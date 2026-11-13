@@ -1,0 +1,10 @@
+node_modules/
+dist/
+test-results/
+playwright-report/
+.agent-home/
+mission-output/
+*.log
+.env
+.env.*
+!.env.example

@@ -1,0 +1,43 @@
+name: Three AI agents build a mission
+run-name: AI mission - ${{ inputs.world }}
+on:
+  workflow_dispatch:
+    inputs:
+      world:
+        description: Building world
+        type: choice
+        options: [jurassic, space]
+        required: true
+      brief:
+        description: Child's build idea (no names or personal information)
+        type: string
+        required: true
+        default: Build a purple brachiosaurus with a tall neck.
+permissions:
+  contents: read
+  models: read
+concurrency:
+  group: ai-mission-${{ github.actor }}
+  cancel-in-progress: false
+jobs:
+  team:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm ci
+      - name: Coordinate, delegate, plan and verify
+        run: node --import tsx scripts/ai-team.ts
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          MISSION_WORLD: ${{ inputs.world }}
+          MISSION_BRIEF: ${{ inputs.brief }}
+      - uses: actions/upload-artifact@v4
+        with:
+          name: ai-mission
+          path: mission-output/ai-mission.json
+          retention-days: 7
