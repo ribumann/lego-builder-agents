@@ -22,6 +22,21 @@ npm run build
 npm start
 ```
 
+## Run in a private GitHub Codespace
+
+[Create a Codespace for BrickLab](https://codespaces.new/ribumann/lego-builder-agents).
+GitHub will show the creation options and applicable usage limits or charges before you create it.
+The Codespace installs dependencies during creation. Once that finishes, run in its terminal:
+
+```sh
+npm run build
+npm start
+```
+
+In the **Ports** tab, open port **4173 (BrickLab)** in a browser. Forwarded ports are private by default; keep this port private. Use the production server above rather than `npm run dev`, which can reject the forwarded hostname. Stop the Codespace when finished to avoid unnecessary usage.
+
+The rule-based builder runs in the browser. The localhost-only planning API rejects the forwarded hostname, so the app may report that server status is unavailable and Copilot planning is unavailable through this URL. A Codespace and its forwarded port have not yet been verified for this repository.
+
 ## The game
 
 - **Jurassic valley:** stegosaurus or brachiosaurus, in a studded landscape with palms.

@@ -1,0 +1,12 @@
+{
+  "name": "BrickLab",
+  "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "postCreateCommand": "npm ci",
+  "waitFor": "postCreateCommand",
+  "forwardPorts": [4173],
+  "portsAttributes": {
+    "4173": {
+      "label": "BrickLab"
+    }
+  }
+}
