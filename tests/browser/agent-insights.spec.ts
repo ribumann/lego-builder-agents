@@ -64,6 +64,7 @@ test('extended insights are optional, read-only and show actual construction and
     await expect(panel.getByRole('heading', { name: memory })).toBeVisible();
     await expect(panel.getByRole('columnheader', { name: latest })).toBeVisible();
     await expect(panel.locator('dt').nth(3)).toHaveText(missing);
+    await expect(panel.locator('code')).toHaveText(['step', 'inspect', 'damage', 'repair']);
     await expect(panel.locator('dd').nth(0)).toHaveText(brief);
     if (language !== 'en')
       for (const text of await panel.locator(ownedCopy).allTextContents()) expect(englishCopy).not.toContain(text);

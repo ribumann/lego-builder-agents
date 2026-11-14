@@ -987,7 +987,7 @@ export function translateInterface(root: HTMLElement): void {
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;
-    if (node.parentElement?.closest(excluded)) continue;
+    if (node.parentElement?.closest(`${excluded}, #agent-insights code`)) continue;
     const current = node.data;
     const previous = originalText.get(node);
     const source = previous && current === previous.rendered ? previous.source : current;
