@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { createServer, request } from 'node:http';
 import { createPlan, parseBrief } from '../../src/engine';
 
 test('Jurassic build supports pause, step, repair, replay, download and restore', async ({ page }) => {
@@ -133,4 +134,43 @@ test('Copilot provider failures are visible and never become a fake AI build', a
   await expect(page.getByRole('alert')).toContainText('Copilot unavailable');
   await expect(page.locator('#stage-status')).toContainText('Ready for your imagination');
   await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
+});
+
+test('a forwarded host can use the local builder but cannot access the planning API', async ({ page, baseURL }) => {
+  if (!baseURL) throw new Error('A production server base URL is required');
+  const target = new URL(baseURL);
+  const forwardedHost = 'bricklab-4173.app.github.dev';
+  const proxy = createServer((req, res) => {
+    const upstream = request({
+      hostname: target.hostname, port: target.port, method: req.method, path: req.url,
+      headers: { ...req.headers, host: forwardedHost, ...(req.headers.origin ? { origin: `https://${forwardedHost}` } : {}) },
+    }, upstreamResponse => {
+      res.writeHead(upstreamResponse.statusCode ?? 502, upstreamResponse.headers);
+      upstreamResponse.pipe(res);
+    });
+    upstream.on('error', () => { if (!res.headersSent) res.writeHead(502); res.end(); });
+    req.pipe(upstream);
+  });
+  await new Promise<void>(resolve => proxy.listen(0, '127.0.0.1', resolve));
+  try {
+    const address = proxy.address();
+    if (!address || typeof address === 'string') throw new Error('Proxy did not bind to a TCP port');
+    const proxyURL = `http://127.0.0.1:${address.port}`;
+    const status = page.waitForResponse(response => response.url().endsWith('/api/status'));
+    const document = await page.goto(proxyURL);
+    expect(document?.status()).toBe(200);
+    expect((await status).status()).toBe(403);
+    await expect(page.getByRole('alert')).toContainText('Rule-based building still works');
+    await page.getByRole('button', { name: 'Change mode' }).click();
+    await expect(page.getByRole('button', { name: 'Use Copilot planning' })).toBeDisabled();
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Make a plan' }).click();
+    await expect(page.locator('#stage-status')).toContainText('Plan ready');
+    await page.getByRole('button', { name: 'Build one step' }).click();
+    await expect(page.locator('#brick-count')).toContainText('1 /');
+    const plan = await page.request.post(`${proxyURL}/api/plan`, { data: { world: 'jurassic', brief: 'test' } });
+    expect(plan.status()).toBe(403);
+  } finally {
+    await new Promise<void>((resolve, reject) => proxy.close(error => error ? reject(error) : resolve()));
+  }
 });
