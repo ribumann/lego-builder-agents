@@ -154,7 +154,7 @@ const clearNotice = () => { $('#notice').hidden = true; };
 const setButton = (id: string, disabled: boolean) => { $<HTMLButtonElement>(id).disabled = disabled; };
 const statusNames: Record<string, string> = {
   planned: 'Plan ready. You’re the director.', building: 'Teamwork in progress', paused: 'Paused. Take a closer look.',
-  complete: 'Mission complete. Beautiful teamwork!', damaged: 'Inspection found a missing brick.',
+  complete: 'Mission complete. Beautiful teamwork!', damaged: 'Inspection found a problem.',
 };
 try {
   scene = new Workbench($('#canvas-host'), (brick: Brick) => {

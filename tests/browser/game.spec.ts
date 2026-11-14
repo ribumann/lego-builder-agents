@@ -29,7 +29,7 @@ test('Jurassic build supports pause, step, repair, replay, download and restore'
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 15_000 });
   await expect(page.locator('#inspection-result')).toHaveText('4/4 checks');
   await page.getByRole('button', { name: 'Hide one brick' }).click();
-  await expect(page.locator('#stage-status')).toContainText('missing brick');
+  await expect(page.locator('#stage-status')).toContainText('Inspection found a problem');
   await page.getByRole('button', { name: 'Ask team to repair' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete');
   await expect(page.locator('#event-list')).toContainText('missing eyes brick');
@@ -300,6 +300,7 @@ test('single-step preserves a failed inspection for a disconnected custom design
   await page.getByRole('button', { name: 'Build one step' }).click();
   await expect(page.locator('#brick-count')).toHaveText('2 / 2 bricks');
   await expect(page.locator('#inspection-result')).toHaveText('2/3 checks');
+  await expect(page.locator('#stage-status')).toContainText('Inspection found a problem');
   await expect(page.locator('#check-state')).toHaveText('Problem found');
   await expect(page.getByRole('button', { name: 'Continue build' })).toBeDisabled();
   await expect(page.getByRole('button', { name: 'Build one step' })).toBeDisabled();
