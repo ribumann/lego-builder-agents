@@ -290,17 +290,20 @@ test('guide and planning choices are available in all six languages', async ({ p
     sessionKey: 'fixture', planner: { state: 'ready', message: 'external 🚀' },
   } }));
   await page.goto('/');
-  for (const [language, guide, settings] of [
-    ['en', 'You’re the director. They’re the crew.', 'Choose how the team plans'],
-    ['de', 'Du führst Regie. Sie sind das Team.', 'Wähle die Planung des Teams'],
-    ['fr', 'Vous dirigez. Ils forment l’équipe.', 'Choisissez le mode de planification'],
-    ['it', 'Tu dirigi. Loro sono la squadra.', 'Scegli come pianifica la squadra'],
-    ['es', 'Tú diriges. Ellos son el equipo.', 'Elige cómo planifica el equipo'],
-    ['pt', 'Você dirige. Eles são a equipe.', 'Escolha como a equipe planeja'],
+  for (const [language, guide, settings, mission, privacy, limits] of [
+    ['en', 'You’re the director. They’re the crew.', 'Choose how the team plans', 'Mission steps', 'Planning choices and privacy', 'Timing and design limits'],
+    ['de', 'Du führst Regie. Sie sind das Team.', 'Wähle die Planung des Teams', 'Missionsschritte', 'Planungsoptionen und Datenschutz', 'Zeit- und Designgrenzen'],
+    ['fr', 'Vous dirigez. Ils forment l’équipe.', 'Choisissez le mode de planification', 'Étapes de la mission', 'Options de planification et confidentialité', 'Délais et limites de conception'],
+    ['it', 'Tu dirigi. Loro sono la squadra.', 'Scegli come pianifica la squadra', 'Fasi della missione', 'Scelte di pianificazione e privacy', 'Tempi e limiti di progettazione'],
+    ['es', 'Tú diriges. Ellos son el equipo', 'Elige cómo planifica el equipo', 'Pasos de la misión', 'Opciones de planificación y privacidad', 'Tiempos y límites de diseño'],
+    ['pt', 'Você dirige. Eles são a equipe.', 'Escolha como a equipe planeja', 'Etapas da missão', 'Opções de planejamento e privacidade', 'Tempo e limites de projeto'],
   ]) {
     await page.locator('#language').selectOption(language);
+    await expect(page.getByRole('navigation', { name: mission })).toBeVisible();
     await page.locator('#guide').click();
     await expect(page.locator('#dialog-title')).toHaveText(guide);
+    await expect(page.locator('#dialog-body details').nth(0).locator('summary')).toHaveText(privacy);
+    await expect(page.locator('#dialog-body details').nth(1).locator('summary')).toHaveText(limits);
     await page.locator('#close-dialog').click();
     await page.locator('#settings').click();
     await expect(page.locator('#dialog-title')).toHaveText(settings);
