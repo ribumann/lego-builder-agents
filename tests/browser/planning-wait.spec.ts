@@ -1,7 +1,8 @@
 import { test, expect } from '@playwright/test';
 
 test('one planning request offers waiting twice and stops at five minutes', async ({ page }) => {
-  await page.clock.install();
+  await page.clock.install({ time: new Date('2024-01-01T00:00:00Z') });
+  await page.clock.pauseAt(new Date('2024-01-01T00:00:01Z'));
   await page.route('**/api/status', route => route.fulfill({ json: {
     copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
   } }));
