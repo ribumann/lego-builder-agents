@@ -166,8 +166,10 @@ application's safety gate is legitimately completed.
 
 Before any public paid deployment, verify exact Host and Origin handling,
 direct-origin denial, WAF association and throttling, durable fail-closed
-budget reservations under concurrent requests, cancellation, and a request
-lasting over 300 seconds through the actual edge with heartbeat streaming.
+budget reservations under concurrent requests and cancellation. Use a
+non-paid synthetic heartbeat stream through the actual edge to test beyond
+the approximately 240-second platform boundary; separately verify that a
+real or simulated planning request stops by its 300-second deadline.
 Run a single bounded original-scene generation only after these controls work.
 Ensure failures do not expose credentials or raw provider errors. A live
 status endpoint alone is not evidence that inference or controls work.
