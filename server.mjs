@@ -11,6 +11,7 @@ import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-outp
 import { createLocalPlanner } from './local-planner.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
+import { createAzureBudgetGate } from './azure-budget.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const production = process.argv.includes('--production');
@@ -24,19 +25,26 @@ if (hosted && (!production || process.env.BRICKLAB_CODESPACES === '1'
 if (hosted && process.env.BRICKLAB_AZURE_AI === '1')
   throw new Error('Hosted Azure planning is blocked pending a verified public edge with abuse and quota protections. Leave BRICKLAB_AZURE_AI off for public static/offline serving.');
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
+const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
 const azureLimit = process.env.BRICKLAB_AZURE_DAILY_CALLS === undefined
   ? 12 : Number(process.env.BRICKLAB_AZURE_DAILY_CALLS);
 const planAzure = azureEnabled ? createAzurePlanner({
   endpoint: process.env.AZURE_OPENAI_ENDPOINT, deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
 }) : null;
-const azureUsage = azureEnabled ? createAzureUsageGate({
+const azureUsage = azureEnabled && !azureMonetaryBudget ? createAzureUsageGate({
   account: process.env.AZURE_STORAGE_ACCOUNT,
   container: process.env.BRICKLAB_AZURE_USAGE_CONTAINER,
   limit: azureLimit,
 }) : null;
+const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate({
+  account: process.env.AZURE_STORAGE_ACCOUNT,
+  container: process.env.BRICKLAB_AZURE_BUDGET_CONTAINER,
+  endpoint: process.env.AZURE_OPENAI_ENDPOINT,
+  deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+}) : null;
 const azurePlannerStatus = azureEnabled
-  ? { enabled: true, state: 'configured', message: 'Azure planning and durable quota are configured, not verified. Only an explicit Azure planning request reserves quota and sends a brief. No retries or refunds.' }
+  ? { enabled: true, state: 'configured', message: `Azure planning and ${azureMonetaryBudget ? 'inference budget' : 'durable quota'} are configured, not verified. Only an explicit Azure planning request reserves ${azureMonetaryBudget ? 'budget' : 'quota'} and sends a brief. No retries or refunds.` }
   : { enabled: false, state: 'off', message: hosted
     ? 'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
@@ -344,9 +352,17 @@ const server = http.createServer(async (req, res) => {
         if (azureAI) {
           const work = (async () => {
             controller.signal.throwIfAborted();
-            try { azureReservation = await azureUsage.reserve({ signal: controller.signal }); }
+            try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({ signal: controller.signal }); }
             catch (error) {
               controller.signal.throwIfAborted();
+              if (azureMonetaryBudget) {
+                const exhausted = error?.code === 'BUDGET_EXHAUSTED';
+                const windowClosed = error?.code === 'BUDGET_WINDOW_CLOSED';
+                throw Object.assign(new Error(exhausted ? 'The Azure daily inference budget is exhausted.'
+                  : windowClosed ? 'Azure planning is unavailable near the UTC day boundary.'
+                  : 'Azure inference budget or pricing could not be verified; no model request was sent.'),
+                { statusCode: exhausted ? 429 : 503 });
+              }
               const exhausted = error?.message === 'Azure daily planning limit reached.';
               throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
                 : 'Azure planning usage could not be reserved; no model request was sent.'),
@@ -370,8 +386,9 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-      respond(200, { spec, calls: azureAI ? azureReservation.used : calls,
-        limit: azureAI ? azureReservation.limit : limit, source: azureAI ? 'azure' : localAI ? 'local-ai' : 'copilot' });
+      respond(200, { spec, ...(azureAI && azureMonetaryBudget ? {}
+        : { calls: azureAI ? azureReservation.used : calls, limit: azureAI ? azureReservation.limit : limit }),
+      source: azureAI ? 'azure' : localAI ? 'local-ai' : 'copilot' });
     } catch (error) {
       // Output-limit errors still wait for termination; cancellation/timeout never delays the HTTP result.
       if (!controller.signal.aborted) await Promise.race([finished, interrupted]);

@@ -132,18 +132,23 @@ globalThis.azureBoundaries = {
   createAzureUsageGate(config) {
     azureConfig.push({ type: 'usage', ...config });
     return { reserve: details => boundary('reserve', reservations, details) };
+  },
+  createAzureBudgetGate(config) {
+    azureConfig.push({ type: 'budget', ...config });
+    return { reserve: details => boundary('reserve', reservations, details) };
   }
 };
 registerHooks({
   resolve(specifier, context, next) {
-    if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs'].includes(specifier))
+    if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs', './azure-budget.mjs'].includes(specifier))
       return { url: 'fixture:' + specifier, shortCircuit: true };
     return next(specifier, context);
   },
   load(url, context, next) {
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
-      'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' };
+      'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' +
+      'export const createAzureBudgetGate = config => globalThis.azureBoundaries.createAzureBudgetGate(config);' };
     return next(url, context);
   }
 });
@@ -222,7 +227,7 @@ process.on('message', message => {
   }
   if (message.action === 'taskkill-done') taskkillCallback(message.fail ? new Error('private taskkill failure') : null, '', '');
   if (message.action === 'azure-reserve') reservations[message.index ?? 0].resolve(message.usage ?? { used: 1, limit: 5 });
-  if (message.action === 'azure-refuse') reservations[message.index ?? 0].reject(new Error(message.error));
+  if (message.action === 'azure-refuse') reservations[message.index ?? 0].reject(Object.assign(new Error(message.error), { code: message.code }));
   if (message.action === 'azure-complete') azurePlans[message.index ?? 0].resolve(message.spec);
   if (message.action === 'azure-fail') azurePlans[message.index ?? 0].reject(new Error('Azure OpenAI service is unavailable. No retry was attempted.'));
   reply();
@@ -596,6 +601,41 @@ test('Azure quota rejection fails closed before the model and never retries a re
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents.map((event: any) => event.type), ['reserve', 'reserve']);
 });
 
+test('Azure monetary budget is reserved before inference and fails closed without quota fallback', { timeout: 10_000 }, async t => {
+  const { azurePost, command } = await startLifecycleServer(t, 'linux', {
+    ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+  });
+  let state = await command({ action: 'inspect' });
+  assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner', 'budget']);
+  const failures = [
+    ['BUDGET_EXHAUSTED', 429, /daily inference budget is exhausted/],
+    ['BUDGET_WINDOW_CLOSED', 503, /UTC day boundary/],
+    ['BUDGET_UNAVAILABLE', 503, /budget or pricing could not be verified/],
+    ['unexpected', 503, /budget or pricing could not be verified/],
+  ] as const;
+  for (const [index, [code, status, message]] of failures.entries()) {
+    const stream = index === 2;
+    const pending = azurePost(stream ? ndjson : {});
+    const streamResponse = stream ? await pending : null;
+    await command({ action: 'azure-started', type: 'reserve', count: index + 1 });
+    await command({ action: 'azure-refuse', index, code, error: 'private details' });
+    const response = streamResponse ?? await pending;
+    assert.equal(response.status, stream ? 200 : status);
+    const body = stream ? streamEvents(await response.text()).at(-1) : await response.json() as { error: string };
+    assert.match(body.error, message);
+    assert.doesNotMatch(body.error, /private details/);
+  }
+  const pending = azurePost();
+  await command({ action: 'azure-started', type: 'reserve', count: 5 });
+  await command({ action: 'azure-reserve', index: 4, usage: { reservedMicros: 550000, dailyLimitMicros: 50000000 } });
+  await command({ action: 'azure-started', type: 'plan', count: 1 });
+  await command({ action: 'azure-complete', spec: lifecycleSpec });
+  const response = await pending;
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'azure' });
+  state = await command({ action: 'inspect' });
+  assert.deepEqual(state.azureEvents.map((event: any) => event.type), ['reserve', 'reserve', 'reserve', 'reserve', 'reserve', 'plan']);
+});
+
 test('Azure validation and model failures consume their reservation with no retry or refund', { timeout: 10_000 }, async t => {
   const { azurePost, command } = await startLifecycleServer(t, 'linux', azureFixtureEnv);
   const specs = [
@@ -715,6 +755,7 @@ test('hosted public planning stays blocked and unsafe/incomplete startup configu
     [{ BRICKLAB_HOSTED: '1', BRICKLAB_CODESPACES: '1' }, ['--production']],
     [{ BRICKLAB_HOSTED: '1', PORT: '0' }, ['--production']],
     [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1' }, ['--production']],
+    [{ ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget' }, ['--production']],
     [{ ...azureFixtureEnv }, []],
     [{ ...azureFixtureEnv, AZURE_OPENAI_ENDPOINT: 'http://localhost' }, ['--production']],
     [{ ...azureFixtureEnv, AZURE_OPENAI_DEPLOYMENT: '' }, ['--production']],

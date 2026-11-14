@@ -40,14 +40,16 @@ monetary guarantee. Each successful reservation remains charged to the limit
 even if generation fails or is cancelled. Missing, invalid or inaccessible
 state denies calls. Never delete or reset the state to troubleshoot.
 For the GPT-5.4 Data Zone model, `azure-budget.mjs` provides an atomic
-estimated-inference-cost reservation gate. It is not yet wired into the
-hosted server. Before integrating it, pre-provision `daily-budget.json`
+estimated-inference-cost reservation gate. Hosted planning remains blocked;
+the gate can be exercised on the private server by setting
+`BRICKLAB_AZURE_BUDGET=1` and `BRICKLAB_AZURE_BUDGET_CONTAINER` alongside the
+Azure adapter settings. This selects the monetary gate instead of the request
+count gate, with no fallback. Pre-provision `daily-budget.json`
 in a private Blob container with `{"day":"2000-01-01","reservedMicros":0}`
 and grant the host identity Storage Blob Data Contributor on that container.
-Create `createAzureBudgetGate({ account, container, endpoint, deployment })`;
-after validating the request and acquiring the shared in-flight slot, call
-`reserve({ signal })` immediately before inference. Exhaustion, a UTC day
-boundary, and unavailable state or pricing have distinct error codes.
+The server validates the request and acquires the shared in-flight slot before
+reserving budget and starting inference. Exhaustion, a UTC day boundary, and
+unavailable state or pricing produce distinct errors.
 
 The gate reserves $0.55 per request against $50 per UTC day, using a conservative
 128,000 input-token allowance and 12,000 completion tokens including reasoning.
