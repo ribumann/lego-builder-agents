@@ -77,6 +77,12 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   await expect(page.locator('#mission-title')).toHaveText('A little prehistoric. A lot of possibility.');
   await expect(page.locator('.agent-name strong')).toHaveText(['BuildBot', 'PlanBot', 'FrameBot', 'DetailBot', 'CheckBot']);
   await expect(page.locator('.agent-name small')).toHaveText(['Build coordinator', 'Plan & dependency verifier', 'Structure builder', 'Detail & support builder', 'Inspector & repair lead']);
+  await expect(page.getByRole('navigation', { name: 'Mission steps' })).toBeVisible();
+  await expect(page.locator('.mission-step[aria-current="step"]')).toContainText('Imagine it');
+  await page.getByRole('link', { name: /Meet the plan/ }).click();
+  await expect(page.getByRole('button', { name: /Task board/ })).toHaveAttribute('aria-pressed', 'true');
+  await page.getByRole('link', { name: /Imagine it/ }).click();
+  await expect(page.locator('#brief-form')).toBeInViewport();
   for (const role of await page.locator('.agent-name small').all()) await expect(role).toBeVisible();
   expect(await page.locator('.stage + .transport + .team-panel').count()).toBe(1);
   const quiz = await page.locator('#quiz-options').boundingBox();
@@ -95,6 +101,10 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   await expect(page.getByRole('alert')).toContainText('Switch to Space');
   await page.getByRole('button', { name: 'How to play' }).click();
   await expect(page.getByRole('dialog')).toBeVisible();
+  const guide = page.getByRole('dialog');
+  await expect(guide.getByText('Planning choices and privacy')).toBeVisible();
+  await guide.getByText('Planning choices and privacy').click();
+  await expect(guide.getByText(/Cloud Copilot planning is the default/)).toBeVisible();
   await page.keyboard.press('Escape');
   await expect(page.getByRole('dialog')).not.toBeVisible();
   await page.setViewportSize({ width: 1200, height: 800 });

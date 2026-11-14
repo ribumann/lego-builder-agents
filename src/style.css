@@ -57,12 +57,16 @@ main { max-width: 1800px; margin: auto; padding: 0 28px; }
 .mission-icon svg { width: 18px; height: 18px; }
 h1 { margin: 22px 0 12px; font-weight: 900; font-size: 26px; line-height: 1.16; letter-spacing: -.035em; text-wrap: balance; }
 .mission-panel > p { font-size: 12px; line-height: 1.7; color: var(--muted); margin: 0; }
-.mission-steps { margin: 25px 0 24px; display: grid; gap: 21px; }
-.mission-step { display: flex; gap: 12px; align-items: center; }
+.mission-path { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; padding: 4px 0 16px; }
+.mission-step { display: flex; gap: 11px; align-items: flex-start; min-width: 0; padding: 9px 7px; border-bottom: 2px solid #dfe6e9; color: inherit; text-decoration: none; }
+.mission-step:hover { background: #fffaf0; }
+.mission-step:focus-visible { outline: 3px solid #254f75; outline-offset: 2px; }
 .mission-step b { width: 25px; height: 25px; border: 1px solid #dae1e6; border-radius: 50%; display: grid; place-items: center; flex: 0 0 auto; font-size: 10px; color: #647783; }
 .mission-step strong { display: block; font-size: 12px; }
-.mission-step span { display: block; color: var(--muted); font-size: 10px; margin-top: 3px; }
+.mission-step > span { display: block; min-width: 0; }
+.mission-step small { display: block; color: var(--muted); font-size: 10px; line-height: 1.4; margin-top: 3px; }
 .mission-step.current b { background: var(--yellow); border-color: var(--yellow); color: #23384c; }
+.mission-step[aria-current="step"] { border-color: var(--yellow); }
 .field-note { display: flex; gap: 10px; padding: 14px 0; border-top: 1px dashed #d9e1e4; margin-top: auto; }
 .field-note > span { flex-shrink: 0; color: #947128; }
 .field-note p { margin: 0; color: #596b75; font-size: 11px; line-height: 1.65; }
@@ -207,6 +211,9 @@ dialog::backdrop { background: #19364b88; }
 #dialog-body p, #dialog-body li { font-size: 13px; line-height: 1.9; color: #4d6474; }
 #dialog-body li { margin-bottom: 9px; }
 #dialog-body code { font-size: 11px; background: #edf1f4; padding: 3px 5px; border-radius: 4px; overflow-wrap: anywhere; }
+#dialog-body details { border-top: 1px solid var(--line); margin-top: 15px; padding-top: 11px; }
+#dialog-body summary { cursor: pointer; font-size: 13px; font-weight: 850; }
+#dialog-body summary:focus-visible { outline: 3px solid #254f75; outline-offset: 3px; }
 hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 @media (min-width: 1550px) {
   main { padding: 0 44px; }
@@ -214,7 +221,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .stage { min-height: 660px; }
   .mission-panel { padding: 30px; }
   h1 { font-size: 31px; margin-top: 27px; }
-  .mission-steps { gap: 28px; margin-top: 35px; }
   .team-content { height: 264px; }
   .event p { font-size: 11px; }
   .agent-name strong { font-size: 12px; }
@@ -225,7 +231,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .workshop { grid-template-columns: 214px minmax(260px,1fr) 258px; }
   .mission-panel { padding: 23px 17px; }
   h1 { font-size: 23px; }
-  .mission-step span { font-size: 9px; }
+  .mission-step small { font-size: 9px; }
   .stage-heading { flex-wrap: wrap; }
   #scene-coordinates { display: none; }
   .stage-footer { font-size: 7px; }
@@ -243,7 +249,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   h1 { font-size: 25px; margin: 0; }
   h1 br { display: none; }
   .mission-panel > p { grid-column: 1; grid-row: 2; }
-  .mission-steps, .field-note, .save-status { display: none; }
+  .field-note, .save-status { display: none; }
   .demo-button { grid-column: 2; grid-row: 1 / 3; align-self: center; margin: 0; padding: 11px 15px; }
   .stage { min-height: 540px; }
   .team-panel { border-top: 1px solid var(--line); }
@@ -262,6 +268,10 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
 }
 @media (max-width: 700px) {
   .topbar { height: 68px; padding: 0 12px; gap: 8px; }
+  .mission-path { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 4px; padding: 4px 0 12px; }
+  .mission-step { gap: 7px; padding: 8px 4px; }
+  .mission-step strong { font-size: 11px; }
+  .mission-step small { font-size: 9px; }
   .top-actions { gap: 8px; }
   .language-picker span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .brand { font-size: 26px; }

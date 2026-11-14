@@ -45,22 +45,22 @@ app.innerHTML = `
       </div>
       <div class="mission-mode"><span class="mode-dot"></span><span id="mode-label">Local rule-based agents</span><button id="settings" class="text-button">Change mode</button></div>
     </div>
+    <nav class="mission-path" aria-label="Mission steps">
+      <a class="mission-step current" data-phase="brief" aria-current="step" href="#brief-form"><b>1</b><span><strong>Imagine it</strong><small>Give your team a clear brief.</small></span></a>
+      <a class="mission-step" data-phase="plan" href="#team-panel"><b>2</b><span><strong>Meet the plan</strong><small>See who does what, and why.</small></span></a>
+      <a class="mission-step" data-phase="build" href="#stage"><b>3</b><span><strong>Watch them build</strong><small>Follow the teamwork live.</small></span></a>
+      <a class="mission-step" data-phase="learn" href="#discovery"><b>4</b><span><strong>Test & discover</strong><small>Hide bricks. Learn to repair.</small></span></a>
+    </nav>
     <div class="workshop">
       <aside class="mission-panel">
         <div class="mission-heading"><span class="mission-icon">${icon('leaf')}</span><span id="mission-number">Mission: Jurassic</span></div>
         <h1 id="mission-title">A little prehistoric.<br> A lot of possibility.</h1>
         <p id="mission-intro">You dream it. Five agents team up to build it, one brick at a time.</p>
-        <div class="mission-steps">
-          <div class="mission-step current" data-phase="brief"><b>1</b><div><strong>Imagine it</strong><span>Give your team a clear brief.</span></div></div>
-          <div class="mission-step" data-phase="plan"><b>2</b><div><strong>Meet the plan</strong><span>See who does what, and why.</span></div></div>
-          <div class="mission-step" data-phase="build"><b>3</b><div><strong>Watch them build</strong><span>Follow the teamwork live.</span></div></div>
-          <div class="mission-step" data-phase="learn"><b>4</b><div><strong>Test & discover</strong><span>Hide bricks. Learn to repair.</span></div></div>
-        </div>
         <div class="field-note"><span>${icon('star')}</span><p id="field-note">An agent does more than answer. It observes, chooses an action, and checks what happened.</p></div>
         <button id="demo" class="button demo-button">${icon('play')} Run an offline demo</button>
         <div id="save-status" class="save-status">Your workshop saves on this device.</div>
       </aside>
-      <section class="stage" aria-label="3D construction workbench">
+      <section class="stage" id="stage" tabindex="-1" aria-label="3D construction workbench">
         <div class="stage-heading"><span class="stage-tag"><i></i><span id="stage-status">Ready for your imagination</span></span><span id="scene-coordinates">JURASSIC / BUILD SITE A</span></div>
         <div id="canvas-host"></div>
         <div id="scene-error" class="scene-error" hidden></div>
@@ -73,7 +73,7 @@ app.innerHTML = `
         <div id="brick-info" class="brick-info" hidden></div>
         <div class="stage-footer"><span>Drag to orbit <span class="separator">/</span> Scroll to zoom <span class="separator">/</span> Tap a brick to inspect</span><span class="scale-label">LEGO-style · original geometry</span></div>
       </section>
-      <aside class="team-panel">
+      <aside class="team-panel" id="team-panel" tabindex="-1">
         <div class="panel-title"><h2>Your build crew</h2><span class="team-count">5 agents</span></div>
         <div class="crew">${(Object.keys(AGENTS) as AgentId[]).map(id => `
           <button class="agent-row" data-agent="${id}" title="Ask ${AGENTS[id].name} about its job">
@@ -92,7 +92,7 @@ app.innerHTML = `
       </aside>
     </div>
     <section class="control-deck" aria-label="Build controls">
-      <form id="brief-form" class="brief-form">
+      <form id="brief-form" class="brief-form" tabindex="-1">
         <div class="brief-label"><label for="brief">What shall we build?</label><button type="button" id="inspire" class="text-button">Try an idea ${icon('star')}</button></div>
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
@@ -111,7 +111,7 @@ app.innerHTML = `
       </div>
     </section>
     <div id="notice" class="notice" role="alert" hidden></div>
-    <section class="discovery" aria-label="Learn and experiment">
+    <section class="discovery" id="discovery" tabindex="-1" aria-label="Learn and experiment">
       <div class="discovery-intro"><h2>Don’t just watch.<br>Be the scientist.</h2><p>Great agents check their work.<br>Great directors ask questions.</p></div>
       <div class="inspection"><div class="section-title"><h3>Build inspection</h3><span id="inspection-result">Waiting for a build</span></div><div id="checks"></div></div>
       <div class="experiments"><h3>Try a little what-if</h3><p>Remove about a third of the bricks. Watch the team compare reality with its plan and repair the gaps.</p><div class="experiment-actions"><button id="damage" class="button outline" disabled>Hide bricks</button><button id="repair" class="button outline" disabled>Ask team to repair</button></div><div class="replay-row"><label for="replay">Build replay</label><input id="replay" type="range" min="0" max="1" value="1" disabled aria-label="Replay placed bricks"/><button id="live-view" class="text-button">Live</button></div><span id="replay-label">Finish a build to explore its timeline.</span></div>
@@ -287,7 +287,12 @@ function render() {
     $('#scene-caption').innerHTML = `<strong>${esc(name)}. ${esc(translate('Your idea, their teamwork.'))}</strong><span>${esc(translate('Blueprint ready'))} · ${total} ${esc(translate('bricks'))} · ${team.plan.tasks.length} ${esc(translate('delegated tasks'))}</span>`;
   }
   const phase = !team ? 'brief' : status === 'planned' ? 'plan' : ['complete','damaged'].includes(status!) ? 'learn' : 'build';
-  document.querySelectorAll<HTMLElement>('.mission-step').forEach(el => el.classList.toggle('current', el.dataset.phase === phase));
+  document.querySelectorAll<HTMLAnchorElement>('.mission-step').forEach(el => {
+    const current = el.dataset.phase === phase;
+    el.classList.toggle('current', current);
+    if (current) el.setAttribute('aria-current', 'step');
+    else el.removeAttribute('aria-current');
+  });
   for (const id of Object.keys(AGENTS) as AgentId[]) {
     const text = id === 'build' ? planning ? 'Waiting' : running ? 'Checking' : team ? 'Watching' : 'Ready'
       : id === 'plan' ? team ? 'Reviewed' : 'Ready'
@@ -572,11 +577,15 @@ $('#replay').addEventListener('input', () => {
   render();
 });
 $('#live-view').addEventListener('click', () => { replaying = false; scene?.showBlueprint(showGhost); render(); });
-for (const tab of ['live', 'tasks']) $(`#tab-${tab}`).addEventListener('click', () => {
+function selectBoardTab(tab: 'live' | 'tasks') {
   $('#event-list').hidden = tab !== 'live';
   $('#task-list').hidden = tab !== 'tasks';
   for (const id of ['live', 'tasks']) { $(`#tab-${id}`).classList.toggle('active', tab === id); $(`#tab-${id}`).setAttribute('aria-pressed', String(tab === id)); }
-});
+}
+for (const tab of ['live', 'tasks'] as const) $(`#tab-${tab}`).addEventListener('click', () => selectBoardTab(tab));
+document.querySelectorAll<HTMLAnchorElement>('.mission-step').forEach(step => step.addEventListener('click', () => {
+  if (step.dataset.phase === 'plan') selectBoardTab('tasks');
+}));
 function answer(question: string, agent?: AgentId) {
   const q = question.toLowerCase();
   const id = agent ?? (/checkbot|inspect|quality/.test(q) ? 'check' : /planbot|dependencies/.test(q) ? 'plan' : /detail|wait|finish/.test(q) ? 'detail' : /frame|structure/.test(q) ? 'frame' : 'build');
@@ -683,12 +692,16 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>This workshop makes agent teamwork visible. Choose <strong>Jurassic valley</strong> or <strong>Space dock</strong>, then describe your build.</p>
   <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies and handoffs.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×. Choose <strong>Add to scene</strong> to grow the build without replacing it.</li><li><strong>Experiment:</strong> hide about a third of the bricks, ask for a repair, or replay the placement timeline. Repair cannot fix a disconnected blueprint.</li></ol>
   <p>Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.</p>
-  <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
-  <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
-  <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
-  <p>Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure is not yet estimated. Local AI has a separate 90-second limit.</p>
-  <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
-  <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>`));
+  <details><summary>Planning choices and privacy</summary>
+    <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
+    <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
+    <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
+  </details>
+  <details><summary>Timing and design limits</summary>
+    <p>Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure is not yet estimated. Local AI has a separate 90-second limit.</p>
+    <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
+    <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>
+  </details>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
     ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. When enabled, an explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
