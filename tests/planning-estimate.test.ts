@@ -16,7 +16,7 @@ test('Copilot estimates use rounded observed ranges and bracket untested sizes',
 test('ambiguous and out-of-study requests use the broad unknown estimate', () => {
   for (const brief of [
     'A lighthouse', '3 towers with 500 bricks', 'between 20 and 100 bricks',
-    'up to 500 bricks', 'not 500 bricks', '-20 bricks', '1.5 bricks',
+    'up to 500 bricks', 'not 500 bricks', 'nicht 500 bricks', 'não 500 bricks', '-20 bricks', '1.5 bricks',
     '10 bricks', '9000 bricks', 'five hundred bricks', '5000 studs',
   ]) assert.match(copilotPlanningEstimate(brief), /Estimate unknown; sampled Copilot requests took about 20–183 seconds/);
 });

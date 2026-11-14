@@ -10,7 +10,7 @@ export function copilotPlanningEstimate(brief: string): string {
   const unknown = 'Estimate unknown; sampled Copilot requests took about 20–183 seconds.';
   // Only compare an unambiguous single numeric brick target; do not infer one from a complex brief.
   if ([...brief.matchAll(/\d+(?:,\d{3})*/g)].length !== 1
-      || /\b(?:budget|maximum|minimum|max|min|at most|at least|less than|more than|up to|under|over|between|without|remove|removed|not|no)\b/i.test(brief))
+      || /\b(?:budget|maximum|minimum|max|min|at most|at least|less than|more than|up to|under|over|between|without|remove|removed|not|no|nicht|kein|keine|keinen|aucun|aucune|non|senza|nessun|nessuna|sin|ningún|ninguna|sem|nenhum|nenhuma)\b|não/iu.test(brief))
     return unknown;
   const match = brief.match(/(?<![\p{L}\p{N}.,+\-])(\d+(?:,\d{3})*)\s*(?:-\s*)?bricks?\b/iu);
   if (!match) return unknown;

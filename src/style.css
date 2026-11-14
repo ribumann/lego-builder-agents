@@ -30,7 +30,9 @@ svg { width: 20px; height: 20px; vertical-align: middle; }
 .brand-mark svg { width: 27px; height: 27px; }
 .brand-dot { width: 7px; height: 7px; border-radius: 50%; background: #ea8d4b; align-self: flex-end; margin-bottom: 10px; margin-left: 3px; }
 .tagline { color: var(--muted); font-size: 13px; border-left: 1px solid var(--line); padding-left: 25px; }
-.top-actions { margin-left: auto; display: flex; align-items: center; gap: 28px; }
+.top-actions { margin-left: auto; display: flex; align-items: center; gap: 16px; }
+.language-picker { display: flex; align-items: center; gap: 6px; color: var(--muted); font-size: 12px; }
+.language-picker select { min-height: 44px; max-width: 120px; border: 1px solid #c9d4db; border-radius: 9px; background: #fff; color: var(--ink); font: inherit; padding: 6px; }
 .local-status { display: flex; align-items: center; gap: 7px; color: #526875; font-size: 12px; }
 .local-status i, .mode-dot, .stage-tag i { width: 7px; height: 7px; background: #4a9075; border-radius: 50%; display: inline-block; }
 .button { border: 0; border-radius: 9px; display: inline-flex; justify-content: center; align-items: center; gap: 9px; padding: 12px 17px; font-size: 13px; font-weight: 800; min-height: 44px; }
@@ -146,6 +148,7 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 textarea { resize: vertical; border: 1px solid #d7e0e5; border-radius: 8px; padding: 11px 12px; color: var(--ink); background: #fbfcfd; flex: 1; min-width: 0; height: 52px; max-height: 160px; min-height: 52px; line-height: 1.5; font-size: 12px; }
 .brief-input .button { min-height: 50px; }
 #brief-help { font-size: 9px; color: var(--muted); margin: 7px 0 0; }
+#language-note { font-size: 10px; line-height: 1.5; color: var(--muted); margin: 7px 0 0; }
 .transport { padding: 20px 21px 13px; border-left: 1px solid var(--line); }
 .build-progress { display: flex; justify-content: space-between; align-items: center; }
 .build-progress strong { font-size: 16px; font-weight: 900; }
@@ -258,7 +261,9 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .world-tab { padding: 10px 13px; }
 }
 @media (max-width: 700px) {
-  .topbar { height: 68px; padding: 0 18px; }
+  .topbar { height: 68px; padding: 0 12px; gap: 8px; }
+  .top-actions { gap: 8px; }
+  .language-picker span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); }
   .brand { font-size: 26px; }
   .brand-mark { width: 34px; height: 34px; }
   .top-actions .button { font-size: 0; padding: 10px; }

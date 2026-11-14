@@ -1,0 +1,378 @@
+export const languages = ['en', 'de', 'fr', 'it', 'es', 'pt'] as const;
+export type Language = typeof languages[number];
+type Translations = readonly [string, string, string, string, string];
+
+// Only application-owned strings belong here; briefs, object names and model output are never translated.
+const catalog: Record<string, Translations> = {
+  'Language': ['Sprache', 'Langue', 'Lingua', 'Idioma', 'Idioma'],
+  'Offline templates and crew questions recognize English keywords only. Some detailed guidance, technical errors and agent messages remain in English; your brief and model output are not translated.': ['Offline-Vorlagen und Teamfragen erkennen nur englische Schlüsselwörter. Ausführliche Anleitungen, technische Fehler und Agentennachrichten bleiben teilweise auf Englisch; dein Auftrag und Modellausgaben werden nicht übersetzt.', 'Les modèles hors ligne et les questions à l’équipe ne reconnaissent que les mots-clés anglais. Certaines aides détaillées, erreurs techniques et messages des agents restent en anglais ; votre consigne et les réponses du modèle ne sont pas traduites.', 'I modelli offline e le domande alla squadra riconoscono solo parole chiave inglesi. Alcune guide dettagliate, errori tecnici e messaggi degli agenti restano in inglese; la tua richiesta e le risposte del modello non vengono tradotte.', 'Las plantillas sin conexión y las preguntas al equipo solo reconocen palabras clave en inglés. Algunas guías detalladas, errores técnicos y mensajes de agentes permanecen en inglés; tus instrucciones y las respuestas del modelo no se traducen.', 'Os modelos offline e as perguntas à equipe reconhecem apenas palavras-chave em inglês. Algumas orientações detalhadas, erros técnicos e mensagens dos agentes permanecem em inglês; suas instruções e respostas do modelo não são traduzidas.'],
+  'Choose how the team plans': ['Wähle die Planung des Teams', 'Choisissez le mode de planification', 'Scegli come pianifica la squadra', 'Elige cómo planifica el equipo', 'Escolha como a equipe planeja'],
+  'You’re the director. They’re the crew.': ['Du führst Regie. Sie sind das Team.', 'Vous dirigez. Ils forment l’équipe.', 'Tu dirigi. Loro sono la squadra.', 'Tú diriges. Ellos son el equipo.', 'Você dirige. Eles são a equipe.'],
+  'This workshop makes agent teamwork visible. Choose': ['Diese Werkstatt macht Agenten-Teamarbeit sichtbar. Wähle', 'Cet atelier rend visible le travail d’équipe des agents. Choisissez', 'Questo laboratorio mostra il lavoro di squadra degli agenti. Scegli', 'Este taller muestra el trabajo en equipo de los agentes. Elige', 'Este laboratório mostra o trabalho em equipe dos agentes. Escolha'],
+  'or': ['oder', 'ou', 'o', 'o', 'ou'],
+  ', then describe your build.': [', und beschreibe deinen Bau.', ', puis décrivez votre construction.', ', poi descrivi la tua costruzione.', ' y describe tu construcción.', ' e descreva sua construção.'],
+  'Imagine:': ['Vorstellen:', 'Imaginer :', 'Immagina:', 'Imagina:', 'Imagine:'],
+  'name the species or ship type, body color, and a feature.': ['Nenne Art oder Schiffstyp, Körperfarbe und ein Merkmal.', 'indiquez l’espèce ou le type de vaisseau, la couleur et une caractéristique.', 'indica specie o tipo di nave, colore e una caratteristica.', 'indica la especie o tipo de nave, el color y una característica.', 'indique a espécie ou tipo de nave, a cor e uma característica.'],
+  'Plan:': ['Planen:', 'Planifier :', 'Pianifica:', 'Planifica:', 'Planeje:'],
+  'BuildBot delegates jobs. Open the task board to inspect dependencies and handoffs.': ['BuildBot verteilt Aufgaben. Auf der Aufgabentafel siehst du Abhängigkeiten und Übergaben.', 'BuildBot délègue les tâches. Ouvrez le tableau pour voir les dépendances et les transferts.', 'BuildBot assegna le attività. Apri la bacheca per vedere dipendenze e passaggi.', 'BuildBot asigna tareas. Abre el tablero para ver dependencias y relevos.', 'BuildBot delega tarefas. Abra o quadro para ver dependências e transferências.'],
+  'Build:': ['Bauen:', 'Construire :', 'Costruisci:', 'Construye:', 'Construa:'],
+  'approve the plan, pause, step one turn, or fast-forward at 4× and 16×. Choose': ['Bestätige den Plan, pausiere, gehe eine Runde weiter oder spule mit 4× oder 16× vor. Wähle', 'approuvez le plan, mettez en pause, avancez d’un tour ou accélérez à 4× ou 16×. Choisissez', 'approva il piano, metti in pausa, avanza di un turno o accelera a 4× o 16×. Scegli', 'aprueba el plan, pausa, avanza un turno o acelera a 4× o 16×. Elige', 'aprove o plano, pause, avance um turno ou acelere em 4× ou 16×. Escolha'],
+  'to grow the build without replacing it.': ['um den Bau zu erweitern, ohne ihn zu ersetzen.', 'pour agrandir la construction sans la remplacer.', 'per ampliare la costruzione senza sostituirla.', 'para ampliar la construcción sin reemplazarla.', 'para ampliar a construção sem substituí-la.'],
+  'Experiment:': ['Experimentieren:', 'Expérimenter :', 'Sperimenta:', 'Experimenta:', 'Experimente:'],
+  'hide about a third of the bricks, ask for a repair, or replay the placement timeline. Repair cannot fix a disconnected blueprint.': ['Verstecke etwa ein Drittel der Steine, bitte um Reparatur oder sieh den Bauverlauf erneut an. Eine Reparatur kann einen unverbundenen Bauplan nicht beheben.', 'cachez environ un tiers des briques, demandez une réparation ou revoyez la chronologie. La réparation ne peut pas corriger un plan déconnecté.', 'nascondi circa un terzo dei mattoncini, chiedi una riparazione o rivedi la sequenza. La riparazione non corregge un progetto scollegato.', 'oculta alrededor de un tercio de los bloques, pide una reparación o revisa la secuencia. La reparación no corrige un plano desconectado.', 'esconda cerca de um terço dos blocos, peça um reparo ou reveja a sequência. O reparo não corrige um projeto desconectado.'],
+  'Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.': ['Probiere einen violetten Brachiosaurus, einen grünen Stegosaurus mit langem Schwanz oder ein weißes Frachtschiff. Füge ein zweites Objekt hinzu und vergleiche die Übergaben. Mit konfigurierter KI kannst du einen Leuchtturm oder eine Raumstation mit Besucherschiff ausprobieren.', 'Essayez un brachiosaure violet, un stégosaure vert à longue queue ou un cargo blanc ; ajoutez un objet et comparez les transferts. Avec une IA configurée, essayez un phare ou une station spatiale et son visiteur.', 'Prova un brachiosauro viola, uno stegosauro verde con coda lunga o una nave cargo bianca; aggiungi un oggetto e confronta i passaggi. Con un’IA configurata, prova un faro o una stazione spaziale con una nave in visita.', 'Prueba un braquiosaurio morado, un estegosaurio verde de cola larga o una nave de carga blanca; añade otro objeto y compara los relevos. Con una IA configurada, prueba un faro o una estación espacial con una nave visitante.', 'Experimente um braquiossauro roxo, um estegossauro verde de cauda longa ou uma nave de carga branca; adicione outro objeto e compare as transferências. Com uma IA configurada, experimente um farol ou uma estação espacial com uma nave visitante.'],
+  'Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.': ['Die Modelle sind stilisierte eigene Geometrie. Verbundene Steine garantieren weder echten Halt noch Stabilität oder Flugfähigkeit. Speicherstände bleiben in diesem Browser.', 'Les modèles sont des géométries originales stylisées. Des briques connectées ne garantissent ni assemblage réel, ni stabilité, ni vol. Les sauvegardes restent dans ce navigateur.', 'I modelli sono geometrie originali stilizzate. Mattoncini collegati non garantiscono incastro reale, stabilità o volo. I salvataggi restano in questo browser.', 'Los modelos son geometrías originales estilizadas. Los bloques conectados no garantizan encaje real, estabilidad ni vuelo. Los archivos guardados permanecen en este navegador.', 'Os modelos são geometrias originais estilizadas. Blocos conectados não garantem encaixe real, estabilidade ou voo. Os dados salvos permanecem neste navegador.'],
+  'Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.': ['Copilot und optionale lokale KI müssen eigene Geometrie liefern; Vorlagenantworten schlagen sichtbar fehl. Fünf lokale Agenten koordinieren, prüfen und bauen. Nachrichten erklären Entscheidungen, nicht private Modellgedanken.', 'Copilot et l’IA locale facultative doivent fournir une géométrie personnalisée ; les réponses prédéfinies échouent visiblement. Cinq agents locaux coordonnent, vérifient et construisent. Les messages expliquent les décisions, pas le raisonnement privé du modèle.', 'Copilot e l’IA locale opzionale devono fornire geometria personalizzata; le risposte predefinite falliscono visibilmente. Cinque agenti locali coordinano, verificano e costruiscono. I messaggi spiegano le decisioni, non il ragionamento privato del modello.', 'Copilot y la IA local opcional deben devolver geometría personalizada; las plantillas fallan de forma visible. Cinco agentes locales coordinan, verifican y construyen. Los mensajes explican decisiones, no razonamientos privados del modelo.', 'O Copilot e a IA local opcional devem fornecer geometria personalizada; respostas predefinidas falham visivelmente. Cinco agentes locais coordenam, verificam e constroem. As mensagens explicam decisões, não o raciocínio privado do modelo.'],
+  'Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure is not yet estimated. Local AI has a separate 90-second limit.': ['Die Copilot-Planung zeigt die verstrichene Zeit und eine grobe Studienschätzung. Nach 100 und 200 Sekunden kannst du abbrechen oder weiter warten; dieselbe Anfrage endet spätestens nach 300 Sekunden. Für Azure gibt es noch keine Schätzung. Lokale KI hat ein eigenes Limit von 90 Sekunden.', 'Copilot affiche le temps écoulé et une estimation approximative issue d’une étude. À 100 et 200 secondes, vous pouvez annuler ou continuer ; la même requête s’arrête après 300 secondes au plus. Azure n’est pas encore estimé. L’IA locale a une limite distincte de 90 secondes.', 'Copilot mostra il tempo trascorso e una stima approssimativa basata su uno studio. A 100 e 200 secondi puoi interrompere o attendere; la stessa richiesta termina entro 300 secondi. Azure non è ancora stimato. L’IA locale ha un limite separato di 90 secondi.', 'Copilot muestra el tiempo transcurrido y una estimación aproximada basada en un estudio. A los 100 y 200 segundos puedes cancelar o esperar; la misma solicitud termina en un máximo de 300 segundos. Azure aún no tiene estimación. La IA local tiene un límite separado de 90 segundos.', 'O Copilot mostra o tempo decorrido e uma estimativa aproximada baseada em estudo. Aos 100 e 200 segundos você pode cancelar ou esperar; a mesma solicitação termina em até 300 segundos. O Azure ainda não tem estimativa. A IA local tem limite separado de 90 segundos.'],
+  'Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.': ['Probiere die lokalen Herden- und Flottenbeispiele mit getrennten benannten Objekten. Normale Entwürfe zielen auf bis zu 1.000 Teile und 32.768 belegte Zellen. Fortgeschrittene Entwürfe erlauben bis zu 8.192 Teile und 262.144 Zellen; große Bauten können langsam sein. Über 8.192 dekorativen Noppen pro Modell oder Bauplan wird eine Auswahl dargestellt; alle Steinkörper bleiben sichtbar und auswählbar.', 'Essayez les exemples locaux de troupeau et de flotte avec des objets nommés distincts. Les créations normales visent jusqu’à 1 000 pièces et 32 768 cellules occupées. Les créations avancées permettent jusqu’à 8 192 pièces et 262 144 cellules ; les grandes constructions peuvent être lentes. Au-delà de 8 192 tenons décoratifs par modèle ou plan, seuls certains sont affichés ; toutes les briques restent présentes et sélectionnables.', 'Prova gli esempi locali di branco e flotta con oggetti distinti. I progetti normali puntano a un massimo di 1.000 pezzi e 32.768 celle occupate. Quelli avanzati consentono fino a 8.192 pezzi e 262.144 celle; le costruzioni grandi possono essere lente. Oltre 8.192 borchie decorative per modello o progetto ne viene mostrata una selezione; tutti i mattoncini restano presenti e selezionabili.', 'Prueba los ejemplos locales de manada y flota con objetos separados. Los diseños normales buscan hasta 1.000 piezas y 32.768 celdas ocupadas. Los avanzados permiten hasta 8.192 piezas y 262.144 celdas; las construcciones grandes pueden ser lentas. Por encima de 8.192 tetones decorativos por modelo o plano se muestra una muestra; todos los bloques siguen presentes y seleccionables.', 'Experimente os exemplos locais de manada e frota com objetos separados. Projetos normais visam até 1.000 peças e 32.768 células ocupadas. Projetos avançados permitem até 8.192 peças e 262.144 células; construções grandes podem ser lentas. Acima de 8.192 pinos decorativos por modelo ou planta, apenas uma amostra é exibida; todos os blocos continuam presentes e selecionáveis.'],
+  'Use Azure Foundry planning': ['Azure Foundry verwenden', 'Utiliser Azure Foundry', 'Usa Azure Foundry', 'Usar Azure Foundry', 'Usar Azure Foundry'],
+  'Use Copilot planning': ['Copilot-Planung verwenden', 'Utiliser Copilot', 'Usa Copilot', 'Usar Copilot', 'Usar Copilot'],
+  'Use Local AI': ['Lokale KI verwenden', 'Utiliser l’IA locale', 'Usa IA locale', 'Usar IA local', 'Usar IA local'],
+  'Use offline templates': ['Offline-Vorlagen verwenden', 'Utiliser les modèles hors ligne', 'Usa i modelli offline', 'Usar plantillas sin conexión', 'Usar modelos offline'],
+  'Retry status': ['Status erneut prüfen', 'Réessayer le statut', 'Riprova stato', 'Reintentar estado', 'Tentar status novamente'],
+  'Offline templates · rule-based agents': ['Offline-Vorlagen · regelbasierte Agenten', 'Modèles hors ligne · agents à règles', 'Modelli offline · agenti a regole', 'Plantillas sin conexión · agentes basados en reglas', 'Modelos offline · agentes baseados em regras'],
+  'Local AI · server-host model': ['Lokale KI · Modell auf dem Server', 'IA locale · modèle sur le serveur', 'IA locale · modello sul server', 'IA local · modelo en el servidor', 'IA local · modelo no servidor'],
+  'Azure Foundry planning · custom designs': ['Azure Foundry · individuelle Entwürfe', 'Azure Foundry · créations personnalisées', 'Azure Foundry · progetti personalizzati', 'Azure Foundry · diseños personalizados', 'Azure Foundry · projetos personalizados'],
+  'Copilot cloud planning · custom designs': ['Copilot-Cloudplanung · individuelle Entwürfe', 'Planification Copilot · créations personnalisées', 'Pianificazione Copilot · progetti personalizzati', 'Planificación Copilot · diseños personalizados', 'Planejamento Copilot · projetos personalizados'],
+  'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.': ['Offline-Vorlagen bauen nur Dinosaurier und Raumschiffe; andere Ideen können einer Vorlage zugeordnet werden.', 'Le mode hors ligne construit seulement des dinosaures et vaisseaux prédéfinis ; les autres idées peuvent être associées à un modèle.', 'La modalità offline costruisce solo dinosauri e astronavi predefiniti; altre idee possono essere associate a un modello.', 'El modo sin conexión solo construye dinosaurios y naves predefinidos; otras ideas pueden asociarse a una plantilla.', 'O modo offline constrói apenas dinossauros e naves predefinidos; outras ideias podem ser associadas a um modelo.'],
+  'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.': ['Lokale KI sendet den Auftrag an Ollama auf dem BrickLab-Server, nicht automatisch an dein Gerät. Ein vertrauenswürdiger lokaler Dienst ist nötig; kein Cloud-Ersatz.', 'L’IA locale envoie la consigne à Ollama sur le serveur BrickLab, pas automatiquement sur votre appareil. Un service local fiable est requis ; aucun recours au cloud.', 'L’IA locale invia la richiesta a Ollama sul server BrickLab, non automaticamente sul tuo dispositivo. Serve un servizio locale affidabile; nessun ripiego sul cloud.', 'La IA local envía las instrucciones a Ollama en el servidor BrickLab, no automáticamente a tu dispositivo. Requiere un servicio local fiable; sin alternativa en la nube.', 'A IA local envia as instruções ao Ollama no servidor BrickLab, não automaticamente ao seu dispositivo. Requer um serviço local confiável; sem alternativa na nuvem.'],
+  'Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. No request until you press it. Do not enter personal information.': ['Azure Foundry sendet deinen Auftrag an Azure und kann Kosten für den Betreiber verursachen. Erst beim Drücken wird eine Anfrage gesendet. Keine persönlichen Daten eingeben.', 'Azure Foundry envoie votre consigne à Azure et peut entraîner des frais pour l’hébergeur. Aucune requête avant votre clic. Ne saisissez pas de données personnelles.', 'Azure Foundry invia la richiesta ad Azure e può comportare costi per il gestore. Nessuna richiesta prima del clic. Non inserire dati personali.', 'Azure Foundry envía tus instrucciones a Azure y puede generar costes para el propietario. No se envía nada hasta pulsar el botón. No introduzcas datos personales.', 'O Azure Foundry envia suas instruções ao Azure e pode gerar custos para o responsável. Nada é enviado até você clicar. Não insira dados pessoais.'],
+  'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.': ['„Auftrag an Copilot senden“ übermittelt deine Anweisungen an GitHub und kann Kontingent verbrauchen. Erst beim Drücken wird gesendet. Beschreibe ein statisches Modell; keine persönlichen Daten eingeben.', '« Envoyer la consigne à Copilot » transmet vos instructions à GitHub et peut utiliser votre quota. Aucun envoi avant votre clic. Décrivez une création statique ; ne saisissez pas de données personnelles.', '«Invia richiesta a Copilot» invia le istruzioni a GitHub e può consumare quota. Nessun invio prima del clic. Descrivi una costruzione statica; non inserire dati personali.', '«Enviar instrucciones a Copilot» las envía a GitHub y puede consumir cuota. No se envía nada hasta pulsar. Describe un diseño estático; no introduzcas datos personales.', '“Enviar instruções ao Copilot” as envia ao GitHub e pode consumir cota. Nada é enviado até você clicar. Descreva um projeto estático; não insira dados pessoais.'],
+  'Describe a dinosaur or spaceship template…': ['Beschreibe eine Dinosaurier- oder Raumschiffvorlage…', 'Décrivez un modèle de dinosaure ou de vaisseau…', 'Descrivi un modello di dinosauro o astronave…', 'Describe una plantilla de dinosaurio o nave…', 'Descreva um modelo de dinossauro ou nave…'],
+  'Describe your brick design…': ['Beschreibe deinen Steinbau…', 'Décrivez votre création en briques…', 'Descrivi la tua costruzione…', 'Describe tu diseño de bloques…', 'Descreva seu projeto de blocos…'],
+  'Small bricks. Big teamwork.': ['Kleine Steine. Großes Teamwork.', 'Petites briques. Grande équipe.', 'Piccoli mattoncini. Grande squadra.', 'Pequeños bloques. Gran equipo.', 'Pequenos blocos. Grande equipe.'],
+  'Five agents. Your ideas.': ['Fünf Agenten. Deine Ideen.', 'Cinq agents. Vos idées.', 'Cinque agenti. Le tue idee.', 'Cinco agentes. Tus ideas.', 'Cinco agentes. Suas ideias.'],
+  'How to play': ['Spielanleitung', 'Comment jouer', 'Come giocare', 'Cómo jugar', 'Como jogar'],
+  'Choose your building world': ['Wähle deine Bauwelt', 'Choisissez votre univers', 'Scegli il tuo mondo', 'Elige tu mundo', 'Escolha seu mundo'],
+  'BrickLab home': ['BrickLab-Startseite', 'Accueil BrickLab', 'Pagina iniziale BrickLab', 'Inicio de BrickLab', 'Início do BrickLab'],
+  'Jurassic valley': ['Juratal', 'Vallée jurassique', 'Valle giurassica', 'Valle jurásico', 'Vale jurássico'],
+  'Space dock': ['Raumhafen', 'Station spatiale', 'Porto spaziale', 'Puerto espacial', 'Porto espacial'],
+  'Change mode': ['Modus ändern', 'Changer de mode', 'Cambia modalità', 'Cambiar modo', 'Alterar modo'],
+  'Imagine it': ['Stell es dir vor', 'Imaginez', 'Immagina', 'Imagina', 'Imagine'],
+  'Give your team a clear brief.': ['Gib deinem Team einen klaren Auftrag.', 'Donnez une consigne claire à votre équipe.', 'Dai alla squadra una richiesta chiara.', 'Da instrucciones claras al equipo.', 'Dê instruções claras à equipe.'],
+  'Meet the plan': ['Lerne den Plan kennen', 'Découvrez le plan', 'Scopri il piano', 'Conoce el plan', 'Conheça o plano'],
+  'See who does what, and why.': ['Sieh, wer was macht und warum.', 'Découvrez qui fait quoi et pourquoi.', 'Scopri chi fa cosa e perché.', 'Descubre quién hace qué y por qué.', 'Veja quem faz o quê e por quê.'],
+  'Watch them build': ['Sieh beim Bauen zu', 'Observez la construction', 'Guarda la costruzione', 'Observa la construcción', 'Observe a construção'],
+  'Follow the teamwork live.': ['Verfolge die Teamarbeit live.', 'Suivez le travail en équipe.', 'Segui il lavoro di squadra.', 'Sigue el trabajo en equipo.', 'Acompanhe o trabalho em equipe.'],
+  'Test & discover': ['Teste und entdecke', 'Testez et découvrez', 'Prova e scopri', 'Prueba y descubre', 'Teste e descubra'],
+  'Hide bricks. Learn to repair.': ['Verstecke Steine. Lerne zu reparieren.', 'Cachez des briques. Apprenez à réparer.', 'Nascondi i mattoncini. Impara a riparare.', 'Oculta bloques. Aprende a reparar.', 'Esconda blocos. Aprenda a reparar.'],
+  'An agent does more than answer. It observes, chooses an action, and checks what happened.': ['Ein Agent antwortet nicht nur. Er beobachtet, handelt und prüft das Ergebnis.', 'Un agent ne fait pas que répondre. Il observe, agit et vérifie le résultat.', 'Un agente non si limita a rispondere. Osserva, agisce e verifica il risultato.', 'Un agente no solo responde. Observa, actúa y comprueba el resultado.', 'Um agente não apenas responde. Ele observa, age e verifica o resultado.'],
+  'Run an offline demo': ['Offline-Demo starten', 'Lancer une démo hors ligne', 'Avvia la demo offline', 'Iniciar demostración sin conexión', 'Iniciar demonstração offline'],
+  'Your workshop saves on this device.': ['Deine Werkstatt wird auf diesem Gerät gespeichert.', 'Votre atelier est enregistré sur cet appareil.', 'Il laboratorio viene salvato su questo dispositivo.', 'Tu taller se guarda en este dispositivo.', 'Seu laboratório é salvo neste dispositivo.'],
+  '3D construction workbench': ['3D-Bauwerkstatt', 'Atelier de construction 3D', 'Banco di costruzione 3D', 'Taller de construcción 3D', 'Oficina de construção 3D'],
+  'Interactive 3D brick model. Drag to orbit, scroll to zoom. The Team board provides the same build information in text.': ['Interaktives 3D-Steinmodell. Ziehen zum Drehen, scrollen zum Zoomen. Die Teamtafel bietet dieselben Bauinformationen als Text.', 'Modèle interactif en briques 3D. Glissez pour tourner, faites défiler pour zoomer. Le tableau d’équipe fournit les mêmes informations par écrit.', 'Modello interattivo 3D. Trascina per ruotare, scorri per zoomare. La bacheca fornisce le stesse informazioni in testo.', 'Modelo interactivo 3D. Arrastra para girar y desplaza para ampliar. El tablero ofrece la misma información en texto.', 'Modelo interativo 3D. Arraste para girar e role para ampliar. O quadro oferece as mesmas informações em texto.'],
+  'Workbench view controls': ['Ansichtssteuerung der Werkstatt', 'Commandes de vue de l’atelier', 'Controlli di visualizzazione', 'Controles de vista del taller', 'Controles de visualização'],
+  'Toggle blueprint': ['Bauplan ein-/ausblenden', 'Afficher ou masquer le plan', 'Mostra o nascondi il progetto', 'Mostrar u ocultar plano', 'Mostrar ou ocultar planta'],
+  'Blueprint': ['Bauplan', 'Plan', 'Progetto', 'Plano', 'Planta'],
+  'Toggle exploded view': ['Explosionsansicht umschalten', 'Activer la vue éclatée', 'Attiva la vista esplosa', 'Alternar vista separada', 'Alternar vista explodida'],
+  'Exploded view': ['Explosionsansicht', 'Vue éclatée', 'Vista esplosa', 'Vista separada', 'Vista explodida'],
+  'Reset camera': ['Kamera zurücksetzen', 'Réinitialiser la caméra', 'Reimposta la fotocamera', 'Restablecer cámara', 'Redefinir câmera'],
+  'Your build crew': ['Dein Bauteam', 'Votre équipe', 'La tua squadra', 'Tu equipo', 'Sua equipe'],
+  'Mission: Jurassic': ['Mission: Jura', 'Mission : Jurassique', 'Missione: Giurassico', 'Misión: Jurásico', 'Missão: Jurássico'],
+  'Mission: Space': ['Mission: Weltraum', 'Mission : Espace', 'Missione: Spazio', 'Misión: Espacio', 'Missão: Espaço'],
+  'bricks': ['Steine', 'briques', 'mattoncini', 'bloques', 'blocos'],
+  'checks': ['Prüfungen', 'vérifications', 'verifiche', 'comprobaciones', 'verificações'],
+  'CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.': ['CheckBot vergleicht den fertigen Bau mit Plan, Verbindung und Steinebudget. Bei Vorlagen wird auch die Symmetrie geprüft.', 'CheckBot comparera la construction terminée au plan, à la connexion et au budget de briques. Les modèles vérifient aussi la symétrie.', 'CheckBot confronterà la costruzione con il piano, la connessione e il budget. I modelli verificano anche la simmetria.', 'CheckBot comparará la construcción con el plan, la conexión y el presupuesto de bloques. Las plantillas también comprueban la simetría.', 'CheckBot comparará a construção com o plano, a conexão e o orçamento de blocos. Os modelos também verificam a simetria.'],
+  'Make a plan to see the delegated jobs and their dependencies here.': ['Erstelle einen Plan, um Aufgaben und Abhängigkeiten hier zu sehen.', 'Créez un plan pour voir ici les tâches et leurs dépendances.', 'Crea un piano per vedere qui attività e dipendenze.', 'Crea un plan para ver aquí las tareas y sus dependencias.', 'Crie um plano para ver aqui as tarefas e suas dependências.'],
+  'Hello, director! Describe any brick design. I’ll split it into jobs for our crew.': ['Hallo, Bauleitung! Beschreibe einen Steinbau. Ich verteile die Aufgaben an unser Team.', 'Bonjour, direction ! Décrivez une création en briques. Je la répartirai entre notre équipe.', 'Ciao, direttore! Descrivi una costruzione. La dividerò in attività per la squadra.', '¡Hola, dirección! Describe un diseño de bloques. Lo dividiré en tareas para el equipo.', 'Olá, direção! Descreva um projeto de blocos. Vou dividi-lo em tarefas para a equipe.'],
+  'I review the task dependencies and check whether the planned bricks connect.': ['Ich prüfe die Aufgabenabhängigkeiten und ob die geplanten Steine verbunden sind.', 'Je vérifie les dépendances des tâches et la connexion des briques prévues.', 'Verifico le dipendenze e se i mattoncini previsti sono collegati.', 'Reviso las dependencias y si los bloques planeados están conectados.', 'Verifico as dependências e se os blocos planejados estão conectados.'],
+  'I build the body and structure. I’ll tell DetailBot when a supporting part is ready.': ['Ich baue Körper und Struktur. Ich sage DetailBot, wenn ein tragendes Teil bereit ist.', 'Je construis le corps et la structure. Je préviens DetailBot lorsqu’un support est prêt.', 'Costruisco corpo e struttura. Avviso DetailBot quando un supporto è pronto.', 'Construyo el cuerpo y la estructura. Avisaré a DetailBot cuando un soporte esté listo.', 'Construo o corpo e a estrutura. Avisarei ao DetailBot quando um suporte estiver pronto.'],
+  'I assemble supports and finishing touches after their foundations are ready. We share one task board.': ['Ich baue Stützen und Details, sobald ihre Grundlagen bereit sind. Wir teilen eine Aufgabentafel.', 'J’assemble les supports et les finitions lorsque leurs bases sont prêtes. Nous partageons un tableau.', 'Assemblo supporti e dettagli quando le basi sono pronte. Condividiamo una bacheca.', 'Monto soportes y detalles cuando sus bases están listas. Compartimos un tablero.', 'Monto suportes e detalhes quando suas bases estão prontas. Compartilhamos um quadro.'],
+  'I inspect the finished model and check for missing bricks.': ['Ich prüfe das fertige Modell auf fehlende Steine.', 'J’inspecte le modèle terminé et recherche les briques manquantes.', 'Ispeziono il modello finito e cerco i mattoncini mancanti.', 'Inspecciono el modelo terminado y busco bloques faltantes.', 'Inspeciono o modelo concluído e procuro blocos ausentes.'],
+  '5 agents': ['5 Agenten', '5 agents', '5 agenti', '5 agentes', '5 agentes'],
+  'Build coordinator': ['Baukoordination', 'Coordination', 'Coordinamento', 'Coordinación', 'Coordenação'],
+  'Plan & dependency verifier': ['Plan- und Abhängigkeitsprüfung', 'Vérification du plan et des dépendances', 'Verifica piano e dipendenze', 'Verificación de plan y dependencias', 'Verificação de plano e dependências'],
+  'Structure builder': ['Strukturbau', 'Construction de la structure', 'Costruzione della struttura', 'Construcción de estructura', 'Construção da estrutura'],
+  'Detail & support builder': ['Detail- und Stützbau', 'Détails et supports', 'Dettagli e supporti', 'Detalles y soportes', 'Detalhes e suportes'],
+  'Inspector & repair lead': ['Inspektion und Reparatur', 'Inspection et réparation', 'Ispezione e riparazione', 'Inspección y reparación', 'Inspeção e reparo'],
+  'Team board view': ['Ansicht der Teamtafel', 'Vue du tableau d’équipe', 'Vista della bacheca', 'Vista del tablero', 'Visualização do quadro'],
+  'Team talk': ['Teamgespräch', 'Discussion', 'Conversazione', 'Conversación', 'Conversa'],
+  'Task board': ['Aufgabentafel', 'Tableau des tâches', 'Bacheca attività', 'Tablero de tareas', 'Quadro de tarefas'],
+  'Agent actions and explanations': ['Aktionen und Erklärungen der Agenten', 'Actions et explications des agents', 'Azioni e spiegazioni degli agenti', 'Acciones y explicaciones de los agentes', 'Ações e explicações dos agentes'],
+  'Ask your crew': ['Frag dein Team', 'Interrogez votre équipe', 'Chiedi alla squadra', 'Pregunta al equipo', 'Pergunte à equipe'],
+  'Ask crew': ['Team fragen', 'Interroger l’équipe', 'Chiedi alla squadra', 'Preguntar al equipo', 'Perguntar à equipe'],
+  'Build controls': ['Bausteuerung', 'Commandes de construction', 'Controlli di costruzione', 'Controles de construcción', 'Controles de construção'],
+  'What shall we build?': ['Was bauen wir?', 'Que construisons-nous ?', 'Cosa costruiamo?', '¿Qué construimos?', 'O que vamos construir?'],
+  'Try an idea': ['Idee ausprobieren', 'Essayer une idée', 'Prova un’idea', 'Prueba una idea', 'Experimente uma ideia'],
+  'Plan destination': ['Ziel des Plans', 'Destination du plan', 'Destinazione del piano', 'Destino del plan', 'Destino do plano'],
+  'Replace scene': ['Szene ersetzen', 'Remplacer la scène', 'Sostituisci la scena', 'Reemplazar escena', 'Substituir cena'],
+  'Add to scene': ['Zur Szene hinzufügen', 'Ajouter à la scène', 'Aggiungi alla scena', 'Añadir a la escena', 'Adicionar à cena'],
+  'Make a plan': ['Plan erstellen', 'Créer un plan', 'Crea un piano', 'Crear un plan', 'Criar um plano'],
+  'Send brief to Copilot': ['Auftrag an Copilot senden', 'Envoyer la consigne à Copilot', 'Invia richiesta a Copilot', 'Enviar instrucciones a Copilot', 'Enviar instruções ao Copilot'],
+  'Plan with Local AI': ['Mit lokaler KI planen', 'Planifier avec l’IA locale', 'Pianifica con IA locale', 'Planificar con IA local', 'Planejar com IA local'],
+  'Plan with Azure Foundry': ['Mit Azure Foundry planen', 'Planifier avec Azure Foundry', 'Pianifica con Azure Foundry', 'Planificar con Azure Foundry', 'Planejar com Azure Foundry'],
+  'Start building': ['Bauen starten', 'Commencer la construction', 'Inizia a costruire', 'Empezar a construir', 'Começar a construir'],
+  'Continue build': ['Weiterbauen', 'Continuer', 'Continua a costruire', 'Continuar construcción', 'Continuar construção'],
+  'Pause build': ['Bau pausieren', 'Mettre en pause', 'Metti in pausa', 'Pausar construcción', 'Pausar construção'],
+  'Build one step': ['Einen Bauschritt ausführen', 'Construire une étape', 'Esegui un passo', 'Construir un paso', 'Construir uma etapa'],
+  'One step': ['Ein Schritt', 'Une étape', 'Un passo', 'Un paso', 'Uma etapa'],
+  'Build completion': ['Baufortschritt', 'Avancement', 'Avanzamento', 'Progreso de construcción', 'Progresso da construção'],
+  'Learn and experiment': ['Lernen und experimentieren', 'Apprendre et expérimenter', 'Impara e sperimenta', 'Aprender y experimentar', 'Aprender e experimentar'],
+  'Build inspection': ['Bauprüfung', 'Inspection', 'Ispezione', 'Inspección', 'Inspeção'],
+  'Waiting for a build': ['Wartet auf einen Bau', 'En attente d’une construction', 'In attesa di una costruzione', 'Esperando una construcción', 'Aguardando uma construção'],
+  'Try a little what-if': ['Probiere ein Was-wäre-wenn', 'Essayez une hypothèse', 'Prova un esperimento', 'Prueba una hipótesis', 'Experimente uma hipótese'],
+  'A big idea starts with a small brief.': ['Eine große Idee beginnt mit einem kleinen Auftrag.', 'Une grande idée commence par une petite consigne.', 'Una grande idea nasce da una piccola richiesta.', 'Una gran idea empieza con unas instrucciones sencillas.', 'Uma grande ideia começa com uma instrução simples.'],
+  'The translucent bricks are a preview, not an agent-built result.': ['Die durchsichtigen Steine sind eine Vorschau, kein von Agenten gebautes Ergebnis.', 'Les briques translucides sont un aperçu, pas une construction réalisée par les agents.', 'I mattoncini traslucidi sono un’anteprima, non una costruzione degli agenti.', 'Los bloques translúcidos son una vista previa, no una construcción de los agentes.', 'Os blocos translúcidos são uma prévia, não uma construção dos agentes.'],
+  'Drag to orbit': ['Ziehen zum Drehen', 'Glisser pour tourner', 'Trascina per ruotare', 'Arrastra para girar', 'Arraste para girar'],
+  'Scroll to zoom': ['Scrollen zum Zoomen', 'Défiler pour zoomer', 'Scorri per zoomare', 'Desplaza para ampliar', 'Role para ampliar'],
+  'Tap a brick to inspect': ['Stein zur Prüfung antippen', 'Touchez une brique pour l’inspecter', 'Tocca un mattoncino per ispezionarlo', 'Toca un bloque para inspeccionarlo', 'Toque em um bloco para inspecionar'],
+  'LEGO-style · original geometry': ['LEGO-Stil · eigene Geometrie', 'Style LEGO · géométrie originale', 'Stile LEGO · geometria originale', 'Estilo LEGO · geometría original', 'Estilo LEGO · geometria original'],
+  'Remove about a third of the bricks. Watch the team compare reality with its plan and repair the gaps.': ['Entferne etwa ein Drittel der Steine. Beobachte, wie das Team den Bau mit dem Plan vergleicht und die Lücken repariert.', 'Retirez environ un tiers des briques. Observez l’équipe comparer la construction au plan et réparer les manques.', 'Rimuovi circa un terzo dei mattoncini. Osserva la squadra confrontare il modello con il piano e riparare i vuoti.', 'Retira aproximadamente un tercio de los bloques. Observa al equipo comparar la construcción con el plan y reparar los huecos.', 'Remova cerca de um terço dos blocos. Observe a equipe comparar a construção com o plano e reparar as lacunas.'],
+  'Hide bricks': ['Steine verstecken', 'Cacher des briques', 'Nascondi mattoncini', 'Ocultar bloques', 'Esconder blocos'],
+  'Ask team to repair': ['Team um Reparatur bitten', 'Demander une réparation', 'Chiedi la riparazione', 'Pedir reparación', 'Pedir reparo'],
+  'Build replay': ['Bauverlauf', 'Revoir la construction', 'Rivedi costruzione', 'Repetir construcción', 'Rever construção'],
+  'Replay placed bricks': ['Platzierte Steine erneut ansehen', 'Revoir les briques placées', 'Rivedi i mattoncini posati', 'Revisar bloques colocados', 'Rever blocos colocados'],
+  'Live': ['Live', 'En direct', 'Dal vivo', 'En directo', 'Ao vivo'],
+  'Finish a build to explore its timeline.': ['Schließe einen Bau ab, um den Verlauf anzusehen.', 'Terminez une construction pour explorer son historique.', 'Completa una costruzione per esplorarne la sequenza.', 'Termina una construcción para explorar su historial.', 'Conclua uma construção para explorar seu histórico.'],
+  'Load local Jurassic herd': ['Lokale Juraherde laden', 'Charger le troupeau jurassique local', 'Carica il branco giurassico locale', 'Cargar manada jurásica local', 'Carregar manada jurássica local'],
+  'Load local space fleet': ['Lokale Raumflotte laden', 'Charger la flotte spatiale locale', 'Carica la flotta spaziale locale', 'Cargar flota espacial local', 'Carregar frota espacial local'],
+  'Save build file': ['Bau als Datei speichern', 'Enregistrer la construction', 'Salva costruzione', 'Guardar construcción', 'Salvar construção'],
+  'Load build / AI mission': ['Bau / KI-Mission laden', 'Charger une construction / mission IA', 'Carica costruzione / missione IA', 'Cargar construcción / misión IA', 'Carregar construção / missão de IA'],
+  'Choose a build or AI mission JSON file': ['JSON-Datei für Bau oder KI-Mission wählen', 'Choisir un fichier JSON de construction ou mission IA', 'Scegli un file JSON di costruzione o missione IA', 'Elegir archivo JSON de construcción o misión IA', 'Escolher arquivo JSON de construção ou missão de IA'],
+  'Close dialog': ['Dialog schließen', 'Fermer la fenêtre', 'Chiudi finestra', 'Cerrar diálogo', 'Fechar diálogo'],
+  'Planning in progress': ['Planung läuft', 'Planification en cours', 'Pianificazione in corso', 'Planificación en curso', 'Planejamento em andamento'],
+  'Still planning. Abort now or continue waiting for this same request.': ['Die Planung läuft noch. Brich ab oder warte auf dieselbe Anfrage.', 'La planification continue. Annulez ou attendez la même requête.', 'Pianificazione ancora in corso. Interrompi o attendi la stessa richiesta.', 'La planificación continúa. Cancela o espera la misma solicitud.', 'O planejamento continua. Cancele ou aguarde a mesma solicitação.'],
+  'Abort planning': ['Planung abbrechen', 'Annuler la planification', 'Interrompi pianificazione', 'Cancelar planificación', 'Cancelar planejamento'],
+  'Continue waiting': ['Weiter warten', 'Continuer à attendre', 'Continua ad attendere', 'Seguir esperando', 'Continuar aguardando'],
+  'Ready': ['Bereit', 'Prêt', 'Pronto', 'Listo', 'Pronto'],
+  'Waiting': ['Wartet', 'En attente', 'In attesa', 'Esperando', 'Aguardando'],
+  'Checking': ['Prüft', 'Vérifie', 'Verifica', 'Comprobando', 'Verificando'],
+  'Watching': ['Beobachtet', 'Observe', 'Osserva', 'Observando', 'Observando'],
+  'Reviewed': ['Geprüft', 'Vérifié', 'Verificato', 'Revisado', 'Revisado'],
+  'Passed': ['Bestanden', 'Réussi', 'Superato', 'Correcto', 'Aprovado'],
+  'Problem found': ['Problem entdeckt', 'Problème détecté', 'Problema rilevato', 'Problema detectado', 'Problema encontrado'],
+  'Building': ['Baut', 'Construit', 'Costruisce', 'Construyendo', 'Construindo'],
+  'Done': ['Fertig', 'Terminé', 'Completato', 'Terminado', 'Concluído'],
+  'Planning your custom design…': ['Dein Entwurf wird geplant…', 'Planification de votre création…', 'Pianificazione del progetto…', 'Planificando tu diseño…', 'Planejando seu projeto…'],
+  'Make a plan, then give your crew the go-ahead.': ['Erstelle einen Plan und gib deinem Team grünes Licht.', 'Créez un plan, puis donnez le feu vert à l’équipe.', 'Crea un piano, poi dai il via alla squadra.', 'Crea un plan y da luz verde al equipo.', 'Crie um plano e autorize a equipe.'],
+  'Review the task board, then start building.': ['Prüfe die Aufgabentafel und starte den Bau.', 'Consultez le tableau des tâches, puis commencez.', 'Controlla la bacheca, poi inizia a costruire.', 'Revisa el tablero y comienza a construir.', 'Revise o quadro e comece a construir.'],
+  'Try the repair challenge below, or change your brief.': ['Probiere unten die Reparatur aus oder ändere deinen Auftrag.', 'Essayez la réparation ci-dessous ou modifiez votre consigne.', 'Prova la riparazione qui sotto o modifica la richiesta.', 'Prueba el reto de reparación o cambia tus instrucciones.', 'Experimente o desafio de reparo ou altere suas instruções.'],
+  'The inspector noticed a problem. Ask the team to repair it.': ['Die Inspektion hat ein Problem gefunden. Bitte das Team um Reparatur.', 'L’inspecteur a détecté un problème. Demandez à l’équipe de le réparer.', 'L’ispezione ha rilevato un problema. Chiedi alla squadra di ripararlo.', 'La inspección detectó un problema. Pide al equipo que lo repare.', 'A inspeção encontrou um problema. Peça à equipe que o repare.'],
+  'One bounded planning request. No template fallback; the crew executes locally.': ['Eine begrenzte Planungsanfrage. Kein Vorlagenersatz; das Team arbeitet lokal.', 'Une requête de planification limitée. Aucun modèle de secours ; l’équipe travaille localement.', 'Una richiesta di pianificazione limitata. Nessun ripiego sui modelli; la squadra opera localmente.', 'Una solicitud de planificación limitada. Sin plantilla alternativa; el equipo trabaja localmente.', 'Uma solicitação de planejamento limitada. Sem modelo alternativo; a equipe trabalha localmente.'],
+  'Saved on this device · no account needed': ['Auf diesem Gerät gespeichert · kein Konto nötig', 'Enregistré sur cet appareil · aucun compte requis', 'Salvato su questo dispositivo · nessun account necessario', 'Guardado en este dispositivo · no se necesita cuenta', 'Salvo neste dispositivo · nenhuma conta necessária'],
+  'Previous build restored from this device.': ['Vorheriger Bau von diesem Gerät wiederhergestellt.', 'Construction précédente restaurée depuis cet appareil.', 'Costruzione precedente ripristinata da questo dispositivo.', 'Construcción anterior restaurada desde este dispositivo.', 'Construção anterior restaurada deste dispositivo.'],
+  'Could not save on this device. Download your build instead.': ['Speichern auf diesem Gerät nicht möglich. Lade deinen Bau herunter.', 'Impossible d’enregistrer sur cet appareil. Téléchargez votre construction.', 'Impossibile salvare su questo dispositivo. Scarica la costruzione.', 'No se pudo guardar en este dispositivo. Descarga la construcción.', 'Não foi possível salvar neste dispositivo. Baixe a construção.'],
+  'Planning reached the 300-second limit. No new build was started.': ['Die Planung hat das Limit von 300 Sekunden erreicht. Es wurde kein neuer Bau gestartet.', 'La planification a atteint la limite de 300 secondes. Aucune construction n’a été lancée.', 'La pianificazione ha raggiunto il limite di 300 secondi. Nessuna costruzione è stata avviata.', 'La planificación alcanzó el límite de 300 segundos. No se inició ninguna construcción.', 'O planejamento atingiu o limite de 300 segundos. Nenhuma construção foi iniciada.'],
+  'Planning aborted. No new build was started.': ['Planung abgebrochen. Es wurde kein neuer Bau gestartet.', 'Planification annulée. Aucune construction n’a été lancée.', 'Pianificazione interrotta. Nessuna costruzione è stata avviata.', 'Planificación cancelada. No se inició ninguna construcción.', 'Planejamento cancelado. Nenhuma construção foi iniciada.'],
+  'Give the team a brief of 1–1,000 characters.': ['Gib dem Team einen Auftrag mit 1–1.000 Zeichen.', 'Donnez à l’équipe une consigne de 1 à 1 000 caractères.', 'Fornisci una richiesta di 1–1.000 caratteri.', 'Escribe instrucciones de 1 a 1.000 caracteres.', 'Escreva instruções de 1 a 1.000 caracteres.'],
+  'There is no scene to add to. Choose Replace scene to start one.': ['Es gibt noch keine Szene. Wähle „Szene ersetzen“, um eine zu beginnen.', 'Aucune scène existante. Choisissez « Remplacer la scène » pour commencer.', 'Non esiste ancora una scena. Scegli «Sostituisci la scena» per iniziare.', 'No hay ninguna escena. Elige «Reemplazar escena» para empezar.', 'Ainda não há cena. Escolha «Substituir cena» para começar.'],
+  'Cannot append the new geometry: no collision-free offset fits within scene bounds.': ['Hinzufügen nicht möglich: Innerhalb der Szenengrenzen gibt es keine kollisionsfreie Position.', 'Ajout impossible : aucune position sans collision ne tient dans les limites de la scène.', 'Impossibile aggiungere: nessuna posizione senza collisioni rientra nei limiti della scena.', 'No se puede añadir: no hay una posición sin colisiones dentro de los límites.', 'Não é possível adicionar: nenhuma posição sem colisão cabe nos limites da cena.'],
+  'Cannot append scenes from different worlds.': ['Szenen aus verschiedenen Welten können nicht zusammengefügt werden.', 'Impossible de réunir des scènes de mondes différents.', 'Non è possibile unire scene di mondi diversi.', 'No se pueden unir escenas de mundos diferentes.', 'Não é possível unir cenas de mundos diferentes.'],
+  'Cannot append more than 32 named objects to a scene.': ['Eine Szene darf höchstens 32 benannte Objekte enthalten.', 'Une scène ne peut pas contenir plus de 32 objets nommés.', 'Una scena non può contenere più di 32 oggetti con nome.', 'Una escena no puede contener más de 32 objetos con nombre.', 'Uma cena não pode conter mais de 32 objetos nomeados.'],
+  'The coordinator is already planning. Wait for that request to finish.': ['Die Koordination plant bereits. Warte, bis diese Anfrage beendet ist.', 'Le coordinateur planifie déjà. Attendez la fin de cette requête.', 'Il coordinatore sta già pianificando. Attendi la fine della richiesta.', 'El coordinador ya está planificando. Espera a que termine la solicitud.', 'O coordenador já está planejando. Aguarde o fim da solicitação.'],
+  'Server status is not ready. Retry status in Change mode before planning.': ['Der Serverstatus ist noch nicht bereit. Prüfe ihn unter „Modus ändern“ erneut.', 'Le statut du serveur n’est pas prêt. Réessayez dans « Changer de mode ».', 'Lo stato del server non è pronto. Riprova in «Cambia modalità».', 'El estado del servidor no está listo. Reinténtalo en «Cambiar modo».', 'O status do servidor não está pronto. Tente novamente em «Alterar modo».'],
+  'The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.': ['Der Planer lieferte eine Vorlage statt eigener Geometrie. Es gab keinen neuen Bau, Wiederholungsversuch oder Vorlagenersatz.', 'Le planificateur a renvoyé un modèle prédéfini au lieu d’une géométrie personnalisée. Aucune construction, nouvelle tentative ou substitution n’a eu lieu.', 'Il pianificatore ha restituito un modello predefinito invece di geometria personalizzata. Nessuna costruzione, ripetizione o sostituzione è stata avviata.', 'El planificador devolvió una plantilla en lugar de geometría personalizada. No se inició ninguna construcción, reintento ni sustitución.', 'O planejador retornou um modelo predefinido em vez de geometria personalizada. Nenhuma construção, nova tentativa ou substituição foi iniciada.'],
+  'The planner chose the wrong world. No build was started.': ['Der Planer hat die falsche Welt gewählt. Es wurde kein Bau gestartet.', 'Le planificateur a choisi le mauvais monde. Aucune construction n’a été lancée.', 'Il pianificatore ha scelto il mondo sbagliato. Nessuna costruzione è stata avviata.', 'El planificador eligió el mundo equivocado. No se inició ninguna construcción.', 'O planejador escolheu o mundo errado. Nenhuma construção foi iniciada.'],
+  'Choose a brick budget between 1 and 1,000.': ['Wähle ein Steinebudget zwischen 1 und 1.000.', 'Choisissez un budget de 1 à 1 000 briques.', 'Scegli un budget tra 1 e 1.000 mattoncini.', 'Elige un presupuesto de entre 1 y 1.000 bloques.', 'Escolha um orçamento entre 1 e 1.000 blocos.'],
+  'This is the dinosaur mission. Switch to Space dock to build a spaceship.': ['Dies ist die Dinosauriermission. Wechsle zum Raumhafen, um ein Raumschiff zu bauen.', 'C’est la mission des dinosaures. Passez à la station spatiale pour construire un vaisseau.', 'Questa è la missione dinosauri. Passa al porto spaziale per costruire un’astronave.', 'Esta es la misión de dinosaurios. Cambia al puerto espacial para construir una nave.', 'Esta é a missão dos dinossauros. Mude para o porto espacial para construir uma nave.'],
+  'This is the spaceship mission. Switch to Jurassic valley to build a dinosaur.': ['Dies ist die Raumschiffmission. Wechsle ins Juratal, um einen Dinosaurier zu bauen.', 'C’est la mission spatiale. Passez à la vallée jurassique pour construire un dinosaure.', 'Questa è la missione spaziale. Passa alla valle giurassica per costruire un dinosauro.', 'Esta es la misión espacial. Cambia al valle jurásico para construir un dinosaurio.', 'Esta é a missão espacial. Mude para o vale jurássico para construir um dinossauro.'],
+  'The Azure daily inference budget is exhausted.': ['Das tägliche Azure-Budget für Modellanfragen ist aufgebraucht.', 'Le budget quotidien d’inférence Azure est épuisé.', 'Il budget giornaliero Azure per l’inferenza è esaurito.', 'Se agotó el presupuesto diario de inferencia de Azure.', 'O orçamento diário de inferência do Azure foi esgotado.'],
+  'Azure inference budget or pricing could not be verified; no model request was sent.': ['Azure-Budget oder Preis konnte nicht geprüft werden; es wurde keine Modellanfrage gesendet.', 'Le budget ou le tarif Azure n’a pas pu être vérifié ; aucune requête au modèle n’a été envoyée.', 'Impossibile verificare budget o prezzi Azure; nessuna richiesta al modello è stata inviata.', 'No se pudo verificar el presupuesto o el precio de Azure; no se envió ninguna solicitud al modelo.', 'Não foi possível verificar o orçamento ou preço do Azure; nenhuma solicitação foi enviada ao modelo.'],
+  'Azure planning is unavailable near the UTC day boundary.': ['Azure-Planung ist kurz vor dem UTC-Tageswechsel nicht verfügbar.', 'La planification Azure est indisponible près du changement de jour UTC.', 'La pianificazione Azure non è disponibile vicino al cambio di giorno UTC.', 'La planificación de Azure no está disponible cerca del cambio de día UTC.', 'O planejamento Azure não está disponível próximo à mudança do dia UTC.'],
+  'plan': ['Plan', 'plan', 'piano', 'plan', 'plano'],
+  'turn': ['Runde', 'tour', 'turno', 'turno', 'turno'],
+  'delegate': ['Übergabe', 'délégation', 'delega', 'delegación', 'delegação'],
+  'observe': ['Beobachtung', 'observation', 'osservazione', 'observación', 'observação'],
+  'place': ['Bau', 'construction', 'costruzione', 'construcción', 'construção'],
+  'verify': ['Prüfung', 'vérification', 'verifica', 'verificación', 'verificação'],
+  'repair': ['Reparatur', 'réparation', 'riparazione', 'reparación', 'reparo'],
+  'Brief fulfilled': ['Auftrag erfüllt', 'Consigne respectée', 'Richiesta soddisfatta', 'Instrucciones cumplidas', 'Instruções cumpridas'],
+  'Connected objects': ['Verbundene Objekte', 'Objets connectés', 'Oggetti collegati', 'Objetos conectados', 'Objetos conectados'],
+  'Connected model': ['Verbundenes Modell', 'Modèle connecté', 'Modello collegato', 'Modelo conectado', 'Modelo conectado'],
+  'Balanced sides': ['Ausgeglichene Seiten', 'Côtés équilibrés', 'Lati equilibrati', 'Lados equilibrados', 'Lados equilibrados'],
+  'Within budget': ['Im Budget', 'Dans le budget', 'Entro il budget', 'Dentro del presupuesto', 'Dentro do orçamento'],
+  'Connectivity will be checked when all planned bricks are placed.': ['Die Verbindung wird geprüft, sobald alle geplanten Steine gesetzt sind.', 'La connexion sera vérifiée lorsque toutes les briques seront placées.', 'La connessione sarà verificata quando tutti i mattoncini saranno posati.', 'La conexión se comprobará cuando se coloquen todos los bloques.', 'A conexão será verificada quando todos os blocos forem colocados.'],
+  'Symmetry will be checked when complete.': ['Die Symmetrie wird nach Fertigstellung geprüft.', 'La symétrie sera vérifiée à la fin.', 'La simmetria sarà verificata al termine.', 'La simetría se comprobará al terminar.', 'A simetria será verificada ao concluir.'],
+  'Left and right brick positions mirror each other.': ['Die Steinpositionen links und rechts sind gespiegelt.', 'Les positions des briques se reflètent à gauche et à droite.', 'Le posizioni dei mattoncini sono speculari.', 'Las posiciones de los bloques son simétricas.', 'As posições dos blocos são simétricas.'],
+  'The two sides do not match yet.': ['Die beiden Seiten stimmen noch nicht überein.', 'Les deux côtés ne correspondent pas encore.', 'I due lati non coincidono ancora.', 'Los dos lados aún no coinciden.', 'Os dois lados ainda não coincidem.'],
+  'I will compare placed brick identities and object connectivity with the plan, then route any missing bricks to their owners.': ['Ich vergleiche die gesetzten Steine und die Verbindung der Objekte mit dem Plan und leite fehlende Steine an ihre zuständigen Bauer weiter.', 'Je comparerai les briques placées et la connexion des objets au plan, puis transmettrai les briques manquantes à leurs responsables.', 'Confronterò i mattoncini posati e la connessione degli oggetti con il piano, poi assegnerò quelli mancanti ai responsabili.', 'Compararé los bloques colocados y la conexión de objetos con el plan, y asignaré los bloques faltantes a sus responsables.', 'Compararei os blocos colocados e a conexão dos objetos com o plano e encaminharei os blocos ausentes aos responsáveis.'],
+  'FrameBot builds structural bases. DetailBot assembles assigned supports and finishing bricks after their bases are ready. PlanBot will validate each handoff; CheckBot will inspect the result.': ['FrameBot baut tragende Grundlagen. DetailBot baut zugewiesene Stützen und Details, sobald deren Grundlagen bereit sind. PlanBot prüft jede Übergabe; CheckBot prüft das Ergebnis.', 'FrameBot construit les bases. DetailBot assemble les supports et finitions lorsque leurs bases sont prêtes. PlanBot vérifie chaque transfert ; CheckBot inspecte le résultat.', 'FrameBot costruisce le basi. DetailBot assembla supporti e dettagli quando le basi sono pronte. PlanBot verifica ogni passaggio; CheckBot controlla il risultato.', 'FrameBot construye las bases. DetailBot monta soportes y detalles cuando sus bases están listas. PlanBot verifica cada relevo; CheckBot inspecciona el resultado.', 'FrameBot constrói as bases. DetailBot monta suportes e detalhes quando as bases estão prontas. PlanBot verifica cada transferência; CheckBot inspeciona o resultado.'],
+  'CheckBot accepted the build. Mission complete!': ['CheckBot hat den Bau abgenommen. Mission erfüllt!', 'CheckBot a accepté la construction. Mission accomplie !', 'CheckBot ha approvato la costruzione. Missione compiuta!', 'CheckBot aceptó la construcción. ¡Misión cumplida!', 'CheckBot aceitou a construção. Missão cumprida!'],
+  'CheckBot found a problem. I will coordinate an exact repair or report an unresolved topology issue.': ['CheckBot hat ein Problem gefunden. Ich koordiniere eine genaue Reparatur oder melde ein ungelöstes Verbindungsproblem.', 'CheckBot a trouvé un problème. Je coordonnerai une réparation précise ou signalerai un problème de connexion non résolu.', 'CheckBot ha trovato un problema. Coordinerò una riparazione precisa o segnalerò un problema di connessione irrisolto.', 'CheckBot encontró un problema. Coordinaré una reparación precisa o informaré de un problema de conexión sin resolver.', 'CheckBot encontrou um problema. Vou coordenar um reparo exato ou informar um problema de conexão não resolvido.'],
+  'No missing bricks found. This prototype cannot automatically repair a different topology problem.': ['Keine fehlenden Steine gefunden. Dieser Prototyp kann andere Verbindungsprobleme nicht automatisch reparieren.', 'Aucune brique manquante. Ce prototype ne peut pas réparer automatiquement un autre problème de connexion.', 'Nessun mattoncino mancante. Questo prototipo non può riparare automaticamente altri problemi di connessione.', 'No faltan bloques. Este prototipo no puede reparar automáticamente otros problemas de conexión.', 'Nenhum bloco ausente. Este protótipo não pode reparar automaticamente outros problemas de conexão.'],
+  'Ready for your imagination': ['Bereit für deine Ideen', 'Prêt pour vos idées', 'Pronti per le tue idee', 'Listos para tus ideas', 'Prontos para suas ideias'],
+  'A little prehistoric.': ['Ein bisschen prähistorisch.', 'Un peu préhistorique.', 'Un po’ preistorico.', 'Un poco prehistórico.', 'Um pouco pré-histórico.'],
+  'A lot of possibility.': ['Voller Möglichkeiten.', 'Beaucoup de possibilités.', 'Tante possibilità.', 'Muchas posibilidades.', 'Muitas possibilidades.'],
+  'One small brick.': ['Ein kleiner Stein.', 'Une petite brique.', 'Un piccolo mattoncino.', 'Un pequeño bloque.', 'Um pequeno bloco.'],
+  'One giant adventure.': ['Ein großes Abenteuer.', 'Une grande aventure.', 'Una grande avventura.', 'Una gran aventura.', 'Uma grande aventura.'],
+  'You dream it. Five agents team up to build it, one brick at a time.': ['Du träumst es. Fünf Agenten bauen es gemeinsam, Stein für Stein.', 'Vous imaginez. Cinq agents construisent ensemble, brique par brique.', 'Tu immagini. Cinque agenti costruiscono insieme, un mattoncino alla volta.', 'Tú imaginas. Cinco agentes construyen juntos, bloque a bloque.', 'Você imagina. Cinco agentes constroem juntos, bloco por bloco.'],
+  'Destination: your imagination. Give the crew a spaceship mission.': ['Ziel: deine Fantasie. Gib dem Team eine Raumschiffmission.', 'Destination : votre imagination. Donnez une mission spatiale à l’équipe.', 'Destinazione: la tua immaginazione. Affida una missione spaziale alla squadra.', 'Destino: tu imaginación. Da al equipo una misión espacial.', 'Destino: sua imaginação. Dê à equipe uma missão espacial.'],
+  'Don’t just watch.': ['Nicht nur zusehen.', 'Ne vous contentez pas de regarder.', 'Non limitarti a guardare.', 'No solo observes.', 'Não fique só olhando.'],
+  'Be the scientist.': ['Sei Wissenschaftler.', 'Soyez scientifique.', 'Diventa scienziato.', 'Sé quien investiga.', 'Seja cientista.'],
+  'Great agents check their work.': ['Gute Agenten prüfen ihre Arbeit.', 'Les bons agents vérifient leur travail.', 'I bravi agenti verificano il proprio lavoro.', 'Los buenos agentes comprueban su trabajo.', 'Bons agentes verificam seu trabalho.'],
+  'Great directors ask questions.': ['Gute Leiter stellen Fragen.', 'Les bons directeurs posent des questions.', 'I bravi direttori fanno domande.', 'Los buenos directores hacen preguntas.', 'Bons diretores fazem perguntas.'],
+  'Quick thought: what makes this a team of agents?': ['Kurze Frage: Was macht dies zu einem Agententeam?', 'Question : qu’est-ce qui en fait une équipe d’agents ?', 'Una domanda: cosa rende questa una squadra di agenti?', 'Pregunta: ¿qué hace que sea un equipo de agentes?', 'Uma pergunta: o que faz deste um time de agentes?'],
+  'Independent educational demo. Not affiliated with the LEGO Group.': ['Unabhängige Lern-Demo. Nicht mit der LEGO Gruppe verbunden.', 'Démonstration éducative indépendante. Sans affiliation avec le groupe LEGO.', 'Demo educativa indipendente. Non affiliata al gruppo LEGO.', 'Demostración educativa independiente. No afiliada al Grupo LEGO.', 'Demonstração educativa independente. Não afiliada ao Grupo LEGO.'],
+  'A hands-on introduction to agentic teamwork.': ['Ein praktischer Einstieg in die Zusammenarbeit von Agenten.', 'Une introduction pratique au travail d’équipe des agents.', 'Un’introduzione pratica al lavoro di squadra degli agenti.', 'Una introducción práctica al trabajo en equipo de agentes.', 'Uma introdução prática ao trabalho em equipe de agentes.'],
+  'Try: “Who does what?” or “Why wait?”': ['Auf Englisch fragen: “Who does what?” oder “Why wait?”', 'En anglais : « Who does what? » ou « Why wait? »', 'In inglese: «Who does what?» o «Why wait?»', 'En inglés: «Who does what?» o «Why wait?»', 'Em inglês: «Who does what?» ou «Why wait?»'],
+  'Why do you need a plan?': ['Englisch: Why do you need a plan?', 'En anglais : Why do you need a plan?', 'In inglese: Why do you need a plan?', 'En inglés: Why do you need a plan?', 'Em inglês: Why do you need a plan?'],
+  'They all use the same color': ['Alle verwenden dieselbe Farbe', 'Ils utilisent tous la même couleur', 'Usano tutti lo stesso colore', 'Todos usan el mismo color', 'Todos usam a mesma cor'],
+  'They choose actions and share progress': ['Sie wählen Aktionen und teilen ihren Fortschritt', 'Ils choisissent des actions et partagent leurs progrès', 'Scelgono azioni e condividono i progressi', 'Eligen acciones y comparten el progreso', 'Escolhem ações e compartilham o progresso'],
+  'They build without any plan': ['Sie bauen ohne Plan', 'Ils construisent sans plan', 'Costruiscono senza un piano', 'Construyen sin plan', 'Constroem sem plano'],
+  'Make a prediction, then watch the crew.': ['Stelle eine Vermutung auf und beobachte das Team.', 'Faites une prédiction, puis observez l’équipe.', 'Fai una previsione, poi osserva la squadra.', 'Haz una predicción y observa al equipo.', 'Faça uma previsão e observe a equipe.'],
+  'Team Scientist stamp earned!': ['Teamforscher-Auszeichnung erhalten!', 'Badge scientifique d’équipe obtenu !', 'Distintivo di scienziato della squadra ottenuto!', '¡Insignia de científico del equipo conseguida!', 'Selo de cientista da equipe conquistado!'],
+  'Exactly! A goal, a shared plan, independent actions, and feedback. You earned the Team Scientist stamp.': ['Genau! Ein Ziel, ein gemeinsamer Plan, eigenständige Aktionen und Rückmeldung. Du erhältst die Teamforscher-Auszeichnung.', 'Exact ! Un objectif, un plan partagé, des actions indépendantes et des retours. Vous obtenez le badge scientifique d’équipe.', 'Esatto! Un obiettivo, un piano condiviso, azioni indipendenti e riscontri. Hai ottenuto il distintivo di scienziato.', '¡Exacto! Un objetivo, un plan compartido, acciones independientes y comentarios. Has ganado la insignia científica.', 'Exatamente! Uma meta, um plano compartilhado, ações independentes e retorno. Você ganhou o selo de cientista.'],
+  'Not quite. Look for each agent choosing a ready task and sharing what changed. Try again.': ['Noch nicht ganz. Achte darauf, wie jeder Agent eine bereite Aufgabe wählt und Änderungen mitteilt. Versuch es noch einmal.', 'Pas tout à fait. Observez chaque agent choisir une tâche prête et partager les changements. Réessayez.', 'Non proprio. Osserva ogni agente scegliere un’attività pronta e condividere i cambiamenti. Riprova.', 'No del todo. Observa cómo cada agente elige una tarea lista y comparte los cambios. Inténtalo de nuevo.', 'Não exatamente. Observe cada agente escolher uma tarefa pronta e compartilhar as mudanças. Tente novamente.'],
+  'Plan ready. You’re the director.': ['Plan bereit. Du führst Regie.', 'Plan prêt. Vous dirigez.', 'Piano pronto. Sei tu a dirigere.', 'Plan listo. Tú diriges.', 'Plano pronto. Você dirige.'],
+  'Teamwork in progress': ['Teamarbeit läuft', 'Travail d’équipe en cours', 'Lavoro di squadra in corso', 'Trabajo en equipo en curso', 'Trabalho em equipe em andamento'],
+  'Paused. Take a closer look.': ['Pausiert. Schau genauer hin.', 'En pause. Regardez de plus près.', 'In pausa. Osserva da vicino.', 'En pausa. Mira más de cerca.', 'Em pausa. Observe de perto.'],
+  'Mission complete. Beautiful teamwork!': ['Mission erfüllt. Großartige Teamarbeit!', 'Mission accomplie. Beau travail d’équipe !', 'Missione compiuta. Ottimo lavoro di squadra!', '¡Misión cumplida! ¡Gran equipo!', 'Missão cumprida! Ótimo trabalho em equipe!'],
+  'Inspection found a problem.': ['Die Prüfung hat ein Problem gefunden.', 'L’inspection a détecté un problème.', 'L’ispezione ha rilevato un problema.', 'La inspección detectó un problema.', 'A inspeção encontrou um problema.'],
+};
+
+let language: Language = 'en';
+export function setLanguage(next: Language) { language = next; }
+export function getLanguage() { return language; }
+export function translate(text: string): string {
+  if (language === 'en') return text;
+  const index = languages.indexOf(language);
+  const ask = /^Ask (BuildBot|PlanBot|FrameBot|DetailBot|CheckBot) about its job$/.exec(text);
+  if (ask) return ['', `Frage ${ask[1]} nach seiner Aufgabe`, `Interroger ${ask[1]} sur son rôle`,
+    `Chiedi a ${ask[1]} il suo ruolo`, `Pregunta a ${ask[1]} por su tarea`, `Pergunte a ${ask[1]} sobre sua função`][index];
+  const speed = /^Fast-forward speed, currently (\d+) times$/.exec(text);
+  if (speed) return ['', `Vorspulgeschwindigkeit, aktuell ${speed[1]}-fach`, `Vitesse d’avance, actuellement ${speed[1]} fois`,
+    `Velocità di avanzamento, attualmente ${speed[1]} volte`, `Velocidad de avance, actualmente ${speed[1]} veces`,
+    `Velocidade de avanço, atualmente ${speed[1]} vezes`][index];
+  return catalog[text]?.[languages.indexOf(language) - 1] ?? text;
+}
+
+export function planningDescription(provider: 'Azure Foundry' | 'Copilot', brief: string): string {
+  const index = languages.indexOf(language);
+  const estimate = provider === 'Copilot' ? copilotPlanningEstimate(brief) : '';
+  const match = /^For ([\d,]+) requested bricks, a small Copilot study suggests about (\d+)–(\d+) seconds\.$/.exec(estimate);
+  const count = match ? new Intl.NumberFormat(language).format(Number(match[1].replaceAll(',', ''))) : '';
+  const reference = match ? [
+    `For ${count} requested bricks, a small Copilot study suggests about ${match[2]}–${match[3]} seconds.`,
+    `Für ${count} angefragte Steine ergab eine kleine Copilot-Studie etwa ${match[2]}–${match[3]} Sekunden.`,
+    `Pour ${count} briques demandées, une petite étude Copilot indique environ ${match[2]}–${match[3]} secondes.`,
+    `Per ${count} mattoncini richiesti, un piccolo studio Copilot indica circa ${match[2]}–${match[3]} secondi.`,
+    `Para ${count} bloques solicitados, un pequeño estudio de Copilot indica unos ${match[2]}–${match[3]} segundos.`,
+    `Para ${count} blocos solicitados, um pequeno estudo do Copilot indica cerca de ${match[2]}–${match[3]} segundos.`,
+  ][index] : provider === 'Copilot' ? [
+    'Estimate unknown; sampled Copilot requests took about 20–183 seconds.',
+    'Schätzung unbekannt; untersuchte Copilot-Anfragen dauerten etwa 20–183 Sekunden.',
+    'Estimation inconnue ; les requêtes Copilot étudiées ont pris environ 20–183 secondes.',
+    'Stima sconosciuta; le richieste Copilot esaminate hanno richiesto circa 20–183 secondi.',
+    'Estimación desconocida; las solicitudes de Copilot estudiadas tardaron unos 20–183 segundos.',
+    'Estimativa desconhecida; as solicitações do Copilot estudadas levaram cerca de 20–183 segundos.',
+  ][index] : [
+    'Estimate unknown; Azure Foundry was not measured in the Copilot study.',
+    'Schätzung unbekannt; Azure Foundry wurde in der Copilot-Studie nicht untersucht.',
+    'Estimation inconnue ; Azure Foundry n’a pas été mesuré dans l’étude Copilot.',
+    'Stima sconosciuta; Azure Foundry non è stato misurato nello studio Copilot.',
+    'Estimación desconocida; Azure Foundry no se midió en el estudio de Copilot.',
+    'Estimativa desconhecida; o Azure Foundry não foi medido no estudo do Copilot.',
+  ][index];
+  return [
+    `One ${provider} request is running. ${reference} Times vary; this is not a deadline. Maximum wait: 300 seconds.`,
+    `Eine ${provider}-Anfrage läuft. ${reference} Zeiten variieren; dies ist keine Frist. Maximale Wartezeit: 300 Sekunden.`,
+    `Une requête ${provider} est en cours. ${reference} Les durées varient ; ce n’est pas une échéance. Attente maximale : 300 secondes.`,
+    `Una richiesta ${provider} è in corso. ${reference} I tempi variano; non è una scadenza. Attesa massima: 300 secondi.`,
+    `Hay una solicitud de ${provider} en curso. ${reference} Los tiempos varían; no es un plazo. Espera máxima: 300 segundos.`,
+    `Uma solicitação do ${provider} está em andamento. ${reference} Os tempos variam; não é um prazo. Espera máxima: 300 segundos.`,
+  ][index];
+}
+
+export function elapsedText(seconds: number): string {
+  return [
+    `Elapsed: ${seconds} seconds`, `Vergangen: ${seconds} Sekunden`, `Temps écoulé : ${seconds} secondes`,
+    `Tempo trascorso: ${seconds} secondi`, `Tiempo transcurrido: ${seconds} segundos`, `Tempo decorrido: ${seconds} segundos`,
+  ][languages.indexOf(language)];
+}
+
+export function translateActivity(message: string): string {
+  const index = languages.indexOf(language);
+  if (!index) return message;
+  let match = /^I routed "(.+)" to (FrameBot|DetailBot); PlanBot, verify its prerequisites before placement\.$/.exec(message);
+  if (match) return [
+    message, `Ich habe „${match[1]}“ an ${match[2]} übergeben; PlanBot, prüfe zuerst die Voraussetzungen.`,
+    `J’ai confié « ${match[1]} » à ${match[2]} ; PlanBot, vérifie d’abord les prérequis.`,
+    `Ho assegnato «${match[1]}» a ${match[2]}; PlanBot, verifica prima i prerequisiti.`,
+    `Asigné «${match[1]}» a ${match[2]}; PlanBot, verifica primero los requisitos.`,
+    `Encaminhei «${match[1]}» para ${match[2]}; PlanBot, verifique primeiro os pré-requisitos.`,
+  ][index];
+  match = /^(All dependencies for|No dependencies block) "(.+)" are satisfied\. (FrameBot|DetailBot) may proceed\.$/.exec(message);
+  if (match) return [
+    message, `Die Voraussetzungen für „${match[2]}“ sind erfüllt. ${match[3]} kann beginnen.`,
+    `Les prérequis de « ${match[2]} » sont satisfaits. ${match[3]} peut commencer.`,
+    `I prerequisiti di «${match[2]}» sono soddisfatti. ${match[3]} può iniziare.`,
+    `Se cumplen los requisitos de «${match[2]}». ${match[3]} puede comenzar.`,
+    `Os pré-requisitos de «${match[2]}» foram atendidos. ${match[3]} pode começar.`,
+  ][index];
+  match = /^I accepted the "(.+)" handoff \((\d+) bricks\)\.$/.exec(message);
+  if (match) return [
+    message, `Ich habe die Übergabe „${match[1]}“ angenommen (${match[2]} Steine).`,
+    `J’ai accepté le transfert « ${match[1]} » (${match[2]} briques).`,
+    `Ho accettato il passaggio «${match[1]}» (${match[2]} mattoncini).`,
+    `Acepté el relevo «${match[1]}» (${match[2]} bloques).`,
+    `Aceitei a transferência «${match[1]}» (${match[2]} blocos).`,
+  ][index];
+  match = /^Finished (.+)\. Shared board updated; ready work returns to BuildBot\.$/.exec(message);
+  if (match) return [
+    message, `${match[1]} fertig. Die Tafel ist aktualisiert; bereite Aufgaben gehen an BuildBot.`,
+    `${match[1]} terminé. Tableau mis à jour ; les tâches prêtes reviennent à BuildBot.`,
+    `${match[1]} completato. Bacheca aggiornata; le attività pronte tornano a BuildBot.`,
+    `${match[1]} terminado. Tablero actualizado; las tareas listas vuelven a BuildBot.`,
+    `${match[1]} concluído. Quadro atualizado; tarefas prontas voltam para BuildBot.`,
+  ][index];
+  match = /^Reached the halfway mark on (.+): (\d+)\/(\d+) bricks placed\.$/.exec(message);
+  if (match) return [
+    message, `Halbzeit bei ${match[1]}: ${match[2]}/${match[3]} Steine gesetzt.`,
+    `Mi-parcours pour ${match[1]} : ${match[2]}/${match[3]} briques placées.`,
+    `Metà di ${match[1]}: ${match[2]}/${match[3]} mattoncini posati.`,
+    `Mitad de ${match[1]}: ${match[2]}/${match[3]} bloques colocados.`,
+    `Metade de ${match[1]}: ${match[2]}/${match[3]} blocos colocados.`,
+  ][index];
+  match = /^(\d+) planned bricks? missing\.$/.exec(message);
+  if (match) return [message, `${match[1]} geplante Steine fehlen.`, `${match[1]} briques prévues manquent.`,
+    `Mancano ${match[1]} mattoncini previsti.`, `Faltan ${match[1]} bloques previstos.`, `Faltam ${match[1]} blocos previstos.`][index];
+  match = /^(\d+) planned bricks placed\.$/.exec(message);
+  if (match) return [message, `${match[1]} geplante Steine gesetzt.`, `${match[1]} briques prévues placées.`,
+    `${match[1]} mattoncini previsti posati.`, `${match[1]} bloques previstos colocados.`, `${match[1]} blocos previstos colocados.`][index];
+  match = /^(\d+) of (\d+) allowed bricks\. No model cost is implied\.$/.exec(message);
+  if (match) return [message, `${match[1]} von ${match[2]} erlaubten Steinen. Keine Modellausgaben angegeben.`,
+    `${match[1]} briques sur ${match[2]} autorisées. Aucun coût de modèle indiqué.`,
+    `${match[1]} mattoncini su ${match[2]} consentiti. Nessun costo del modello indicato.`,
+    `${match[1]} de ${match[2]} bloques permitidos. No indica el coste del modelo.`,
+    `${match[1]} de ${match[2]} blocos permitidos. Não indica custo do modelo.`][index];
+  return translate(message);
+}
+
+const originalText = new WeakMap<Text, { source: string; rendered: string }>();
+const originalAttributes = new WeakMap<Element, Map<string, { source: string; rendered: string }>>();
+
+export function translateInterface(root: HTMLElement): void {
+  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status';
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
+  while (walker.nextNode()) {
+    const node = walker.currentNode as Text;
+    if (node.parentElement?.closest(excluded)) continue;
+    const current = node.data;
+    const previous = originalText.get(node);
+    const source = previous && current === previous.rendered ? previous.source : current;
+    const match = source.match(/^(\s*)(.*?)(\s*)$/s);
+    if (!match || !match[2]) continue;
+    const rendered = match[1] + translate(match[2]) + match[3];
+    if (rendered !== current) node.data = rendered;
+    if (rendered !== source || previous) originalText.set(node, { source, rendered });
+  }
+  for (const element of root.querySelectorAll<HTMLElement>('[aria-label], [title], [placeholder]')) {
+    if (element.closest(excluded)) continue;
+    let entries = originalAttributes.get(element);
+    for (const name of ['aria-label', 'title', 'placeholder']) {
+      const current = element.getAttribute(name);
+      if (current === null) continue;
+      const previous = entries?.get(name);
+      const source = previous && current === previous.rendered ? previous.source : current;
+      const rendered = translate(source);
+      if (rendered !== current) element.setAttribute(name, rendered);
+      if (rendered !== source || previous) {
+        entries ??= new Map();
+        entries.set(name, { source, rendered });
+        originalAttributes.set(element, entries);
+      }
+    }
+  }
+}
+import { copilotPlanningEstimate } from './planning-estimate';
+

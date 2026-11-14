@@ -4,7 +4,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
-import { copilotPlanningEstimate } from './planning-estimate';
+import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateInterface, type Language } from './i18n';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -35,7 +35,7 @@ app.innerHTML = `
   <header class="topbar">
     <a class="brand" href="/" aria-label="BrickLab home"><span class="brand-mark">${icon('cube')}</span>Brick<span>Lab</span><span class="brand-dot"></span></a>
     <span class="tagline">Small bricks. Big teamwork.</span>
-    <div class="top-actions"><span class="local-status"><i></i> Five agents. Your ideas.</span><button id="guide" class="button subtle">${icon('help')} How to play</button></div>
+    <div class="top-actions"><span class="local-status"><i></i> Five agents. Your ideas.</span><label class="language-picker"><span>Language</span><select id="language" aria-label="Language"><option value="en">English</option><option value="de">Deutsch</option><option value="fr">Français</option><option value="it">Italiano</option><option value="es">Español</option><option value="pt">Português</option></select></label><button id="guide" class="button subtle">${icon('help')} How to play</button></div>
   </header>
   <main>
     <div class="world-bar">
@@ -96,6 +96,7 @@ app.innerHTML = `
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
+        <p id="language-note">Offline templates and crew questions recognize English keywords only. Some detailed guidance, technical errors and agent messages remain in English; your brief and model output are not translated.</p>
       </form>
       <div class="transport">
         <div class="build-progress"><strong id="brick-count">0 <span>bricks placed</span></strong><span id="progress-value">0%</span></div>
@@ -126,6 +127,33 @@ app.innerHTML = `
     <div class="planning-actions"><button id="abort-planning" class="button outline" type="button">Abort planning</button><button id="continue-planning" class="button primary" type="button" hidden>Continue waiting</button></div>
   </dialog>
 `;
+
+let noticeSource = '';
+try {
+  const savedLanguage = localStorage.getItem('bricklab-language');
+  if (languages.some(language => language === savedLanguage)) setLanguage(savedLanguage as Language);
+} catch { /* The interface still works when browser storage is unavailable. */ }
+const languageSelect = $<HTMLSelectElement>('#language');
+const applyLanguage = () => {
+  document.documentElement.lang = getLanguage();
+  languageSelect.value = getLanguage();
+  translateInterface(app);
+  if (noticeSource) $('#notice').textContent = translate(noticeSource);
+};
+languageSelect.addEventListener('change', () => {
+  const selected = languageSelect.value;
+  if (!languages.some(language => language === selected)) return;
+  setLanguage(selected as Language);
+  try { localStorage.setItem('bricklab-language', selected); }
+  catch { notice('Could not save your language on this device.'); }
+  applyLanguage();
+  lastEventCount = -1;
+  render();
+});
+const languageObserver = new MutationObserver(() => translateInterface(app));
+languageObserver.observe(app, { subtree: true, childList: true, characterData: true, attributes: true,
+  attributeFilter: ['aria-label', 'title', 'placeholder'] });
+applyLanguage();
 
 const phoneLayout = window.matchMedia('(max-width: 700px)');
 const transport = $('.transport');
@@ -164,8 +192,8 @@ let storageWarningShown = false;
 let quizWon = false;
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = EXAMPLES.jurassic[0];
-const notice = (message: string) => { $('#notice').textContent = message; $('#notice').hidden = false; };
-const clearNotice = () => { $('#notice').hidden = true; };
+const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translate(message); $('#notice').hidden = false; };
+const clearNotice = () => { noticeSource = ''; $('#notice').hidden = true; };
 const setButton = (id: string, disabled: boolean) => { $<HTMLButtonElement>(id).disabled = disabled; };
 const statusNames: Record<string, string> = {
   planned: 'Plan ready. You’re the director.', building: 'Teamwork in progress', paused: 'Paused. Take a closer look.',
@@ -212,7 +240,7 @@ function render() {
   const total = team ? allBricks(team.plan).length : 0;
   const count = team?.bricks.size ?? 0;
   const percent = total ? Math.round(count / total * 100) : 0;
-  $('#brick-count').innerHTML = `${count} <span>/ ${total || '—'} bricks</span>`;
+  $('#brick-count').innerHTML = `${count} <span>/ ${total || '—'} ${esc(translate('bricks'))}</span>`;
   $('#progress-value').textContent = `${percent}%`;
   $<HTMLProgressElement>('#progress').value = percent;
   $('#stage-status').textContent = planning ? 'Planning your custom design…' : team ? statusNames[team.status] : 'Ready for your imagination';
@@ -238,6 +266,9 @@ function render() {
     : status === 'damaged' ? 'The inspector noticed a problem. Ask the team to repair it.'
     : team ? 'Review the task board, then start building.' : 'Make a plan, then give your crew the go-ahead.';
   $('#scene-caption').hidden = !!team && count > 0;
+  if (!team) {
+    $('#scene-caption').innerHTML = `<strong>${esc(translate('A big idea starts with a small brief.'))}</strong><span>${esc(translate('The translucent bricks are a preview, not an agent-built result.'))}</span>`;
+  }
   if (team && !count) {
     const name = team.plan.spec.design?.name ?? `${team.plan.spec.color} ${team.plan.spec.model}`;
     $('#scene-caption').innerHTML = `<strong>${esc(name)}. Your idea, their teamwork.</strong><span>Blueprint ready · ${total} bricks · ${team.plan.tasks.length} delegated tasks</span>`;
@@ -263,7 +294,7 @@ function render() {
       { agent: 'detail' as const, kind: 'observe', message: 'I assemble supports and finishing touches after their foundations are ready. We share one task board.', tick: 0 },
       { agent: 'check' as const, kind: 'observe', message: 'I inspect the finished model and check for missing bricks.', tick: 0 },
     ];
-    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(e.kind)} · turn ${e.tick}</span></div><p>${esc(e.message)}</p></article>`).join('');
+    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(translate(e.kind))} · ${esc(translate('turn'))} ${e.tick}</span></div><p>${esc(translateActivity(e.message))}</p></article>`).join('');
   }
   $('#task-list').innerHTML = team ? team.plan.tasks.map(task => {
     const done = team!.taskDone(task);
@@ -272,9 +303,9 @@ function render() {
     return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(task.label)}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `Waits for: ${task.depends.map(id => esc(team!.plan.tasks.find(t => t.id === id)?.label ?? id)).join(', ')}` : done ? 'Shared board updated' : 'Dependencies ready'}</small></div></article>`;
   }).join('') : '<p class="empty-note">Make a plan to see the delegated jobs and their dependencies here.</p>';
   const checks = team?.checks ?? [];
-  $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(c.label)}</strong><small>${esc(c.detail)}</small></div></div>`).join('')
+  $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(translate(c.label))}</strong><small>${esc(translateActivity(c.detail))}</small></div></div>`).join('')
     : '<p class="empty-note">CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.</p>';
-  $('#inspection-result').textContent = team ? `${checks.filter(c => c.pass).length}/${checks.length} checks` : 'Waiting for a build';
+  $('#inspection-result').textContent = team ? `${checks.filter(c => c.pass).length}/${checks.length} ${translate('checks')}` : 'Waiting for a build';
   const replay = $<HTMLInputElement>('#replay');
   replay.disabled = status !== 'complete' && status !== 'damaged';
   replay.max = String(Math.max(1, count));
@@ -290,7 +321,7 @@ function startPlanningWait(controller: AbortController, provider: 'Azure Foundry
   let timeout = false;
   const update = () => {
     const elapsed = Math.floor((Date.now() - started) / 1000);
-    $('#planning-elapsed').textContent = `Elapsed: ${elapsed} seconds`;
+    $('#planning-elapsed').textContent = elapsedText(elapsed);
     if (elapsed >= 300) {
       timeout = true;
       controller.abort();
@@ -301,10 +332,8 @@ function startPlanningWait(controller: AbortController, provider: 'Azure Foundry
   };
   $('#planning-reminder').hidden = true;
   $('#continue-planning').hidden = true;
-  $('#planning-elapsed').textContent = 'Elapsed: 0 seconds';
-  const estimate = provider === 'Copilot' ? copilotPlanningEstimate(planningBrief)
-    : 'Estimate unknown; Azure Foundry was not measured in the Copilot study.';
-  $('#planning-description').textContent = `One ${provider} request is running. ${estimate} Times vary; this is not a deadline. Maximum wait: 300 seconds.`;
+  $('#planning-elapsed').textContent = elapsedText(0);
+  $('#planning-description').textContent = planningDescription(provider, planningBrief);
   const abort = () => controller.abort();
   const cancel = (event: Event) => { event.preventDefault(); abort(); };
   const continueWaiting = () => {
@@ -636,7 +665,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
   <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
   <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
-  <p>Copilot planning shows elapsed time and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Its completion time is unknown. Local AI has a separate 90-second limit.</p>
+  <p>Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure is not yet estimated. Local AI has a separate 90-second limit.</p>
   <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
   <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>`));
 $('#settings').addEventListener('click', () => {
