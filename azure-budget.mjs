@@ -8,6 +8,9 @@ const RESERVATION = 128_000 * 2.75 + 12_000 * 16.5;
 const MAX_STATE_BYTES = 256;
 const PRICE_FILTER = "productName eq 'Azure OpenAI GPT5' and armRegionName eq 'swedencentral' and (skuName eq '5.4 inp Dz' or skuName eq '5.4 opt Dz')";
 const PRICE_URL = `https://prices.azure.com/api/retail/prices?%24filter=${encodeURIComponent(PRICE_FILTER)}`;
+const SPEECH_RESERVATION = 16_667;
+const SPEECH_PRICE_FILTER = "productName eq 'Azure Speech' and armRegionName eq 'swedencentral' and skuName eq 'S1' and meterName eq 'S1 Speech To Text' and priceType eq 'Consumption'";
+const SPEECH_PRICE_URL = `https://prices.azure.com/api/retail/prices?%24filter=${encodeURIComponent(SPEECH_PRICE_FILTER)}`;
 
 function failure(code, message) {
   return Object.assign(new Error(message), { code });
@@ -70,6 +73,51 @@ export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
   }
 }
 
+export async function verifySpeechConfig({ resourceId, credential, signal, fetchImpl = fetch }) {
+  const timeout = AbortSignal.timeout(10_000);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const token = await credential.getToken('https://management.azure.com/.default', { abortSignal: combined });
+  if (!token?.token) throw new Error('Management identity unavailable.');
+  const account = await boundedJSON(await fetchImpl(`https://management.azure.com${resourceId}?api-version=2023-05-01`, {
+    headers: { Authorization: `Bearer ${token.token}` }, redirect: 'error', signal: combined,
+  }), 256_000);
+  const name = resourceId.slice(resourceId.lastIndexOf('/') + 1).toLowerCase();
+  if (account.location?.toLowerCase() !== 'swedencentral' || account.kind !== 'SpeechServices'
+      || account.sku?.name !== 'S0' || account.name?.toLowerCase() !== name
+      || account.properties?.customSubDomainName?.toLowerCase() !== name
+      || account.properties?.disableLocalAuth !== true
+      || account.properties?.provisioningState !== 'Succeeded')
+    throw new Error('Speech account does not match the priced configuration.');
+}
+
+export async function verifySpeechRetailPrice({ signal, now, fetchImpl = fetch }) {
+  const timeout = AbortSignal.timeout(10_000);
+  const response = await fetchImpl(SPEECH_PRICE_URL, { redirect: 'error',
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  const data = await boundedJSON(response, 1_048_576);
+  if (!Array.isArray(data.Items) || data.NextPageLink) throw new Error('Incomplete pricing response.');
+  const matches = data.Items.filter(item => item.productName === 'Azure Speech'
+    && item.armRegionName === 'swedencentral' && item.skuName === 'S1'
+    && item.meterName === 'S1 Speech To Text' && item.currencyCode === 'USD'
+    && item.type === 'Consumption' && item.unitOfMeasure === '1 Hour' && item.tierMinimumUnits === 0
+    && Number.isFinite(item.retailPrice) && Date.parse(item.effectiveStartDate) <= now.getTime());
+  matches.sort((a, b) => Date.parse(b.effectiveStartDate) - Date.parse(a.effectiveStartDate));
+  if (!matches.length || matches[0].retailPrice <= 0 || matches[0].retailPrice > 1
+      || (matches[1] && matches[1].effectiveStartDate === matches[0].effectiveStartDate))
+    throw new Error('Speech pricing not verified.');
+}
+
+function createBudgetBlob({ account, container, blobClient, credential }) {
+  if (blobClient) return blobClient;
+  if (typeof account !== 'string' || !/^[a-z0-9]{3,24}$/.test(account)
+      || typeof container !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(container)
+      || container.includes('--'))
+    throw new Error('Azure budget storage account or container name is invalid.');
+  const service = new BlobServiceClient(`https://${account}.blob.core.windows.net`,
+    credential, { retryOptions: { maxTries: 1 } });
+  return service.getContainerClient(container).getBlockBlobClient('daily-budget.json');
+}
+
 export function createAzureBudgetGate({ account, container, endpoint, deployment, resourceId, blobClient,
   credential = new ManagedIdentityCredential(), now = () => new Date(),
   verifyPrices = verifyRetailPrices, verifyConfig = verifyDeploymentConfig }) {
@@ -78,16 +126,15 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
       || endpoint.replace(/\/$/, '').toLowerCase() !== `https://${match[1].toLowerCase()}.openai.azure.com`
       || typeof deployment !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(deployment))
     throw new Error('Azure budget requires a matching Azure OpenAI resource ID, endpoint and deployment.');
-  if (!blobClient) {
-    if (typeof account !== 'string' || !/^[a-z0-9]{3,24}$/.test(account)
-        || typeof container !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(container)
-        || container.includes('--'))
-      throw new Error('Azure budget storage account or container name is invalid.');
-    const service = new BlobServiceClient(`https://${account}.blob.core.windows.net`,
-      credential, { retryOptions: { maxTries: 1 } });
-    blobClient = service.getContainerClient(container).getBlockBlobClient('daily-budget.json');
-  }
+  blobClient = createBudgetBlob({ account, container, blobClient, credential });
+  return createReservationGate({ blobClient, now, reservation: RESERVATION,
+    verify: signal => Promise.all([
+      verifyPrices({ signal, now: now() }),
+      verifyConfig({ resourceId, deployment, credential, signal }),
+    ]) });
+}
 
+function createReservationGate({ blobClient, now, reservation, verify }) {
   function currentDay() {
     const date = now();
     const nextMidnight = Date.UTC(date.getUTCFullYear(), date.getUTCMonth(), date.getUTCDate() + 1);
@@ -100,10 +147,7 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
     async reserve({ signal } = {}) {
       try {
         currentDay();
-        await Promise.all([
-          verifyPrices({ signal, now: now() }),
-          verifyConfig({ resourceId, deployment, credential, signal }),
-        ]);
+        await verify(signal);
         for (let attempt = 0; attempt < 5; attempt++) {
           const today = currentDay();
           const response = await blobClient.download(0, undefined, { abortSignal: signal });
@@ -128,9 +172,9 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
               || state.day > today)
             throw new Error('Invalid budget state.');
           const spent = state.day === today ? state.reservedMicros : 0;
-          if (spent + RESERVATION > DAILY_LIMIT)
+          if (spent + reservation > DAILY_LIMIT)
             throw failure('BUDGET_EXHAUSTED', 'The Azure daily inference budget is exhausted.');
-          const body = JSON.stringify({ day: today, reservedMicros: spent + RESERVATION });
+          const body = JSON.stringify({ day: today, reservedMicros: spent + reservation });
           try {
             if (currentDay() !== today) throw new Error('UTC day changed.');
             await blobClient.upload(body, Buffer.byteLength(body), {
@@ -138,7 +182,7 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
               blobHTTPHeaders: { blobContentType: 'application/json' },
             });
             if (currentDay() !== today) throw new Error('UTC day changed.');
-            return { reservedMicros: spent + RESERVATION, dailyLimitMicros: DAILY_LIMIT };
+            return { reservedMicros: spent + reservation, dailyLimitMicros: DAILY_LIMIT };
           } catch (error) {
             if (error?.statusCode === 412 && !signal?.aborted) continue;
             throw error;
@@ -152,4 +196,18 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
       }
     },
   };
+}
+
+export function createAzureSpeechBudgetGate({ account, container, endpoint, resourceId, blobClient,
+  credential = new ManagedIdentityCredential(), now = () => new Date(),
+  verifyPrices = verifySpeechRetailPrice, verifyConfig = verifySpeechConfig }) {
+  const match = typeof resourceId === 'string' && /^\/subscriptions\/[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}\/resourceGroups\/[\w().-]{1,90}\/providers\/Microsoft\.CognitiveServices\/accounts\/([a-z0-9][a-z0-9-]{0,62})$/i.exec(resourceId);
+  if (!match || endpoint !== `https://${match[1].toLowerCase()}.cognitiveservices.azure.com`)
+    throw new Error('Speech budget requires a matching resource ID and endpoint.');
+  blobClient = createBudgetBlob({ account, container, blobClient, credential });
+  return createReservationGate({ blobClient, now, reservation: SPEECH_RESERVATION,
+    verify: signal => Promise.all([
+      verifyPrices({ signal, now: now() }),
+      verifyConfig({ resourceId, credential, signal }),
+    ]) });
 }

@@ -17,13 +17,19 @@ and the resource-bound Entra bearer required by
 No Speech resource, route, or working cloud transcription is provided here.
 
 The adapter requires a reservation callback before token acquisition or audio
-transmission. A production caller must provide a verified, fail-closed speech
-reservation in the same durable daily ledger as planning, as well as
-authenticated access, explicit informed consent, abuse controls, and privacy
-and retention policies. The existing text-only budget gate does not provide
-speech reservations. Verify the resource, identity, pricing and billing before
-use; do not enable paid speech publicly without these controls. Audio and
-transcripts must not be logged.
+transmission. `createAzureSpeechBudgetGate` reserves $0.016667 for each
+request (the full 60 seconds at the verified $1/hour retail ceiling), using
+the same ETag-protected `daily-budget.json` ledger as planning. Configure both
+gates with the same storage account and container: separate ledgers would not
+enforce a combined limit. The speech gate verifies a Sweden Central, S0,
+identity-only Speech account and the current S1 speech-to-text retail meter.
+Its resource checks and billing assumptions have not been verified against a
+real Speech resource; actual contract charges may differ from retail.
+
+A production caller must also enforce authenticated access, explicit informed
+consent, abuse controls, and privacy and retention policies. Verify the
+resource, identity, pricing and billing before use; do not enable paid speech
+publicly without these controls. Audio and transcripts must not be logged.
 
 ## Azure planning
 

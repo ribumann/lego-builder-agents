@@ -1,7 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { createAzureBudgetGate, verifyDeploymentConfig, verifyRetailPrices } from '../azure-budget.mjs';
+import { createAzureBudgetGate, createAzureSpeechBudgetGate, verifyDeploymentConfig, verifyRetailPrices,
+  verifySpeechConfig, verifySpeechRetailPrice } from '../azure-budget.mjs';
 
 const endpoint = 'https://example-openai.openai.azure.com/';
 const deployment = 'example-model';
@@ -84,4 +85,51 @@ test('pricing verification rejects missing, ambiguous and increased retail meter
   await assert.rejects(verify([input]));
   await assert.rejects(verify([input, output, output]));
   await assert.rejects(verify([input, { ...output, retailPrice: 16.51 }]));
+});
+
+const speechId = '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example-rg/providers/Microsoft.CognitiveServices/accounts/speech-account';
+const speechEndpoint = 'https://speech-account.cognitiveservices.azure.com';
+const speechGate = (blobClient, options = {}) => createAzureSpeechBudgetGate({
+  endpoint: speechEndpoint, resourceId: speechId, blobClient, now, verifyPrices, verifyConfig, ...options,
+});
+
+test('speech and planning reservations share one atomic daily limit', async () => {
+  const blob = fakeBlob('{"day":"2026-11-14","reservedMicros":49433333}');
+  const results = await Promise.allSettled([gate(blob).reserve(), speechGate(blob).reserve(), speechGate(blob).reserve()]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 2);
+  assert.ok(blob.state().reservedMicros <= 50_000_000);
+  assert.ok(results.some(result => result.status === 'rejected' && result.reason.code === 'BUDGET_EXHAUSTED'));
+});
+
+test('speech reservation fails closed for configuration, prices or missing state', async () => {
+  const blob = fakeBlob('{"day":"2026-11-14","reservedMicros":0}');
+  await assert.rejects(speechGate(blob, { verifyPrices: async () => { throw new Error('private'); } }).reserve(),
+    error => error.code === 'BUDGET_UNAVAILABLE' && !error.message.includes('private'));
+  await assert.rejects(speechGate(fakeBlob(undefined)).reserve(), error => error.code === 'BUDGET_UNAVAILABLE');
+  assert.equal(blob.state().reservedMicros, 0);
+  assert.throws(() => speechGate(blob, { endpoint: 'https://other.cognitiveservices.azure.com' }), /matching/);
+});
+
+test('speech config requires the specific identity-only account and S0 SKU', async () => {
+  const account = { name: 'speech-account', kind: 'SpeechServices', location: 'swedencentral', sku: { name: 'S0' },
+    properties: { customSubDomainName: 'speech-account', disableLocalAuth: true, provisioningState: 'Succeeded' } };
+  const credential = { async getToken() { return { token: 'test-token' }; } };
+  const verify = item => verifySpeechConfig({ resourceId: speechId, credential,
+    fetchImpl: async () => new Response(JSON.stringify(item)) });
+  await verify(account);
+  await assert.rejects(verify({ ...account, sku: { name: 'F0' } }));
+  await assert.rejects(verify({ ...account, properties: { ...account.properties, disableLocalAuth: false } }));
+  await assert.rejects(verify({ ...account, location: 'italynorth' }));
+});
+
+test('speech price verification rejects missing, ambiguous and increased rates', async () => {
+  const item = { productName: 'Azure Speech', armRegionName: 'swedencentral', skuName: 'S1',
+    meterName: 'S1 Speech To Text', currencyCode: 'USD', type: 'Consumption',
+    unitOfMeasure: '1 Hour', tierMinimumUnits: 0, retailPrice: 1, effectiveStartDate: '2026-02-01T00:00:00Z' };
+  const verify = Items => verifySpeechRetailPrice({ now: now(), fetchImpl: async () =>
+    new Response(JSON.stringify({ Items, NextPageLink: null })) });
+  await verify([item]);
+  await assert.rejects(verify([]));
+  await assert.rejects(verify([item, item]));
+  await assert.rejects(verify([{ ...item, retailPrice: 1.01 }]));
 });

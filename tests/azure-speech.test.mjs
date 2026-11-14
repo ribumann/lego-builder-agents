@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
+import { Readable } from 'node:stream';
 import { createAzureSpeechTranscriber, validateSpeechAudio } from '../azure-speech.mjs';
+import { createAzureSpeechBudgetGate } from '../azure-budget.mjs';
 
 const endpoint = 'https://bricklab-speech.cognitiveservices.azure.com';
 const resourceId = '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/bricklab/providers/Microsoft.CognitiveServices/accounts/bricklab-speech';
@@ -103,4 +105,23 @@ test('does not expose malformed, empty or oversized provider responses', async (
     });
     await assert.rejects(transcribe({ audio: wav(), language: 'en-US' }), /transcription failed/);
   }
+});
+
+test('real speech gate reserves in the shared ledger before a provider request', async () => {
+  let state = '{"day":"2026-11-14","reservedMicros":550000}';
+  const blobClient = {
+    async download() { return { etag: '"1"', contentLength: Buffer.byteLength(state), readableStreamBody: Readable.from([Buffer.from(state)]) }; },
+    async upload(body, _length, options) { assert.equal(options.conditions.ifMatch, '"1"'); state = body; },
+  };
+  const gate = createAzureSpeechBudgetGate({ endpoint, resourceId, blobClient,
+    now: () => new Date('2026-11-14T12:00:00Z'), verifyPrices: async () => {}, verifyConfig: async () => {},
+  });
+  const transcribe = createAzureSpeechTranscriber({ endpoint, resourceId, reserve: gate.reserve,
+    credential: { async getToken() { return { token: 'token' }; } },
+    fetchImpl: async () => {
+      assert.equal(JSON.parse(state).reservedMicros, 566667);
+      return new Response(JSON.stringify({ RecognitionStatus: 'Success', DisplayText: 'Hello.' }));
+    },
+  });
+  assert.deepEqual(await transcribe({ audio: wav(), language: 'en-US' }), { transcript: 'Hello.' });
 });
