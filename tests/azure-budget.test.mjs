@@ -1,12 +1,14 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { Readable } from 'node:stream';
-import { createAzureBudgetGate, verifyRetailPrices } from '../azure-budget.mjs';
+import { createAzureBudgetGate, verifyDeploymentConfig, verifyRetailPrices } from '../azure-budget.mjs';
 
-const endpoint = 'https://bricklab-ai-rer5x4xnttoge.openai.azure.com/';
-const deployment = 'bricklab-planner-gpt54';
+const endpoint = 'https://example-openai.openai.azure.com/';
+const deployment = 'example-model';
+const resourceId = '/subscriptions/11111111-1111-4111-8111-111111111111/resourceGroups/example-rg/providers/Microsoft.CognitiveServices/accounts/example-openai';
 const now = () => new Date('2026-11-14T12:00:00Z');
 const verifyPrices = async () => {};
+const verifyConfig = async () => {};
 function fakeBlob(initial) {
   let contents = initial;
   let version = 0;
@@ -26,7 +28,7 @@ function fakeBlob(initial) {
   };
 }
 const gate = (blobClient, options = {}) => createAzureBudgetGate({
-  endpoint, deployment, blobClient, now, verifyPrices, ...options,
+  endpoint, deployment, resourceId, blobClient, now, verifyPrices, verifyConfig, ...options,
 });
 
 test('reserves worst-case dollar amounts atomically, never exceeding $50', async () => {
@@ -52,7 +54,22 @@ test('pricing and storage failures deny reservations without disclosing details'
   await assert.rejects(gate(blob, { verifyPrices: async () => { throw new Error('private'); } }).reserve(),
     error => error.code === 'BUDGET_UNAVAILABLE' && !error.message.includes('private'));
   assert.equal(blob.state().reservedMicros, 0);
-  assert.throws(() => gate(blob, { deployment: 'unpriced-model' }), /approved GPT-5.4/);
+  assert.throws(() => gate(blob, { endpoint: 'https://other.openai.azure.com' }), /matching Azure OpenAI/);
+});
+
+test('deployment verification rejects a different model, SKU, region, or key-enabled account', async () => {
+  const account = { name: 'example-openai', kind: 'OpenAI', location: 'swedencentral',
+    properties: { customSubDomainName: 'example-openai', disableLocalAuth: true, provisioningState: 'Succeeded' } };
+  const model = { sku: { name: 'DataZoneStandard' }, properties: { provisioningState: 'Succeeded',
+    model: { format: 'OpenAI', name: 'gpt-5.4', version: '2026-03-05' } } };
+  const credential = { async getToken() { return { token: 'test-token' }; } };
+  const verify = (a, m) => verifyDeploymentConfig({ resourceId, deployment, credential,
+    fetchImpl: async url => new Response(JSON.stringify(url.includes('/deployments/') ? m : a)) });
+  await verify(account, model);
+  await assert.rejects(verify({ ...account, location: 'westeurope' }, model));
+  await assert.rejects(verify({ ...account, properties: { ...account.properties, disableLocalAuth: false } }, model));
+  await assert.rejects(verify(account, { ...model, sku: { name: 'GlobalStandard' } }));
+  await assert.rejects(verify(account, { ...model, properties: { ...model.properties, model: { ...model.properties.model, name: 'other' } } }));
 });
 
 test('pricing verification rejects missing, ambiguous and increased retail meters', async () => {
