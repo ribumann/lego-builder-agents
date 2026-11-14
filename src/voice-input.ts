@@ -143,6 +143,7 @@ export function createVoiceInput(
           const samples = await dependencies.decode(audio);
           if (current !== generation) return;
           if (!samples.length || samples.length > SAMPLE_RATE * 31) { fail('processing'); return; }
+          if (samples.every(sample => sample === 0)) { fail('empty'); return; }
           transcription = dependencies.transcribe(samples, language);
           const text = (await transcription.promise).trim();
           if (current !== generation) return;

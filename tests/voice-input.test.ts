@@ -2,7 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createVoiceInput, type VoiceUpdate } from '../src/voice-input';
 
-function fixture() {
+function fixture(samples = new Float32Array([0.1])) {
   let stopped = 0;
   const updates: VoiceUpdate[] = [];
   const transcripts: string[] = [];
@@ -27,7 +27,7 @@ function fixture() {
   const input = createVoiceInput(update => updates.push(update), text => transcripts.push(text), {
     getStream: async () => stream,
     createRecorder: () => { recorder = new FakeRecorder(); return recorder as unknown as MediaRecorder; },
-    decode: async () => new Float32Array([0.1]),
+    decode: async () => samples,
     transcribe: (_audio, language) => {
       languageUsed = language;
       return {
@@ -106,4 +106,25 @@ test('permission denial is reported without recording or transcription', async (
   });
   await input.start(true, 'pt');
   assert.deepEqual(updates.at(-1), { state: 'error', error: 'permission' });
+});
+
+test('exact digital silence is empty audio without starting inference', async () => {
+  const f = fixture(new Float32Array([0, -0, 0]));
+  await f.input.start(true, 'de');
+  f.input.stop();
+  await tick();
+  assert.deepEqual(f.updates.at(-1), { state: 'error', error: 'empty' });
+  assert.equal(f.language(), '');
+  assert.deepEqual(f.transcripts, []);
+});
+
+test('a very quiet nonzero signal is not discarded as silence', async () => {
+  const f = fixture(new Float32Array([0, 1e-12, 0]));
+  await f.input.start(true, 'de');
+  f.input.stop();
+  await tick();
+  assert.equal(f.language(), 'de');
+  f.finish('Quiet speech');
+  await tick();
+  assert.deepEqual(f.transcripts, ['Quiet speech']);
 });
