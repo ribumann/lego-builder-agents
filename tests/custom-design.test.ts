@@ -30,7 +30,7 @@ for (const fixture of fixtures) test(`${fixture.design.name}: execute, inspect, 
   assert.equal(team.status, 'damaged');
   const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot(fixture.design.name))));
   restored.team.repair();
-  restored.team.step(20);
+  for (let i = 0; i < 8192 && restored.team.step(20); i++) {}
   assert.equal(restored.team.status, 'complete');
   const again = restoreSnapshot(JSON.parse(JSON.stringify(restored.team.snapshot(fixture.design.name))));
   assert.deepEqual(again.team.plan.spec, spec);
@@ -142,7 +142,7 @@ for (const world of ['jurassic', 'space'] as const) test(`${world} example build
   const restored = restoreSnapshot(saved);
   assert.equal(restored.team.status, 'damaged');
   restored.team.repair();
-  restored.team.step(20);
+  for (let i = 0; i < 8192 && restored.team.step(20); i++) {}
   assert.equal(restored.team.status, 'complete');
   assert.deepEqual(allBricks(restored.team.plan), allBricks(team.plan));
   assert.deepEqual(restored.team.plan.spec, spec);

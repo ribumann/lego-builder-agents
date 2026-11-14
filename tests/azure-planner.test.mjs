@@ -19,7 +19,8 @@ test('Azure planner sends a bounded authenticated request and returns parsed JSO
   assert.match(request.url, /\/deployments\/small-model\/chat\/completions\?/);
   assert.equal(request.options.redirect, 'error');
   assert.equal(request.options.headers.Authorization, 'Bearer test-token');
-  assert.equal(JSON.parse(request.options.body).max_tokens, 12000);
+  assert.equal(JSON.parse(request.options.body).max_completion_tokens, 12000);
+  assert.equal(JSON.parse(request.options.body).max_tokens, undefined);
 });
 
 test('Azure planner rejects untrusted endpoints and incomplete or oversized responses', async () => {

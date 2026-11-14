@@ -28,11 +28,11 @@ test('Jurassic build supports pause, step, repair, replay, download and restore'
   await page.getByRole('button', { name: 'Continue build' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 15_000 });
   await expect(page.locator('#inspection-result')).toHaveText('4/4 checks');
-  await page.getByRole('button', { name: 'Hide one brick' }).click();
+  await page.getByRole('button', { name: 'Hide bricks' }).click();
   await expect(page.locator('#stage-status')).toContainText('Inspection found a problem');
   await page.getByRole('button', { name: 'Ask team to repair' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete');
-  await expect(page.locator('#event-list')).toContainText('missing eyes brick');
+  await expect(page.locator('#event-list')).toContainText('missing');
   await page.getByLabel('Replay placed bricks').fill('20');
   await expect(page.locator('#replay-label')).toContainText('20 /');
   await page.getByRole('button', { name: 'Live', exact: true }).click();
@@ -76,7 +76,7 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.locator('#mission-title')).toHaveText('A little prehistoric. A lot of possibility.');
   await expect(page.locator('.agent-name strong')).toHaveText(['BuildBot', 'PlanBot', 'FrameBot', 'DetailBot', 'CheckBot']);
-  await expect(page.locator('.agent-name small')).toHaveText(['Coordinator', 'Plan verifier', 'Structure specialist', 'Finishing specialist', 'Quality inspector']);
+  await expect(page.locator('.agent-name small')).toHaveText(['Build coordinator', 'Plan & dependency verifier', 'Structure builder', 'Detail & support builder', 'Inspector & repair lead']);
   for (const role of await page.locator('.agent-name small').all()) await expect(role).toBeVisible();
   expect(await page.locator('.stage + .transport + .team-panel').count()).toBe(1);
   const quiz = await page.locator('#quiz-options').boundingBox();
@@ -89,7 +89,7 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   await page.getByRole('button', { name: 'Pause build' }).click();
   await page.getByRole('textbox', { name: 'Ask your crew' }).fill('Why wait?');
   await page.getByRole('button', { name: 'Ask crew', exact: true }).click();
-  await expect(page.locator('#crew-answer')).toContainText('supporting part');
+  await expect(page.locator('#crew-answer')).toContainText('prerequisites');
   await page.getByLabel('What shall we build?').fill('Build a spaceship.');
   await page.getByRole('button', { name: 'Make a plan' }).click();
   await expect(page.getByRole('alert')).toContainText('Switch to Space');
@@ -274,7 +274,7 @@ test('fixture Copilot custom design accepts an unrelated brief and survives relo
   await page.getByRole('button', { name: 'Start building' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
   await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
-  await page.getByRole('button', { name: 'Hide one brick' }).click();
+  await page.getByRole('button', { name: 'Hide bricks' }).click();
   await page.getByRole('button', { name: 'Ask team to repair' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
   await page.reload();
@@ -288,6 +288,7 @@ test('single-step preserves a failed inspection for a disconnected custom design
     design: { name: 'Two islands fixture', bricks: [
       { x: 0, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
       { x: 5, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' },
+      { x: 10, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' },
     ] },
   }, 'jurassic')));
   await page.goto('/');
@@ -296,10 +297,10 @@ test('single-step preserves a failed inspection for a disconnected custom design
     buffer: Buffer.from(JSON.stringify(team.snapshot('Two separate islands'))),
   });
   await page.getByRole('button', { name: 'Build one step' }).click();
-  await expect(page.locator('#brick-count')).toHaveText('1 / 2 bricks');
+  await expect(page.locator('#brick-count')).toHaveText('1 / 3 bricks');
   await expect(page.locator('#stage-status')).toContainText('Paused');
   await page.getByRole('button', { name: 'Build one step' }).click();
-  await expect(page.locator('#brick-count')).toHaveText('2 / 2 bricks');
+  await expect(page.locator('#brick-count')).toHaveText('3 / 3 bricks');
   await expect(page.locator('#inspection-result')).toHaveText('2/3 checks');
   await expect(page.locator('#stage-status')).toContainText('Inspection found a problem');
   await expect(page.locator('#check-state')).toHaveText('Problem found');
@@ -335,7 +336,7 @@ test('local herd world builds named objects, repairs and survives reload without
   await expect(page.locator('#checks')).toContainText('Mossback stegosaurus');
   await expect(page.locator('#checks')).toContainText('Violet brachiosaurus');
   await expect(page.locator('#check-state')).toHaveText('Passed');
-  await page.getByRole('button', { name: 'Hide one brick' }).click();
+  await page.getByRole('button', { name: 'Hide bricks' }).click();
   await expect(page.locator('#check-state')).toHaveText('Problem found');
   await page.getByRole('button', { name: 'Ask team to repair' }).click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });

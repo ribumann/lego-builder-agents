@@ -1,6 +1,6 @@
 # Azure OpenAI planner adapter
 
-`azure-planner.mjs` is an unintegrated adapter, not a deployment. It uses the
+`azure-planner.mjs` is a separately configured adapter, not a deployment. It uses the
 hosting resource's managed identity and requires `AZURE_OPENAI_ENDPOINT` (an
 HTTPS `*.openai.azure.com` resource endpoint) and `AZURE_OPENAI_DEPLOYMENT`.
 Grant that identity the Cognitive Services OpenAI User role on its dedicated
@@ -16,6 +16,12 @@ Do not enable it on a public service until authenticated access, exact host and
 origin checks, a durable bounded usage limit, concurrency control, transport
 timeouts and cancellation are implemented and verified. Configuration alone
 does not establish model access or successful generation.
+
+The optional `BRICKLAB_AZURE_AI=1` integration is restricted to the existing
+local or private-Codespace API boundaries and requires production serving plus
+the usage gate below. `BRICKLAB_HOSTED=1` serves the anonymous lab separately:
+it disables every planner, including Azure, pending verified public edge
+protections. Never copy a personal Copilot credential into a public host.
 
 `azure-usage.mjs` provides an independent daily request reservation gate. Set up
 a private Blob container and **pre-provision** `daily-usage.json` with

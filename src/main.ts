@@ -3,6 +3,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
   type AgentId, type Brick, type World } from './engine';
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
+import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -52,7 +53,7 @@ app.innerHTML = `
           <div class="mission-step current" data-phase="brief"><b>1</b><div><strong>Imagine it</strong><span>Give your team a clear brief.</span></div></div>
           <div class="mission-step" data-phase="plan"><b>2</b><div><strong>Meet the plan</strong><span>See who does what, and why.</span></div></div>
           <div class="mission-step" data-phase="build"><b>3</b><div><strong>Watch them build</strong><span>Follow the teamwork live.</span></div></div>
-          <div class="mission-step" data-phase="learn"><b>4</b><div><strong>Test & discover</strong><span>Break a brick. Learn to repair.</span></div></div>
+          <div class="mission-step" data-phase="learn"><b>4</b><div><strong>Test & discover</strong><span>Hide bricks. Learn to repair.</span></div></div>
         </div>
         <div class="field-note"><span>${icon('star')}</span><p id="field-note">An agent does more than answer. It observes, chooses an action, and checks what happened.</p></div>
         <button id="demo" class="button demo-button">${icon('play')} Run an offline demo</button>
@@ -91,6 +92,7 @@ app.innerHTML = `
     <section class="control-deck" aria-label="Build controls">
       <form id="brief-form" class="brief-form">
         <div class="brief-label"><label for="brief">What shall we build?</label><button type="button" id="inspire" class="text-button">Try an idea ${icon('star')}</button></div>
+        <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
       </form>
@@ -109,12 +111,19 @@ app.innerHTML = `
     <section class="discovery" aria-label="Learn and experiment">
       <div class="discovery-intro"><h2>Don’t just watch.<br>Be the scientist.</h2><p>Great agents check their work.<br>Great directors ask questions.</p></div>
       <div class="inspection"><div class="section-title"><h3>Build inspection</h3><span id="inspection-result">Waiting for a build</span></div><div id="checks"></div></div>
-      <div class="experiments"><h3>Try a little what-if</h3><p>Remove a finishing brick. Watch the team compare reality with its plan and repair the gap.</p><div class="experiment-actions"><button id="damage" class="button outline" disabled>Hide one brick</button><button id="repair" class="button outline" disabled>Ask team to repair</button></div><div class="replay-row"><label for="replay">Build replay</label><input id="replay" type="range" min="0" max="1" value="1" disabled aria-label="Replay placed bricks"/><button id="live-view" class="text-button">Live</button></div><span id="replay-label">Finish a build to explore its timeline.</span></div>
+      <div class="experiments"><h3>Try a little what-if</h3><p>Remove about a third of the bricks. Watch the team compare reality with its plan and repair the gaps.</p><div class="experiment-actions"><button id="damage" class="button outline" disabled>Hide bricks</button><button id="repair" class="button outline" disabled>Ask team to repair</button></div><div class="replay-row"><label for="replay">Build replay</label><input id="replay" type="range" min="0" max="1" value="1" disabled aria-label="Replay placed bricks"/><button id="live-view" class="text-button">Live</button></div><span id="replay-label">Finish a build to explore its timeline.</span></div>
     </section>
     <section class="learning-strip"><span class="learning-symbol">${icon('help')}</span><div><h3 id="quiz-title">Quick thought: what makes this a team of agents?</h3><div id="quiz-options"><button data-answer="wrong">They all use the same color</button><button data-answer="right">They choose actions and share progress</button><button data-answer="wrong">They build without any plan</button></div><p id="quiz-feedback" role="status">Make a prediction, then watch the crew.</p></div><div class="file-actions"><button id="herd-example" class="button outline">Load local Jurassic herd</button><button id="fleet-example" class="button outline">Load local space fleet</button><button id="export" class="button outline" disabled>${icon('download')} Save build file</button><button id="import" class="button outline">Load build / AI mission</button><input id="import-file" type="file" accept=".json,application/json" hidden aria-label="Choose a build or AI mission JSON file"/></div></section>
     <footer><span>BrickLab <span class="footer-dot">·</span> A hands-on introduction to agentic teamwork.</span><span>Independent educational demo. Not affiliated with the LEGO Group.</span></footer>
   </main>
   <dialog id="info-dialog" aria-labelledby="dialog-title"><div class="dialog-heading"><h2 id="dialog-title">Welcome to the workshop</h2><button id="close-dialog" class="tool-button" aria-label="Close dialog">×</button></div><div id="dialog-body"></div></dialog>
+  <dialog id="planning-dialog" aria-labelledby="planning-title" aria-describedby="planning-description">
+    <h2 id="planning-title">Planning in progress</h2>
+    <p id="planning-description">One Copilot request is running. An estimate is unavailable; the maximum wait is 300 seconds.</p>
+    <p id="planning-elapsed">Elapsed: 0 seconds</p>
+    <p id="planning-reminder" role="status" hidden>Still planning. Abort now or continue waiting for this same request.</p>
+    <div class="planning-actions"><button id="abort-planning" class="button outline" type="button">Abort planning</button><button id="continue-planning" class="button primary" type="button" hidden>Continue waiting</button></div>
+  </dialog>
 `;
 
 const phoneLayout = window.matchMedia('(max-width: 700px)');
@@ -128,6 +137,7 @@ phoneLayout.addEventListener('change', positionTransport);
 
 let world: World = 'jurassic';
 let team: Team | null = null;
+let hasSceneAppend = false;
 let activeBrief = '';
 let running = false;
 let speed = 1;
@@ -135,13 +145,17 @@ let lastEventCount = -1;
 let eventRevision = 0;
 let showGhost = true;
 let exploded = false;
-let mode: 'local' | 'copilot' | 'local-ai' = 'copilot';
+let mode: 'local' | 'copilot' | 'local-ai' | 'azure' = 'copilot';
+let modeChosen = false;
+let hosted = false;
 let apiKey = '';
 let copilotEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
 let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
+let azurePlanner = { enabled: false, state: 'off', message: 'Azure planning is unavailable on this server.' };
 let planning = false;
+let planningController: AbortController | null = null;
 let replaying = false;
 let examples = 0;
 let scene: Workbench | undefined;
@@ -170,8 +184,16 @@ try {
 
 function save() {
   if (!team) return;
+  let payload;
   try {
-    localStorage.setItem(`bricklab-${world}`, JSON.stringify(team.snapshot(activeBrief)));
+    payload = JSON.stringify(hasSceneAppend ? snapshotSceneAppend(team, activeBrief) : team.snapshot(activeBrief));
+  } catch (error) {
+    $('#save-status').textContent = 'Could not prepare the build for saving.';
+    notice(`Could not prepare the build for saving: ${error instanceof Error ? error.message : 'invalid scene'}.`);
+    return;
+  }
+  try {
+    localStorage.setItem(`bricklab-${world}`, payload);
     $('#save-status').textContent = 'Saved on this device · no account needed';
   } catch {
     $('#save-status').textContent = 'Could not save on this device. Download your build instead.';
@@ -192,7 +214,7 @@ function render() {
   $('#brick-count').innerHTML = `${count} <span>/ ${total || '—'} bricks</span>`;
   $('#progress-value').textContent = `${percent}%`;
   $<HTMLProgressElement>('#progress').value = percent;
-  $('#stage-status').textContent = planning ? 'BuildBot is planning your custom design…' : team ? statusNames[team.status] : 'Ready for your imagination';
+  $('#stage-status').textContent = planning ? 'Planning your custom design…' : team ? statusNames[team.status] : 'Ready for your imagination';
   const status = team?.status;
   const canRun = !!team && !['complete', 'damaged'].includes(team.status) && !planning;
   setButton('#run', !canRun);
@@ -206,6 +228,7 @@ function render() {
   setButton('#fleet-example', planning);
   setButton('#jurassic', planning);
   setButton('#space', planning);
+  document.querySelectorAll<HTMLInputElement>('input[name="scene-action"]').forEach(input => { input.disabled = planning; });
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
   $('#transport-note').textContent = planning ? 'One bounded planning request. No template fallback; the crew executes locally.'
@@ -221,13 +244,13 @@ function render() {
   const phase = !team ? 'brief' : status === 'planned' ? 'plan' : ['complete','damaged'].includes(status!) ? 'learn' : 'build';
   document.querySelectorAll<HTMLElement>('.mission-step').forEach(el => el.classList.toggle('current', el.dataset.phase === phase));
   for (const id of Object.keys(AGENTS) as AgentId[]) {
-    const text = id === 'build' ? planning ? 'Thinking' : running ? 'Checking' : team ? 'Watching' : 'Ready'
+    const text = id === 'build' ? planning ? 'Waiting' : running ? 'Checking' : team ? 'Watching' : 'Ready'
       : id === 'plan' ? team ? 'Reviewed' : 'Ready'
       : id === 'check' ? status === 'complete' ? 'Passed' : status === 'damaged' ? 'Problem found' : team ? 'Waiting' : 'Ready'
       : running && team?.plan.tasks.some(t => t.agent === id && !team!.taskDone(t) && t.depends.every(d => team!.taskDone(team!.plan.tasks.find(p => p.id === d)!))) ? 'Building'
       : status === 'complete' ? 'Done' : team ? 'Waiting' : 'Ready';
     $(`#${id}-state`).textContent = text;
-    $(`#${id}-state`).classList.toggle('working', text === 'Building' || text === 'Thinking');
+    $(`#${id}-state`).classList.toggle('working', text === 'Building');
   }
   const revision = (team?.events.length ?? 0) + eventRevision;
   if (revision !== lastEventCount) {
@@ -236,7 +259,7 @@ function render() {
       { agent: 'build' as const, kind: 'plan', message: 'Hello, director! Describe any brick design. I’ll split it into jobs for our crew.', tick: 0 },
       { agent: 'plan' as const, kind: 'observe', message: 'I review the task dependencies and check whether the planned bricks connect.', tick: 0 },
       { agent: 'frame' as const, kind: 'observe', message: 'I build the body and structure. I’ll tell DetailBot when a supporting part is ready.', tick: 0 },
-      { agent: 'detail' as const, kind: 'observe', message: 'Eyes, plates, cockpits, engines… I make the finishing touches. We share one task board.', tick: 0 },
+      { agent: 'detail' as const, kind: 'observe', message: 'I assemble supports and finishing touches after their foundations are ready. We share one task board.', tick: 0 },
       { agent: 'check' as const, kind: 'observe', message: 'I inspect the finished model and check for missing bricks.', tick: 0 },
     ];
     $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(e.kind)} · turn ${e.tick}</span></div><p>${esc(e.message)}</p></article>`).join('');
@@ -259,35 +282,130 @@ function render() {
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
 }
 
+function startPlanningWait(controller: AbortController, provider: string) {
+  const modal = $<HTMLDialogElement>('#planning-dialog');
+  const started = Date.now();
+  let nextReminder = 100;
+  let timeout = false;
+  const update = () => {
+    const elapsed = Math.floor((Date.now() - started) / 1000);
+    $('#planning-elapsed').textContent = `Elapsed: ${elapsed} seconds`;
+    if (elapsed >= 300) {
+      timeout = true;
+      controller.abort();
+    } else if (elapsed >= nextReminder) {
+      $('#planning-reminder').hidden = false;
+      $('#continue-planning').hidden = false;
+    }
+  };
+  $('#planning-reminder').hidden = true;
+  $('#continue-planning').hidden = true;
+  $('#planning-elapsed').textContent = 'Elapsed: 0 seconds';
+  $('#planning-description').textContent = `One ${provider} request is running. An estimate is unavailable; the maximum wait is 300 seconds.`;
+  const abort = () => controller.abort();
+  const cancel = (event: Event) => { event.preventDefault(); abort(); };
+  const continueWaiting = () => {
+    nextReminder = Math.floor((Date.now() - started) / 100_000 + 1) * 100;
+    $('#planning-reminder').hidden = true;
+    $('#continue-planning').hidden = true;
+  };
+  $('#abort-planning').addEventListener('click', abort);
+  $('#continue-planning').addEventListener('click', continueWaiting);
+  modal.addEventListener('cancel', cancel);
+  modal.showModal();
+  const timer = window.setInterval(update, 1000);
+  return {
+    timedOut: () => timeout,
+    close: () => {
+      window.clearInterval(timer);
+      $('#abort-planning').removeEventListener('click', abort);
+      $('#continue-planning').removeEventListener('click', continueWaiting);
+      modal.removeEventListener('cancel', cancel);
+      if (modal.open) modal.close();
+    },
+  };
+}
+
+async function planningResponse(response: Response): Promise<{ spec?: unknown; error?: string }> {
+  if (!response.headers.get('content-type')?.includes('application/x-ndjson')) return response.json();
+  if (!response.body) throw new Error('Planning response has no stream.');
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '', size = 0;
+  let result: { spec?: unknown; error?: string } | undefined;
+  const consume = (line: string) => {
+    if (!line.trim()) return;
+    if (result) throw new Error('Planning stream continued after its result.');
+    const event: unknown = JSON.parse(line);
+    if (!event || typeof event !== 'object' || !('type' in event)) throw new Error('Invalid planning stream event.');
+    if (event.type === 'waiting') return;
+    if (event.type === 'result' && 'spec' in event) result = { spec: event.spec };
+    else if (event.type === 'error' && 'error' in event && typeof event.error === 'string') result = { error: event.error };
+    else throw new Error('Invalid planning stream event.');
+  };
+  try {
+    while (true) {
+      const { value, done } = await reader.read();
+      if (done) break;
+      size += value.byteLength;
+      if (size > 1_048_576) throw new Error('Planning response is too large.');
+      buffer += decoder.decode(value, { stream: true });
+      let end;
+      while ((end = buffer.indexOf('\n')) !== -1) {
+        consume(buffer.slice(0, end));
+        buffer = buffer.slice(end + 1);
+      }
+    }
+    buffer += decoder.decode();
+    consume(buffer);
+    if (!result) throw new Error('Planning stream ended without a result.');
+    return result;
+  } catch (error) {
+    await reader.cancel().catch(() => {});
+    throw error;
+  } finally {
+    reader.releaseLock();
+  }
+}
+
 async function makePlan(demo = false) {
   if (planning) return;
+  const adding = !demo && $<HTMLInputElement>('input[name="scene-action"]:checked').value === 'add';
   running = false;
   if (team?.status === 'building') team.status = 'paused';
   replaying = false;
   clearNotice();
+  let wait: ReturnType<typeof startPlanningWait> | undefined;
   try {
     if (!brief.value.trim() || brief.value.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
+    if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
     let spec;
-    let source: 'local' | 'copilot' | 'local-ai' = 'local';
+    let source: 'local' | 'copilot' | 'local-ai' | 'azure' = 'local';
     const assumptions: string[] = [];
     if (mode !== 'local') {
       const localAI = mode === 'local-ai';
-      if (localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
-        throw new Error(localAI ? localPlanner.message : plannerMessage);
+      const azure = mode === 'azure';
+      if (azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
+        : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
+        throw new Error(azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       planning = true; render();
-      const response = await fetch(localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey },
-        body: JSON.stringify({ world, brief: brief.value }) });
-      const data = await response.json();
-      if (!response.ok) {
+      const controller = new AbortController();
+      planningController = controller;
+      if (!localAI) wait = startPlanningWait(controller, azure ? 'Azure Foundry' : 'Copilot');
+      const response = await fetch(azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
+        body: JSON.stringify({ world, brief: brief.value }), signal: controller.signal });
+      const data = await planningResponse(response);
+      if (controller.signal.aborted) throw new DOMException('Planning aborted.', 'AbortError');
+      if (!response.ok || data.error) {
         await refreshStatus();
-        throw new Error(data.error || 'Copilot planning request failed.');
+        throw new Error(data.error || 'Planning request failed.');
       }
       spec = validateSpec(data.spec, world);
       if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
-      source = localAI ? 'local-ai' : 'copilot';
-      assumptions.push(`${localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
+      source = azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
+      assumptions.push(`${azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
     } else {
       const parsed = parseBrief(world, brief.value);
       spec = parsed.spec;
@@ -295,11 +413,19 @@ async function makePlan(demo = false) {
       assumptions.push('Offline template mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.');
     }
     const plan = createPlan(spec, assumptions, source);
-    team = new Team(plan);
+    if (adding && team) {
+      const appended = appendScene(team, plan);
+      team = appended.team;
+      hasSceneAppend = true;
+      notice(`Added to the scene at grid offset (${appended.offset.x}, ${appended.offset.z}). Existing bricks remain in place.`);
+    } else {
+      team = new Team(plan);
+      hasSceneAppend = false;
+    }
     activeBrief = brief.value;
     eventRevision += 1000;
-    scene?.setBlueprint(allBricks(plan));
-    scene?.sync([]);
+    scene?.setBlueprint(allBricks(team.plan));
+    scene?.sync([...team.bricks.values()]);
     if (demo) {
       speed = 4;
       updateSpeed();
@@ -310,8 +436,10 @@ async function makePlan(demo = false) {
     }
     save();
   } catch (error) {
-    notice(error instanceof Error ? error.message : 'Planning failed. No new build was started.');
-  } finally { planning = false; render(); }
+    notice(planningController?.signal.aborted
+      ? wait?.timedOut() ? 'Planning reached the 300-second limit. No new build was started.' : 'Planning aborted. No new build was started.'
+      : error instanceof Error ? error.message : 'Planning failed. No new build was started.');
+  } finally { wait?.close(); planningController = null; planning = false; render(); }
 }
 function updateSpeed() {
   $('#speed').innerHTML = `${icon('fast')}<span>${speed}×</span>`;
@@ -321,20 +449,25 @@ function restore() {
   try {
     const raw = localStorage.getItem(`bricklab-${world}`);
     if (raw) {
-      const restored = restoreSnapshot(JSON.parse(raw));
+      const data: unknown = JSON.parse(raw);
+      const appended = !!data && typeof data === 'object' && 'sceneAppend' in data;
+      const restored = appended ? restoreSceneAppend(data) : restoreSnapshot(data);
       team = restored.team;
+      hasSceneAppend = appended;
       brief.value = restored.prompt;
       activeBrief = restored.prompt;
       scene?.setBlueprint(allBricks(team.plan));
       $('#save-status').textContent = 'Previous build restored from this device.';
     } else {
       team = null;
+      hasSceneAppend = false;
       activeBrief = '';
       brief.value = EXAMPLES[world][0];
       preview();
     }
   } catch (error) {
     team = null;
+    hasSceneAppend = false;
     brief.value = EXAMPLES[world][0];
     preview();
     notice(`Could not restore the saved build: ${error instanceof Error ? error.message : 'invalid data'}. Your old save has not been overwritten.`);
@@ -366,7 +499,7 @@ $('#brief-form').addEventListener('submit', event => { event.preventDefault(); v
 $('#jurassic').addEventListener('click', () => switchWorld('jurassic'));
 $('#space').addEventListener('click', () => switchWorld('space'));
 $('#inspire').addEventListener('click', () => { brief.value = EXAMPLES[world][++examples % EXAMPLES[world].length]; brief.focus(); });
-$('#demo').addEventListener('click', () => { mode = 'local'; updateMode(); brief.value = EXAMPLES[world][0]; void makePlan(true); });
+$('#demo').addEventListener('click', () => { mode = 'local'; modeChosen = true; updateMode(); brief.value = EXAMPLES[world][0]; void makePlan(true); });
 $('#run').addEventListener('click', () => {
   if (!team) return;
   replaying = false;
@@ -402,15 +535,15 @@ function answer(question: string, agent?: AgentId) {
     build: 'I turn your goal into tasks and coordinate the crew. A language model is optional here: our local agents follow explicit rules.',
     plan: 'I review the task graph for missing dependencies and cycles before the build starts, and warn if the planned bricks are disconnected.',
     frame: 'I check the shared board, choose a ready structure task, and place bricks. I tell DetailBot when each supporting part is ready. I do not need a new instruction for every brick.',
-    detail: 'I can work alongside FrameBot. Feet wait for legs; eyes wait for a head. Those dependencies stop me from placing details before their supporting part exists.',
+    detail: 'I build assigned supports and details after their prerequisites are ready. Feet wait for legs; eyes wait for a head. We share the task board.',
     check: 'I inspect the completed build against its plan, connectivity and budget. If bricks are missing, I identify them so their owners can repair the build.',
   };
   let response = responses[id];
-  if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses compute on the server host. Copilot starts one CLI planning invocation per click; the CLI may retry internally, so subscription usage can differ. We cannot measure a dollar price here.';
+  if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
-  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. Copilot can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
+  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. A selected cloud or local model can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
   else if (!agent && !/who|what|job|help|team|wait|frame|detail|build|structure|planbot|checkbot|inspect|quality|dependencies/.test(q)) response = 'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.';
   $('#crew-answer').textContent = `${AGENTS[id].name}: ${response}`;
 }
@@ -428,7 +561,7 @@ document.querySelectorAll<HTMLButtonElement>('[data-answer]').forEach(button => 
 }));
 $('#export').addEventListener('click', () => {
   if (!team) return;
-  const payload = { ...team.snapshot(activeBrief), explanation: 'Original stylized brick grid. Not official LEGO instructions or a physical stability guarantee.', source: team.plan.source };
+  const payload = { ...(hasSceneAppend ? snapshotSceneAppend(team, activeBrief) : team.snapshot(activeBrief)), explanation: 'Original stylized brick grid. Not official LEGO instructions or a physical stability guarantee.', source: team.plan.source };
   const link = document.createElement('a');
   link.href = URL.createObjectURL(new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' }));
   link.download = `bricklab-${team.plan.spec.model}.json`;
@@ -440,10 +573,11 @@ function loadWorldExample(exampleWorld: World) {
   try {
     const plan = createPlan(worldExample(exampleWorld), ['This themed world is a deterministic local example, not a model result.'], 'local');
     const example = new Team(plan);
-    mode = 'local'; updateMode();
+    mode = 'local'; modeChosen = true; updateMode();
     if (world !== plan.spec.world) switchWorld(plan.spec.world);
     running = false; replaying = false;
     team = example;
+    hasSceneAppend = false;
     activeBrief = `Original local ${exampleWorld === 'jurassic' ? 'Jurassic herd' : 'space fleet'} example`;
     brief.value = activeBrief;
     scene?.setBlueprint(allBricks(plan));
@@ -467,11 +601,13 @@ $('#import-file').addEventListener('change', async () => {
     if (file.size > 4_000_000) throw new Error('Build files must be smaller than 4 MB.');
     const data: unknown = JSON.parse(await file.text());
     const isMission = !!data && typeof data === 'object' && 'kind' in data && data.kind === 'bricklab-ai-mission';
-    const loaded = isMission ? loadAIMission(data) : restoreSnapshot(data);
+    const appended = !!data && typeof data === 'object' && 'sceneAppend' in data;
+    const loaded = isMission ? loadAIMission(data) : appended ? restoreSceneAppend(data) : restoreSnapshot(data);
     if (loaded.team.plan.spec.world !== world) switchWorld(loaded.team.plan.spec.world);
     running = false;
     replaying = false;
     team = loaded.team;
+    hasSceneAppend = appended && !isMission;
     activeBrief = loaded.prompt;
     brief.value = loaded.prompt;
     scene?.setBlueprint(allBricks(team.plan));
@@ -492,14 +628,19 @@ function dialog(title: string, body: string) {
 $('#close-dialog').addEventListener('click', () => $<HTMLDialogElement>('#info-dialog').close());
 $('#guide').addEventListener('click', () => dialog('You’re the director. They’re the crew.', `
   <p>This workshop makes agent teamwork visible. Choose <strong>Jurassic valley</strong> or <strong>Space dock</strong>, then describe your build.</p>
-  <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×.</li><li><strong>Experiment:</strong> hide a brick, ask for a repair, or replay the placement timeline.</li></ol>
-  <p>Cloud planning is the default: describe any static brick design, not just these themes. Pressing <strong>Send brief to Copilot</strong> sends the brief to GitHub and may consume quota. No model request happens on load.</p>
+  <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies and handoffs.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×. Choose <strong>Add to scene</strong> to grow the build without replacing it.</li><li><strong>Experiment:</strong> hide about a third of the bricks, ask for a repair, or replay the placement timeline. Repair cannot fix a disconnected blueprint.</li></ol>
+  <p>Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.</p>
+  <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
   <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
   <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
+  <p>Copilot planning shows elapsed time and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Its completion time is unknown. Local AI has a separate 90-second limit.</p>
   <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
   <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
+    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. When enabled, an explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
+    <p id="azure-planner-status" role="status">${esc(azurePlanner.message)}</p>
+    <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
     <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Default limit: 12 CLI invocations per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
     <p id="planner-status" role="status">${esc(plannerMessage)}</p>
@@ -515,9 +656,10 @@ $('#settings').addEventListener('click', () => {
     <hr><p><strong>Three model decisions via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two builder models concurrently. Each chooses a real task priority. PlanBot and CheckBot remain local rule-based agents, making five crew members, not five model calls. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
     <p>This workflow needs repository access and GitHub Models availability. It has not been live-verified in this environment. It uses three bounded requests, no additional model keys, and no model tools. Do not enter personal information in workflow inputs.</p>
     <p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
-  $('#choose-local').addEventListener('click', () => { mode = 'local'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
-  $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
-  $('#choose-local-ai').addEventListener('click', () => { mode = 'local-ai'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
+  $('#choose-local').addEventListener('click', () => { mode = 'local'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
+  $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
+  $('#choose-local-ai').addEventListener('click', () => { mode = 'local-ai'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
+  document.querySelector<HTMLElement>('#choose-azure')?.addEventListener('click', () => { mode = 'azure'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!azurePlanner.enabled) notice(azurePlanner.message); });
   $('#refresh-status').addEventListener('click', () => { void refreshStatus(true); });
 });
 
@@ -532,17 +674,19 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); save(); }
 });
-window.addEventListener('beforeunload', save);
+window.addEventListener('beforeunload', () => { planningController?.abort(); save(); });
 restore();
 render();
 function updateMode() {
-  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : 'Copilot cloud planning · custom designs';
+  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
     : mode === 'local-ai'
       ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
-      : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
-  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'local-ai' ? 'Plan with Local AI' : 'Send brief to Copilot'} ${icon('arrow')}`;
+      : mode === 'azure'
+        ? 'Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. No request until you press it. Do not enter personal information.'
+        : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
+  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
 }
 async function refreshStatus(inDialog = false) {
@@ -556,7 +700,12 @@ async function refreshStatus(inDialog = false) {
     plannerMessage = typeof data.planner?.message === 'string' ? data.planner.message : 'Planner status unavailable.';
     if (data.localPlanner && typeof data.localPlanner.message === 'string')
       localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
-    if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
+    if (data.azurePlanner && typeof data.azurePlanner.message === 'string')
+      azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state), message: data.azurePlanner.message };
+    hosted = data.hosted === true;
+    if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
+    if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
+    else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
     copilotEnabled = false;
     plannerState = 'unavailable';
@@ -568,6 +717,8 @@ async function refreshStatus(inDialog = false) {
     if (status) status.textContent = plannerMessage;
     const localStatus = document.querySelector<HTMLElement>('#local-planner-status');
     if (localStatus) localStatus.textContent = localPlanner.message;
+    const azureStatus = document.querySelector<HTMLElement>('#azure-planner-status');
+    if (azureStatus) azureStatus.textContent = azurePlanner.message;
   }
 }
 updateMode();

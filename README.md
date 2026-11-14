@@ -24,6 +24,48 @@ npm run build
 npm start
 ```
 
+## Facilitate a BrickLab lab
+
+Allow 30–45 minutes for pairs. Start with offline templates, so the first activity
+needs no model account or model calls. Ask learners not to include names or other
+personal information in briefs. Cloud planning sends the submitted brief to
+GitHub; Local AI sends it to the configured model service on the server host.
+
+1. **Imagine and plan:** choose a world and offline templates. Try “a purple
+   brachiosaurus with a tall neck.” Open **Task board** and predict which jobs
+   must wait for another.
+2. **Observe:** step the build, then run it. Follow the actual handoffs and
+   compare the coordinator, plan verifier, two builders and inspector. These
+   are five deterministic local agents, not five model requests.
+3. **Grow:** choose **Add to scene**, describe another object and plan it.
+   The existing build stays in place; the addition is positioned separately.
+   Compare this with **Replace scene**, which starts a new build.
+4. **Investigate:** when complete, hide roughly one-third of the bricks. Record
+   what the inspector finds, ask for repair and watch the owners replace the
+   missing parts. A disconnected blueprint is not fixed by replacing bricks.
+5. **Reflect and share:** replay the build, download its JSON, reload it and
+   explain one dependency and one handoff. Saves are local to the browser;
+   the download is a file, not a public sharing service.
+
+More missions: a green stegosaurus with a long tail, a white cargo ship with
+engines, or the local herd/fleet examples. With an explicitly configured AI
+planner, try an original lighthouse, a dinosaur habitat, or a space station
+with a visiting ship. AI geometry is bounded and may fail validation or fail
+to resemble the brief; it is static, not a physical building instruction.
+
+Adding sends only the new brief and selected world to the chosen planner, not
+the existing scene. BrickLab positions the result locally and displays its grid
+offset. If no collision-free position fits, or the combined design exceeds the
+object, record, brick, cell or coordinate limits, the existing scene is unchanged.
+Scene saves retain contribution sources and offsets; they do not prove that an
+imported model attribution is genuine.
+
+The separate **Azure Foundry** adapter uses a managed identity, not a personal
+Copilot credential. Public hosted mode currently serves the anonymous lab and
+offline templates only; paid hosted planning is deliberately disabled until
+edge abuse controls and the long-request transport have been verified.
+Azure service usage can incur charges. See [Azure planner setup](docs/azure-planner.md).
+
 ## Run in a private GitHub Codespace
 
 [Create a Codespace for BrickLab](https://codespaces.new/ribumann/lego-builder-agents).
@@ -180,7 +222,7 @@ This removes the four-template subject restriction **for AI-planned designs**, n
 
 The shared custom contract supports legacy `design.bricks` or named groups in `design.objects`, with **1-256 compact brick records in total**, optional `repeat: {count, dx, dy, dz}`, up to **32 objects**, **8,192 expanded bricks** and **262,144 occupied cells**. Each brick has integer dimensions **1-8** per axis; every occupied cell must stay within **x/z -64..63 and y 0..63**. Colors are allowlisted and overlaps are rejected, including between objects. Separate objects may be apart; PlanBot and CheckBot check face connectivity within each object. Missing-brick repair cannot fix a fundamentally disconnected blueprint. Invalid output fails explicitly, without automatic paid retries. Old template and single-object custom saves remain supported; new saves retain validated object geometry. A novel design's semantic quality and large-scene live model reliability remain unverified.
 
-Each **Copilot plan** starts **one CLI planning invocation**, maximum 90 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with one concurrent invocation allowed. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Default limit is **12 Copilot planning invocations per UTC day per server process**, configurable with `BRICKLAB_DAILY_CALLS` (1-100). Restarting resets the counter; this is a demo guardrail, **not a durable FinOps or monetary budget**. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
+Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with one concurrent invocation allowed. The planning dialog shows elapsed time, not an invented completion estimate; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. The deadline still applies without a response. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Default limit is **12 Copilot planning invocations per UTC day per server process**, configurable with `BRICKLAB_DAILY_CALLS` (1-100). Restarting resets the counter; this is a demo guardrail, **not a durable FinOps or monetary budget**. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
 
 ### Multi-object scale, not a reference-parity claim
 
@@ -201,7 +243,7 @@ The planning API is localhost-only by default, validates Origin and a per-proces
 1. **Predict:** ask what a coordinator does. Start with “Build a dinosaur” and inspect its explicit assumptions.
 2. **Direct:** try “purple brachiosaurus with a tall neck.” Ask what changed and what stayed fixed.
 3. **Observe:** open Task board, start at 1x, pause, then fast-forward. Notice DetailBot finishing feet while FrameBot is still building the body.
-4. **Investigate:** hide a brick, read the failed inspection, ask for a repair and identify the observe-act-check loop.
+4. **Investigate:** hide roughly one-third of the bricks, read the failed inspection, ask for a repair and identify the observe-act-check loop.
 5. **Reflect:** answer the Team Scientist question. Explain why a rule-based agent and a language model are not the same thing.
 
 ## Development
@@ -215,7 +257,14 @@ npm run test:e2e
 
 CI checks the engine, type safety, production build and browser journeys on both worlds. No paid model calls run in CI.
 
-Latest Linux verification: **62 unit/integration tests passed, one IPv6 socket test skipped because the host lacks IPv6 loopback**, TypeScript and the locked **Vite 7.3.8** production build, and **12 Chromium journeys** passed. Coverage includes default cloud consent/setup, original brief passthrough, rejection of template output without retry/fallback, explicit Local AI/offline modes, local-provider metadata/redirect/proxy/size/time bounds, and failed-inspection preservation after single-step/reload. The existing large-bundle advisory remains. Reported Windows ARM64 verification of earlier `0c0bc63`: **38 tests passed, two POSIX executable-fixture tests skipped**, and the build used Vite **8.2.2** because that host's feed lacked the locked version. Its five-agent preview and bounded live named-object request do not verify these later planner changes, lockfile-equivalent Windows build parity, Windows advanced-scale performance or real Codespaces forwarding. Real Ollama inference remains unverified.
+Coverage includes scene growth and provenance, deterministic damage and repair,
+planner consent and failure handling, fake-clock 300-second limits, subprocess
+cancellation and browser journeys. The IPv6 loopback test may be skipped on
+hosts without IPv6 loopback support. The production build reports a large-bundle
+advisory. Windows tree termination uses simulated tests; the current changes,
+real Codespaces forwarding and real Ollama inference remain unverified there.
+Proxy buffering or hosting request limits may prevent a hosted connection from
+remaining open for 300 seconds; local tests do not establish hosted behavior.
 
 Architecture: `src/engine.ts` (typed specs, task graph, five-agent loop, inspection and saves), `src/scene.ts` (Three.js original brick geometry and habitats), `src/main.ts` (workshop UI), `server.mjs` (local serving and optional bounded CLI bridge), `copilot-output.mjs` (strict CLI event decoding).
 

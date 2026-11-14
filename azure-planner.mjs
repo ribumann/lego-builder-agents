@@ -29,7 +29,7 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
         headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
-          max_tokens: 12000,
+          max_completion_tokens: 12000,
           response_format: { type: 'json_object' },
         }),
       });
