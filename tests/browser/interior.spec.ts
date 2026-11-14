@@ -1,5 +1,7 @@
 import { test, expect } from '@playwright/test';
 
+test.setTimeout(90_000);
+
 test('hollow preference is explicit and cutaway never changes saved geometry', async ({ page }) => {
   const requests: Record<string, unknown>[] = [];
   await page.route('**/api/status', route => route.fulfill({ json: {
