@@ -45,7 +45,7 @@ export interface Plan {
   spec: Spec;
   tasks: BuildTask[];
   assumptions: string[];
-  source: 'local' | 'copilot' | 'github-models';
+  source: 'local' | 'copilot' | 'local-ai' | 'github-models';
 }
 export interface AgentDecision {
   agent: ModelAgentId;
@@ -462,7 +462,7 @@ export function restoreSnapshot(value: unknown): { team: Team; prompt: string } 
     throw new Error('Saved build format is invalid or from a different version.');
   const spec = validateSpec(s.spec, s.world);
   const source = s.source === undefined ? 'local' : s.source;
-  if (source !== 'local' && source !== 'copilot' && source !== 'github-models')
+  if (source !== 'local' && source !== 'copilot' && source !== 'local-ai' && source !== 'github-models')
     throw new Error('Saved build has an invalid source.');
   const plan = createPlan(spec, [], source);
   if (s.taskOrder !== undefined) {

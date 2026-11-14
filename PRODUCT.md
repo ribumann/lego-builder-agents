@@ -18,12 +18,13 @@ A visible coordinator works with a plan verifier, two specialist builders, and a
 Local browser application with a local Node server. No Azure service is required. Source and CI may be stored in a private repository owned by ribumann.
 
 ## Capabilities and Constraints
-- Default execution is a transparent, deterministic, rule-based agent simulation, not an LLM.
+- Default planning choice is cloud Copilot, with explicit server opt-in and per-brief submission; no model requests on load. Five-agent execution is transparent and deterministic, not five model conversations.
 - The optional imported workflow has three model decisions, not five model calls: the plan verifier and quality inspector remain rule-based.
 - Optional GitHub Copilot CLI planning uses the user's authenticated subscription, with explicit opt-in and a bounded request count. Actual model charges are unknown.
-- Copilot may propose original static designs with mixed brick dimensions within bounded workspace, count and volume limits. Local planning remains template-based.
+- Copilot and optional Local AI require custom static geometry for arbitrary briefs, including familiar subjects. Template responses fail explicitly without retries or fallback. Offline templates are a separate explicit choice.
+- Optional Ollama runs on the BrickLab server host, not automatically the browser device. It requires a trusted local-only service with cloud disabled and a manually downloaded model. Numeric loopback, remote-model metadata checks and bounded requests protect the app boundary; metadata cannot prove service internals. No runtime/model downloads happen automatically.
 - Deterministic local dinosaur-herd and spacecraft-fleet examples demonstrate named multi-object worlds without model calls. Normal designs target at most 1,000 pieces and 32,768 occupied cells; advanced designs allow up to 8,192 pieces and 262,144 cells within bounded coordinates. Performance varies by device.
-- No gated local models, downloaded brand assets, or paid cloud infrastructure.
+- No required local models, downloaded brand assets or provisioned cloud infrastructure.
 - Original brick geometry, not official LEGO assets or affiliation.
 - Local persistence and downloadable builds; no accounts or public sharing.
 

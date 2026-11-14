@@ -1,6 +1,6 @@
 # BrickLab
 
-A local-first, LEGO-style game that makes **agentic teamwork tangible for ages 11-15**. Give a brief and watch five agents coordinate: BuildBot delegates, PlanBot checks the blueprint, FrameBot and DetailBot build, and CheckBot inspects the result.
+A LEGO-style game with **cloud-first, open-ended planning** and visible **agentic teamwork for ages 11-15**. Give a brief and watch five agents coordinate: BuildBot delegates, PlanBot checks the blueprint, FrameBot and DetailBot build, and CheckBot inspects the result. Optional Local AI and explicit offline presets are separate choices.
 
 Inspired by the user-supplied National Future Day post: three agents build a Minecraft castle from children's ideas. This original implementation translates its lesson into two brick-building worlds, not a reproduction of Minecraft or official LEGO software.
 
@@ -13,7 +13,9 @@ npm ci
 npm run dev
 ```
 
-Open **http://127.0.0.1:4173**. The server binds to loopback by default. No Azure account, model download, API key, or external service is required for local mode.
+Open **http://127.0.0.1:4173**. The server binds to loopback by default. New visitors see Copilot cloud planning, but no model request happens on load or mode selection. **Send brief to Copilot** explicitly sends that brief to GitHub and may consume quota. The server still requires the separate model opt-in below; missing setup is shown, never silently replaced by templates.
+
+For no-model use, choose **Change mode -> Use offline templates**, **Run an offline demo**, or a clearly labeled local herd/fleet example. These use no model calls. No Azure account, model download, API key or external service is required for offline templates. Mode selection applies to the next plan in this tab; restored builds are not automatically sent to a provider.
 
 For a production build:
 
@@ -35,7 +37,7 @@ npm start
 
 In the **Ports** tab, open port **4173 (BrickLab)** in a browser. Forwarded ports are private by default; keep this port private. Use the production server above rather than `npm run dev`, which can reject the forwarded hostname. Stop the Codespace when finished to avoid unnecessary usage.
 
-The rule-based builder runs in the browser. By default the planning API is localhost-only, so this URL can report that server status is unavailable. For optional real Copilot planning through the private browser URL, use the explicit setup below. A Codespace is not itself a Copilot subscription or a Copilot CLI login.
+The rule-based builder runs in the browser after explicitly choosing offline templates. The default cloud choice shows setup instructions until configured. By default the planning API is localhost-only, so this URL can report that server status is unavailable. For real Copilot planning through the private browser URL, use the explicit setup below. A Codespace is not itself a Copilot subscription or a Copilot CLI login.
 
 ### Opt in to Copilot planning in the Codespace
 
@@ -87,11 +89,11 @@ The **local rule-based templates** support body colors green, orange, blue, purp
 
 ## What is actually agentic?
 
-**Local mode is explicitly a rule-based agent simulation, not generative AI.** All five agents have observable roles: BuildBot compiles the interpreted brief into tasks with prerequisites; PlanBot checks dependency and blueprint connectivity before construction; FrameBot and DetailBot observe the shared world, select eligible tasks, place bounded numbers of bricks and report completion; CheckBot inspects the finished grid and identifies missing bricks for repair. The repair loop reopens the owning construction specialist's task. These are deterministic application decisions, not five hidden model conversations.
+**Offline template mode is explicitly a rule-based agent simulation, not generative AI.** All five agents have observable roles: BuildBot compiles the interpreted brief into tasks with prerequisites; PlanBot checks dependency and blueprint connectivity before construction; FrameBot and DetailBot observe the shared world, select eligible tasks, place bounded numbers of bricks and report completion; CheckBot inspects the finished grid and identifies missing bricks for repair. The repair loop reopens the owning construction specialist's task. These are deterministic application decisions, not five hidden model conversations.
 
 This teaches goal decomposition, delegation, shared memory, dependencies, parallel work, observation, tool actions, verification and repair. It deliberately separates those concepts from a claim that every agent must be a language model.
 
-**Optional Copilot mode is hybrid:** a real Copilot model interprets the child's brief into a template specification or a new arrangement of differently sized rectangular bricks; the same two local construction specialists execute it, with PlanBot and CheckBot performing local checks. Subjects are not limited to dinosaurs and spacecraft, but the result is still a bounded stylized brick design, not unrestricted text-to-3D or a guarantee of artistic fidelity. It is not three independent LLM calls. Crew Q&A remains a clearly labeled local teaching guide in either mode.
+**Cloud planning is hybrid:** a real Copilot model must propose custom geometry for the child's brief, including familiar subjects; selecting a pre-built template is rejected. The same two local construction specialists execute it, with PlanBot and CheckBot performing local checks. Optional Local AI uses this same custom-only contract and five-agent execution. Subjects are not limited to dinosaurs and spacecraft, but the result is still a bounded stylized brick design, not unrestricted text-to-3D or a guarantee of artistic fidelity or semantic originality. It is not five independent LLM calls. Crew Q&A remains a clearly labeled local teaching guide in every mode.
 
 **Optional GitHub Models workflow uses three model calls:** BuildBot interprets the brief and delegates; FrameBot and DetailBot are then called concurrently to choose their actual task priority orders and explain their coordination. Every proposed order is schema-validated against the specialist's owned tasks. The local runtime enforces prerequisites regardless of priority, runs the whole mission and checks the result before producing an artifact. Loading this artifact starts an observable real-time execution, not a video.
 
@@ -132,25 +134,53 @@ $env:BRICKLAB_COPILOT="1"
 npm run dev
 ```
 
-In the app, select **Change mode -> Use Copilot planning**. This explicitly consents to sending subsequent briefs to your authenticated Copilot model service.
+Copilot planning is the default choice, or select **Change mode -> Use Copilot planning**. Review the disclosure, then press **Send brief to Copilot** to consent to sending that brief to your authenticated model service. Merely loading the app or choosing a mode sends no brief. Guided demos and explicit local examples never implicitly invoke a model.
 
 Server status detects a missing or unusable CLI with a non-model `copilot --version` check; it sends no brief and verifies no account entitlement. Authentication errors from an attempted plan provide login instructions without displaying raw CLI output or automatically retrying. An installed CLI is not proof of a working login or subscription.
 
 On Windows, a VS Code `copilot.exe` shim may win command resolution while the standalone CLI is missing. Check `Get-Command copilot -All` and `copilot --version`; the app also recognizes a shim reporting that the CLI is not installed. If needed, set `BRICKLAB_COPILOT_BIN` to the **absolute path of the actual standalone native executable** (`.exe` on Windows), then restart. This override is used for both status and planning without a shell, including paths with spaces. `.cmd`/`.bat` wrappers are intentionally unsupported rather than enabling shell execution of a child's brief. The private Codespace setup avoids relying on the computer's Windows executable or login. Native Windows ARM64 CLI version reporting and a bounded real local API planning request were verified. The two subprocess tests that create POSIX shebang executables are explicitly skipped on Windows, not represented as native Windows coverage.
 
-The server invokes `copilot -p` without shell interpolation, with an empty available-tool list, built-in MCPs disabled, and repository custom instructions disabled. No model tools are exposed. JSON validation accepts the existing templates or bounded custom brick arrangements; invalid responses fail visibly, without silently substituting a template or pretending local planning was AI.
+The server invokes `copilot -p` without shell interpolation, with an empty available-tool list, built-in MCPs disabled, and repository custom instructions disabled. No model tools are exposed. Both server and browser require validated custom brick arrangements: template-only and invalid responses fail visibly, without automatic retries, substitution or pretending offline planning was AI. Legacy saves and imported Actions missions may still contain templates; they are not new cloud planning results.
 
 The bridge uses the CLI's scripting mode, `--output-format=json`, not terminal-rendered `--silent` text. It reads the final completed `assistant.message` content only, requires a successful terminal `result`, and rejects malformed, failed or incomplete streams. Metadata, user echoes and partial message deltas are not treated as designs or logged. The final assistant content must still be valid JSON and pass the geometry schema; the app never joins wrapped strings, strips arbitrary control characters, repairs malformed model output, or automatically launches another planning invocation. JSONL support requires a recent standalone CLI. An isolated local fake-provider run with the actual Linux CLI verified the event handling without external model calls; a later bounded real Windows ARM64 API request verified the small custom-planning path. Neither establishes Codespaces integration or successful large-scene model generation.
 
+### Optional open-ended Local AI (Ollama)
+
+Local AI is a separate, explicitly selected planner, not the offline template engine. It runs on the **BrickLab Node server's host**. In a Codespace, that means the remote Codespace, not the browser's Windows/Mac/mobile device. No runtime, model or infrastructure is installed or downloaded by BrickLab.
+
+Install [Ollama](https://ollama.com/) yourself if wanted, choose a local model that fits the host, and **disable Ollama cloud features before starting its service**. For a manually started service:
+
+```sh
+OLLAMA_NO_CLOUD=1 ollama serve
+```
+
+If Ollama already runs as a service/application, configure `OLLAMA_NO_CLOUD=1` for that service and restart it yourself; setting it only in BrickLab's terminal does not change an already-running Ollama process. In another terminal, explicitly download a model and opt in:
+
+```sh
+ollama pull qwen2.5:3b
+npm run build
+BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=qwen2.5:3b npm start
+```
+
+The model name above is an example, not a hardware or design-quality guarantee. Downloading requires network access and storage; inference needs device-dependent RAM/compute and may exceed the deadline. On PowerShell, set `$env:BRICKLAB_LOCAL_AI="1"` and `$env:BRICKLAB_LOCAL_MODEL="qwen2.5:3b"` before `npm start`; configure Ollama's own service environment separately.
+
+Choose **Change mode -> Use Local AI**, then **Plan with Local AI**. Status and mode selection do not contact Ollama. Only that explicit planning action checks `/api/tags`, then sends the brief and fixed schema to `/api/generate`. Missing runtime/model and invalid/template output fail visibly; no downloads, retries, cloud or template fallback occur.
+
+The default endpoint is `http://127.0.0.1:11434`; optional `BRICKLAB_LOCAL_URL` accepts only an HTTP numeric loopback address (`127.0.0.1` or `[::1]`), without userinfo, paths, query or fragment. Hostnames (including `localhost`), external addresses and redirects are rejected. Transport does not use environment proxies. Model metadata identifying a remote/cloud model is rejected **before transmitting the brief**. **Loopback alone does not prove offline operation:** use `OLLAMA_NO_CLOUD=1`, a genuinely local downloaded model and a trusted service. Metadata cannot prove what a modified or misconfigured service does internally.
+
+Local AI shares Host/Origin/authentication checks, the per-process request token, custom geometry validation and a single active planning slot with Copilot. It has a 90-second deadline, 1 MiB provider-envelope limit and 128,000-byte final-content limit, with bounded output tokens. It uses no Copilot quota, but server/Codespace compute charges may apply. Keep children's identifying/sensitive information out of briefs.
+
+Fake local-provider and browser tests cover success, failures, explicit mode separation and remote-model rejection. No Ollama executable/listener was observed on the checked Linux server or Windows ARM64 host, so **real local-model inference remains unverified**. No model was installed/downloaded or live local-model success inferred from fixtures.
+
 ### Original dinosaur and spacecraft worlds
 
-Dinosaurs and spacecraft remain the focus. With Copilot planning selected, try a new dinosaur anatomy, a herd with habitat objects, an original multi-deck spacecraft, or a fleet with station structures. The model can return `model: "custom"` with named objects and explicit brick geometry, including each brick's lower-corner coordinates, width, height, depth, color and structural/detail role. Objects can share a world without being one connected model; each object's own connectivity still matters. FrameBot and DetailBot execute a visible task graph, with PlanBot and CheckBot reviewing and inspecting it. Missing-brick repair, replay and saves use the generated geometry.
+Dinosaurs and spacecraft remain the focus. With Copilot or Local AI selected, try a new dinosaur anatomy, a herd with habitat objects, an original multi-deck spacecraft, or a fleet with station structures. Both AI planners must return `model: "custom"` with named objects and explicit brick geometry, including each brick's lower-corner coordinates, width, height, depth, color and structural/detail role. Objects can share a world without being one connected model; each object's own connectivity still matters. FrameBot and DetailBot execute a visible task graph, with PlanBot and CheckBot reviewing and inspecting it. Missing-brick repair, replay and saves use the generated geometry.
 
-This removes the four-template subject restriction **for optional Copilot designs**, not consent, authentication or resource limits. Dinosaur and spacecraft showcases are not an allowlist: original buildings, castle-like structures and other subjects can also use custom geometry. Local rule-based interpretation and the separate three-model Actions workflow still use their documented templates.
+This removes the four-template subject restriction **for AI-planned designs**, not consent, authentication or resource limits. Dinosaur and spacecraft showcases are not an allowlist: original buildings, castle-like structures and other subjects can also use custom geometry. Offline rule-based interpretation and the separate three-model Actions workflow still use their documented templates.
 
 The shared custom contract supports legacy `design.bricks` or named groups in `design.objects`, with **1-256 compact brick records in total**, optional `repeat: {count, dx, dy, dz}`, up to **32 objects**, **8,192 expanded bricks** and **262,144 occupied cells**. Each brick has integer dimensions **1-8** per axis; every occupied cell must stay within **x/z -64..63 and y 0..63**. Colors are allowlisted and overlaps are rejected, including between objects. Separate objects may be apart; PlanBot and CheckBot check face connectivity within each object. Missing-brick repair cannot fix a fundamentally disconnected blueprint. Invalid output fails explicitly, without automatic paid retries. Old template and single-object custom saves remain supported; new saves retain validated object geometry. A novel design's semantic quality and large-scene live model reliability remain unverified.
 
-Each plan starts **one CLI planning invocation**, maximum 90 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with one concurrent invocation allowed. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Default limit is **12 planning invocations per UTC day per server process**, configurable with `BRICKLAB_DAILY_CALLS` (1-100). Restarting resets the counter; this is a demo guardrail, **not a durable FinOps or monetary budget**. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Local mode uses zero model calls. No gated SLM is used.
+Each **Copilot plan** starts **one CLI planning invocation**, maximum 90 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with one concurrent invocation allowed. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Default limit is **12 Copilot planning invocations per UTC day per server process**, configurable with `BRICKLAB_DAILY_CALLS` (1-100). Restarting resets the counter; this is a demo guardrail, **not a durable FinOps or monetary budget**. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
 
 ### Multi-object scale, not a reference-parity claim
 
@@ -185,7 +215,7 @@ npm run test:e2e
 
 CI checks the engine, type safety, production build and browser journeys on both worlds. No paid model calls run in CI.
 
-Latest Linux verification: **40 unit/integration tests**, TypeScript and the locked **Vite 7.3.8** production build, and **eight Chromium journeys** passed. The existing large-bundle advisory remains. Reported Windows ARM64 verification of `0c0bc63`: **38 tests passed, two POSIX executable-fixture tests skipped**, and the build used Vite **8.2.2** because that host's feed lacked the locked version. The five-agent preview was opened locally and one bounded synthetic live request succeeded with a named custom object. This is not lockfile-equivalent Windows build parity, Windows advanced-scale browser coverage or real Codespaces verification.
+Latest Linux verification: **62 unit/integration tests passed, one IPv6 socket test skipped because the host lacks IPv6 loopback**, TypeScript and the locked **Vite 7.3.8** production build, and **12 Chromium journeys** passed. Coverage includes default cloud consent/setup, original brief passthrough, rejection of template output without retry/fallback, explicit Local AI/offline modes, local-provider metadata/redirect/proxy/size/time bounds, and failed-inspection preservation after single-step/reload. The existing large-bundle advisory remains. Reported Windows ARM64 verification of earlier `0c0bc63`: **38 tests passed, two POSIX executable-fixture tests skipped**, and the build used Vite **8.2.2** because that host's feed lacked the locked version. Its five-agent preview and bounded live named-object request do not verify these later planner changes, lockfile-equivalent Windows build parity, Windows advanced-scale performance or real Codespaces forwarding. Real Ollama inference remains unverified.
 
 Architecture: `src/engine.ts` (typed specs, task graph, five-agent loop, inspection and saves), `src/scene.ts` (Three.js original brick geometry and habitats), `src/main.ts` (workshop UI), `server.mjs` (local serving and optional bounded CLI bridge), `copilot-output.mjs` (strict CLI event decoding).
 

@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
-import { request } from 'node:http';
+import { request, createServer as createHttpServer } from 'node:http';
 import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
@@ -37,7 +37,8 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}) {
   await new Promise<void>(resolve => reservation.close(() => resolve()));
   const child = spawn(process.execPath, ['server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
-      BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '', ...env },
+      BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '',
+      BRICKLAB_LOCAL_AI: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
   t.after(async () => {
@@ -95,6 +96,65 @@ const posixExecutableFixtures = {
   skip: process.platform === 'win32' ? 'These subprocess fixtures require POSIX shebang execution; native Windows CLI execution is not simulated.' : false,
 };
 
+test('Local AI is explicit, uses the same API protections and requires custom local geometry', async t => {
+  const generated: { prompt: string }[] = [];
+  let metadataRequests = 0;
+  let remote = false;
+  let reply: unknown = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+    design: { name: 'Local sculpture', bricks: [
+      { x: 0, y: 0, z: 0, width: 3, height: 2, depth: 1, color: 'purple', part: 'frame' },
+    ] } };
+  const provider = createHttpServer(async (req, res) => {
+    res.setHeader('Content-Type', 'application/json');
+    if (req.url === '/api/tags') {
+      metadataRequests++;
+      res.end(JSON.stringify({ models: [{ name: 'fixture:latest', model: 'fixture:latest',
+        ...(remote ? { remote_model: 'remote', remote_host: 'https://ollama.com' } : {}) }] }));
+      return;
+    }
+    assert.equal(req.url, '/api/generate');
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    generated.push(JSON.parse(raw));
+    res.end(JSON.stringify({ done: true, response: JSON.stringify(reply) }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const { base } = await startServer(t, { BRICKLAB_COPILOT: '0', BRICKLAB_LOCAL_AI: '1',
+    BRICKLAB_LOCAL_MODEL: 'fixture:latest', BRICKLAB_LOCAL_URL: `http://127.0.0.1:${address.port}` });
+  const status = await (await fetch(`${base}/api/status`)).json() as {
+    sessionKey: string; localPlanner: { enabled: boolean }; copilot: boolean;
+  };
+  assert.equal(status.copilot, false);
+  assert.equal(status.localPlanner.enabled, true);
+  assert.equal(metadataRequests, 0, 'Page/status requests never probe the local provider');
+  const brief = 'An original freestanding abstract sculpture, not a dinosaur or spaceship.';
+  const post = (extra: Record<string, string> = {}) => fetch(`${base}/api/local-plan`, {
+    method: 'POST', headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey, ...extra },
+    body: JSON.stringify({ world: 'jurassic', brief }),
+  });
+  assert.equal((await post({ Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await post({ 'X-Bricklab-Key': '' })).status, 403);
+  assert.equal(metadataRequests, 0);
+  const planned = await post();
+  assert.equal(planned.status, 200);
+  assert.deepEqual(await planned.json(), { spec: reply, calls: 0, limit: 12, source: 'local-ai' });
+  assert.equal(generated.length, 1);
+  assert.ok(generated[0].prompt.endsWith(`User brief: ${JSON.stringify(brief)}`));
+  reply = { world: 'jurassic', model: 'stegosaurus', color: 'blue', longTail: false, wideWings: false, budget: 700 };
+  const template = await post();
+  assert.equal(template.status, 502);
+  assert.match((await template.json() as { error: string }).error, /original custom design is required/i);
+  assert.equal(generated.length, 2, 'No retries or alternate-provider/template fallback');
+  remote = true;
+  const cloudModel = await post();
+  assert.equal(cloudModel.status, 502);
+  assert.equal(generated.length, 2, 'Remote metadata is rejected before sending a brief');
+});
+
 test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {
   const bin = await mkdtemp(join(tmpdir(), 'bricklab-private-test-'));
   t.after(() => rm(bin, { recursive: true, force: true }));
@@ -111,7 +171,10 @@ if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify([
 ])) process.exit(2);
 process.stdout.write(fs.readFileSync(process.env.TEST_PORTS_FILE, 'utf8'));
 `, { mode: 0o700 });
-  const spec = { world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: true, budget: 700 };
+  const spec = { world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 700,
+    design: { name: 'Original fixture', bricks: [
+      { x: 0, y: 0, z: 0, width: 3, height: 2, depth: 1, color: 'blue', part: 'frame' },
+    ] } };
   await writeFile(specFile, JSON.stringify(spec));
   await writeFile(join(bin, 'copilot'), `#!/usr/bin/env node
 if (process.argv[2] === '--version') { console.log('fixture-cli'); process.exit(0); }
@@ -162,16 +225,17 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   assert.equal(response.headers.get('access-control-allow-origin'), null);
   const status = await response.json() as { sessionKey: string; calls: number; copilot: boolean };
   assert.equal(status.copilot, true);
-  const post = (extra: Record<string, string> = {}) => fetchWithHost(`${base}/api/plan`, {
+  const post = (extra: Record<string, string> = {}, brief = 'A blue ship with wide wings') => fetchWithHost(`${base}/api/plan`, {
     method: 'POST', headers: { ...headers, Origin: origin, 'X-Bricklab-Key': status.sessionKey, ...extra },
-    body: JSON.stringify({ world: 'space', brief: 'A blue ship with wide wings' }),
+    body: JSON.stringify({ world: 'space', brief }),
   });
   for (const invalid of ['', 'http://' + headers.Host, origin + '.attacker.example', 'https://other-4173.app.github.dev'])
     assert.equal((await post({ Origin: invalid })).status, 403);
   assert.equal((await post({ 'X-Bricklab-Key': '' })).status, 403);
   assert.equal((await post({ Authorization: '' })).status, 401);
   await assert.rejects(readFile(callsFile), { code: 'ENOENT' });
-  const planned = await post();
+  const arbitraryBrief = 'An original observatory with a spiral bridge and a separate sculpture, not a spaceship.';
+  const planned = await post({}, arbitraryBrief);
   assert.equal(planned.status, 200);
   assert.deepEqual(await planned.json(), { spec, calls: 1, limit: 12, source: 'copilot' });
   const args = JSON.parse(await readFile(callsFile, 'utf8')) as string[];
@@ -179,6 +243,7 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   assert.ok(args.includes('--disable-builtin-mcps'));
   assert.ok(args.includes('--output-format=json'));
   assert.equal(args.includes('--silent'), false, 'Use machine events, not wrapped terminal rendering');
+  assert.ok(args[args.indexOf('-p') + 1].endsWith(`User brief: ${JSON.stringify(arbitraryBrief)}`), 'The complete arbitrary brief reaches the model unchanged');
   const custom = { ...spec, model: 'custom', wideWings: false, design: {
     name: 'Moon café tower',
     bricks: [
@@ -191,6 +256,12 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const customPlan = await post();
   assert.equal(customPlan.status, 200);
   assert.deepEqual((await customPlan.json() as { spec: unknown }).spec, custom);
+  const beforeTemplate = (await readFile(invocationsFile, 'utf8')).trim().split('\n').length;
+  await writeFile(specFile, JSON.stringify({ world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: true, budget: 700 }));
+  const templatePlan = await post();
+  assert.equal(templatePlan.status, 502);
+  assert.match((await templatePlan.json() as { error: string }).error, /original custom design is required/i);
+  assert.equal((await readFile(invocationsFile, 'utf8')).trim().split('\n').length, beforeTemplate + 1, 'Template rejection does not retry or fall back');
   await writeFile(specFile, JSON.stringify({ ...custom, design: { ...custom.design,
     bricks: [custom.design.bricks[0], custom.design.bricks[0]] } }));
   const overlappingPlan = await post();

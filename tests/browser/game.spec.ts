@@ -1,10 +1,16 @@
-import { test, expect } from '@playwright/test';
+import { test, expect, type Page } from '@playwright/test';
 import { Team, allBricks, createPlan, parseBrief, validateSpec } from '../../src/engine';
+
+async function chooseOfflineTemplates(page: Page) {
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use offline templates' }).click();
+}
 
 test('Jurassic build supports pause, step, repair, replay, download and restore', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
+  await chooseOfflineTemplates(page);
   await expect(page.getByRole('heading', { name: /prehistoric/ })).toBeVisible();
   await page.getByLabel('What shall we build?').fill('Build a purple brachiosaurus with a tall neck.');
   await page.getByRole('button', { name: 'Make a plan' }).click();
@@ -48,6 +54,7 @@ test('space build exposes dependencies and exploded view', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));
   await page.goto('/');
+  await chooseOfflineTemplates(page);
   await page.getByRole('button', { name: 'Space dock' }).click();
   await page.getByLabel('What shall we build?').fill('Build a white cargo spaceship with two engines.');
   await page.getByRole('button', { name: 'Make a plan' }).click();
@@ -77,7 +84,7 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   expect(quiz).not.toBeNull();
   expect(files).not.toBeNull();
   expect(files!.y).toBeGreaterThanOrEqual(quiz!.y + quiz!.height);
-  await page.getByRole('button', { name: 'Run a guided demo' }).click();
+  await page.getByRole('button', { name: 'Run an offline demo' }).click();
   await expect(page.locator('#stage-status')).toContainText('Teamwork');
   await page.getByRole('button', { name: 'Pause build' }).click();
   await page.getByRole('textbox', { name: 'Ask your crew' }).fill('Why wait?');
@@ -134,10 +141,104 @@ test('Copilot provider failures are visible and never become a fake AI build', a
   await page.goto('/');
   await page.getByRole('button', { name: 'Change mode' }).click();
   await page.getByRole('button', { name: 'Use Copilot planning' }).click();
-  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
   await expect(page.getByRole('alert')).toContainText('Copilot unavailable');
   await expect(page.locator('#stage-status')).toContainText('Ready for your imagination');
   await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
+});
+
+test('cloud is default but unavailable setup never submits or falls back to templates', async ({ page }) => {
+  let requests = 0;
+  let localRequests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: false, sessionKey: 'fixture',
+    planner: { state: 'off', message: 'Run copilot login and restart with BRICKLAB_COPILOT=1.' },
+  } }));
+  await page.route('**/api/plan', route => { requests++; return route.abort(); });
+  await page.route('**/api/local-plan', route => { localRequests++; return route.abort(); });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Copilot cloud planning');
+  await expect(page.getByRole('alert')).toContainText('BRICKLAB_COPILOT=1');
+  await page.getByLabel('What shall we build?').fill('An original kinetic sculpture with a canopy.');
+  await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
+  await expect(page.getByRole('alert')).toContainText('copilot login');
+  await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
+  expect(requests).toBe(0);
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
+  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('BRICKLAB_LOCAL_AI=1');
+  expect(localRequests).toBe(0);
+  await chooseOfflineTemplates(page);
+  await page.getByLabel('What shall we build?').fill('Build a green stegosaurus with a long tail.');
+  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Plan ready');
+  expect(requests).toBe(0);
+});
+
+test('cloud template output is rejected without a new build or retry', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Fixture planner ready.' },
+  } }));
+  await page.route('**/api/plan', route => {
+    requests++;
+    return route.fulfill({ json: { spec: parseBrief('jurassic', 'Build a green stegosaurus.').spec } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await expect(page.locator('#planner-status')).toHaveText('Fixture planner ready.');
+  await page.getByRole('button', { name: 'Use Copilot planning' }).click();
+  await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
+  await expect(page.getByRole('alert')).toContainText('template instead of custom geometry');
+  await expect(page.locator('#stage-status')).toContainText('Ready for your imagination');
+  await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
+  expect(requests).toBe(1);
+});
+
+test('explicit Local AI sends only to its endpoint, restores attribution and reports failure', async ({ page }) => {
+  const briefs: string[] = [];
+  let cloudRequests = 0;
+  let unavailable = false;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: false, sessionKey: 'fixture', planner: { state: 'off', message: 'Copilot off.' },
+    localPlanner: { enabled: true, state: 'configured', message: 'Fixture local model configured.' },
+  } }));
+  await page.route('**/api/plan', route => { cloudRequests++; return route.abort(); });
+  await page.route('**/api/local-plan', route => {
+    briefs.push(route.request().postDataJSON().brief);
+    return unavailable ? route.fulfill({ status: 502, json: { error: 'Local model missing. Configure Ollama on the server host.' } })
+      : route.fulfill({ json: { spec: {
+        world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+        design: { name: 'Local original fixture', objects: [{ name: 'Sculpture', bricks: [
+          { x: 0, y: 0, z: 0, width: 2, height: 2, depth: 2, color: 'purple', part: 'frame' },
+        ] }] },
+      } } });
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await expect(page.locator('#local-planner-status')).toHaveText('Fixture local model configured.');
+  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
+  expect(briefs).toHaveLength(0);
+  const brief = 'An original purple sculpture, not a dinosaur or spaceship.';
+  await page.getByLabel('What shall we build?').fill(brief);
+  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
+  await expect(page.locator('#scene-caption')).toContainText('Local original fixture');
+  expect(briefs).toEqual([brief]);
+  expect(cloudRequests).toBe(0);
+  await page.getByRole('button', { name: 'Start building' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete');
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).source)).toBe('local-ai');
+  await page.reload();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
+  unavailable = true;
+  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
+  await expect(page.getByRole('alert')).toContainText('Local model missing');
+  await expect(page.locator('#brick-count')).toHaveText('1 / 1 bricks');
+  expect(briefs).toHaveLength(2);
+  expect(cloudRequests).toBe(0);
 });
 
 test('fixture Copilot custom design accepts an unrelated brief and survives reload', async ({ page }) => {
@@ -158,14 +259,15 @@ test('fixture Copilot custom design accepts an unrelated brief and survives relo
   });
 
   await page.goto('/');
-  await expect(page.locator('#brief-help')).toContainText('templates only');
+  await expect(page.locator('#mode-label')).toContainText('Copilot cloud planning');
+  await expect(page.locator('#brief-help')).toContainText('may consume quota');
   await page.getByRole('button', { name: 'Change mode' }).click();
   await expect(page.locator('#planner-status')).toHaveText('<login> required; retry after login');
   await expect(page.locator('#planner-status login')).toHaveCount(0);
   expect(sent).toHaveLength(0);
   await page.getByRole('button', { name: 'Use Copilot planning' }).click();
   await page.getByLabel('What shall we build?').fill('A lighthouse on a rocky coast');
-  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
   await expect(page.locator('#scene-caption')).toContainText('Lighthouse fixture');
   expect(sent).toEqual(['A lighthouse on a rocky coast']);
   await page.getByRole('button', { name: 'Start building' }).click();
@@ -177,6 +279,37 @@ test('fixture Copilot custom design accepts an unrelated brief and survives relo
   await page.reload();
   await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
   await expect(page.getByLabel('What shall we build?')).toHaveValue('A lighthouse on a rocky coast');
+});
+
+test('single-step preserves a failed inspection for a disconnected custom design', async ({ page }) => {
+  const team = new Team(createPlan(validateSpec({
+    world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+    design: { name: 'Two islands fixture', bricks: [
+      { x: 0, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
+      { x: 5, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' },
+    ] },
+  }, 'jurassic')));
+  await page.goto('/');
+  await page.locator('#import-file').setInputFiles({
+    name: 'disconnected.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(team.snapshot('Two separate islands'))),
+  });
+  await page.getByRole('button', { name: 'Build one step' }).click();
+  await expect(page.locator('#brick-count')).toHaveText('1 / 2 bricks');
+  await expect(page.locator('#stage-status')).toContainText('Paused');
+  await page.getByRole('button', { name: 'Build one step' }).click();
+  await expect(page.locator('#brick-count')).toHaveText('2 / 2 bricks');
+  await expect(page.locator('#inspection-result')).toHaveText('2/3 checks');
+  await expect(page.locator('#check-state')).toHaveText('Problem found');
+  await expect(page.getByRole('button', { name: 'Continue build' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Build one step' })).toBeDisabled();
+  await page.getByRole('button', { name: 'Ask team to repair' }).click();
+  await expect(page.locator('#event-list')).toContainText('cannot automatically repair a different topology problem');
+  await expect(page.locator('#check-state')).toHaveText('Problem found');
+  await page.reload();
+  await expect(page.locator('#check-state')).toHaveText('Problem found');
+  await expect(page.getByRole('button', { name: 'Continue build' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Ask team to repair' })).toBeEnabled();
 });
 
 test('local herd world builds named objects, repairs and survives reload without a model', async ({ page }) => {

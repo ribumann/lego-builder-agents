@@ -33,7 +33,7 @@ app.innerHTML = `
   <header class="topbar">
     <a class="brand" href="/" aria-label="BrickLab home"><span class="brand-mark">${icon('cube')}</span>Brick<span>Lab</span><span class="brand-dot"></span></a>
     <span class="tagline">Small bricks. Big teamwork.</span>
-    <div class="top-actions"><span class="local-status"><i></i> Local-first playground</span><button id="guide" class="button subtle">${icon('help')} How to play</button></div>
+    <div class="top-actions"><span class="local-status"><i></i> Five agents. Your ideas.</span><button id="guide" class="button subtle">${icon('help')} How to play</button></div>
   </header>
   <main>
     <div class="world-bar">
@@ -55,7 +55,7 @@ app.innerHTML = `
           <div class="mission-step" data-phase="learn"><b>4</b><div><strong>Test & discover</strong><span>Break a brick. Learn to repair.</span></div></div>
         </div>
         <div class="field-note"><span>${icon('star')}</span><p id="field-note">An agent does more than answer. It observes, chooses an action, and checks what happened.</p></div>
-        <button id="demo" class="button demo-button">${icon('play')} Run a guided demo</button>
+        <button id="demo" class="button demo-button">${icon('play')} Run an offline demo</button>
         <div id="save-status" class="save-status">Your workshop saves on this device.</div>
       </aside>
       <section class="stage" aria-label="3D construction workbench">
@@ -135,11 +135,12 @@ let lastEventCount = -1;
 let eventRevision = 0;
 let showGhost = true;
 let exploded = false;
-let mode: 'local' | 'copilot' = 'local';
+let mode: 'local' | 'copilot' | 'local-ai' = 'copilot';
 let apiKey = '';
 let copilotEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
+let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
 let planning = false;
 let replaying = false;
 let examples = 0;
@@ -191,7 +192,7 @@ function render() {
   $('#brick-count').innerHTML = `${count} <span>/ ${total || '—'} bricks</span>`;
   $('#progress-value').textContent = `${percent}%`;
   $<HTMLProgressElement>('#progress').value = percent;
-  $('#stage-status').textContent = planning ? 'BuildBot is thinking with Copilot…' : team ? statusNames[team.status] : 'Ready for your imagination';
+  $('#stage-status').textContent = planning ? 'BuildBot is planning your custom design…' : team ? statusNames[team.status] : 'Ready for your imagination';
   const status = team?.status;
   const canRun = !!team && !['complete', 'damaged'].includes(team.status) && !planning;
   setButton('#run', !canRun);
@@ -207,7 +208,7 @@ function render() {
   setButton('#space', planning);
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
-  $('#transport-note').textContent = planning ? 'One CLI planning invocation. The CLI may retry internally; the crew executes locally.'
+  $('#transport-note').textContent = planning ? 'One bounded planning request. No template fallback; the crew executes locally.'
     : running ? `${speed}× playback · Both builders observe the shared board each turn.`
     : status === 'complete' ? 'Try the repair challenge below, or change your brief.'
     : status === 'damaged' ? 'The inspector noticed a problem. Ask the team to repair it.'
@@ -267,11 +268,15 @@ async function makePlan(demo = false) {
   try {
     if (!brief.value.trim() || brief.value.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     let spec;
-    let source: 'local' | 'copilot' = 'local';
+    let source: 'local' | 'copilot' | 'local-ai' = 'local';
     const assumptions: string[] = [];
-    if (mode === 'copilot') {
+    if (mode !== 'local') {
+      const localAI = mode === 'local-ai';
+      if (localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
+        throw new Error(localAI ? localPlanner.message : plannerMessage);
+      if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       planning = true; render();
-      const response = await fetch('/api/plan', { method: 'POST',
+      const response = await fetch(localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey },
         body: JSON.stringify({ world, brief: brief.value }) });
       const data = await response.json();
@@ -280,15 +285,14 @@ async function makePlan(demo = false) {
         throw new Error(data.error || 'Copilot planning request failed.');
       }
       spec = validateSpec(data.spec, world);
-      source = 'copilot';
-      assumptions.push(spec.model === 'custom'
-        ? 'Copilot proposed an original bounded brick design. The local specialists execute it; they are not separate language models.'
-        : 'Copilot chose an existing template. The local specialists execute it; they are not separate language models.');
+      if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
+      source = localAI ? 'local-ai' : 'copilot';
+      assumptions.push(`${localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
     } else {
       const parsed = parseBrief(world, brief.value);
       spec = parsed.spec;
       assumptions.push(...parsed.assumptions);
-      assumptions.push('Local mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.');
+      assumptions.push('Offline template mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.');
     }
     const plan = createPlan(spec, assumptions, source);
     team = new Team(plan);
@@ -362,7 +366,7 @@ $('#brief-form').addEventListener('submit', event => { event.preventDefault(); v
 $('#jurassic').addEventListener('click', () => switchWorld('jurassic'));
 $('#space').addEventListener('click', () => switchWorld('space'));
 $('#inspire').addEventListener('click', () => { brief.value = EXAMPLES[world][++examples % EXAMPLES[world].length]; brief.focus(); });
-$('#demo').addEventListener('click', () => { brief.value = EXAMPLES[world][0]; void makePlan(true); });
+$('#demo').addEventListener('click', () => { mode = 'local'; updateMode(); brief.value = EXAMPLES[world][0]; void makePlan(true); });
 $('#run').addEventListener('click', () => {
   if (!team) return;
   replaying = false;
@@ -370,7 +374,7 @@ $('#run').addEventListener('click', () => {
   team.status = running ? 'building' : 'paused';
   render(); save();
 });
-$('#step').addEventListener('click', () => { if (team) { replaying = false; team.step(1); team.status = team.status === 'complete' ? 'complete' : 'paused'; render(); save(); } });
+$('#step').addEventListener('click', () => { if (team) { replaying = false; team.step(1); if (team.status !== 'complete' && team.status !== 'damaged') team.status = 'paused'; render(); save(); } });
 $('#speed').addEventListener('click', () => { speed = speed === 1 ? 4 : speed === 4 ? 16 : 1; updateSpeed(); render(); });
 $('#blueprint').addEventListener('click', () => { showGhost = !showGhost; scene?.showBlueprint(showGhost); $('#blueprint').setAttribute('aria-pressed', String(showGhost)); });
 $('#explode').addEventListener('click', () => { exploded = !exploded; scene?.explode(exploded); $('#explode').setAttribute('aria-pressed', String(exploded)); });
@@ -402,7 +406,7 @@ function answer(question: string, agent?: AgentId) {
     check: 'I inspect the completed build against its plan, connectivity and budget. If bricks are missing, I identify them so their owners can repair the build.',
   };
   let response = responses[id];
-  if (/cost|money|price/.test(q)) response = 'Local mode makes no model calls. Copilot mode starts one CLI planning invocation per click; the CLI may retry internally, so subscription usage can differ. Charges depend on your account; we cannot measure a dollar price here.';
+  if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses compute on the server host. Copilot starts one CLI planning invocation per click; the CLI may retry internally, so subscription usage can differ. We cannot measure a dollar price here.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
@@ -436,6 +440,7 @@ function loadWorldExample(exampleWorld: World) {
   try {
     const plan = createPlan(worldExample(exampleWorld), ['This themed world is a deterministic local example, not a model result.'], 'local');
     const example = new Team(plan);
+    mode = 'local'; updateMode();
     if (world !== plan.spec.world) switchWorld(plan.spec.world);
     running = false; replaying = false;
     team = example;
@@ -488,25 +493,31 @@ $('#close-dialog').addEventListener('click', () => $<HTMLDialogElement>('#info-d
 $('#guide').addEventListener('click', () => dialog('You’re the director. They’re the crew.', `
   <p>This workshop makes agent teamwork visible. Choose <strong>Jurassic valley</strong> or <strong>Space dock</strong>, then describe your build.</p>
   <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×.</li><li><strong>Experiment:</strong> hide a brick, ask for a repair, or replay the placement timeline.</li></ol>
-  <p>Supported dinosaurs: <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic. Ships: <strong>explorer and cargo</strong>. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change the model.</p>
-  <p>Five rule-based agents coordinate, verify the plan, build structure and details, and inspect the result. Local mode uses only these templates. Optional Copilot mode can propose original static designs within bounded brick dimensions and workspace limits; all five agents still work locally. Messages explain decisions, not private model reasoning.</p>
+  <p>Cloud planning is the default: describe any static brick design, not just these themes. Pressing <strong>Send brief to Copilot</strong> sends the brief to GitHub and may consume quota. No model request happens on load.</p>
+  <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
+  <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
   <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
   <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
-    <p><strong>Local workshop</strong> — rule-based agents build only stegosaurus, brachiosaurus, explorer and cargo templates. Other ideas may be mapped to a template. Runs offline after loading; no model, token, or hosting bill.</p>
-    <button id="choose-local" class="button primary">Use local agents</button>
-    <hr><p><strong>GitHub Copilot planner</strong> — one CLI planning invocation per click can propose an original static design with different rectangular brick sizes, within workspace and count limits. FrameBot and DetailBot remain local agents, not separate LLMs.</p>
+    <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
     <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Default limit: 12 CLI invocations per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
     <p id="planner-status" role="status">${esc(plannerMessage)}</p>
-    <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Selecting Copilot consents to sending subsequent briefs; readiness does not verify login, subscription, or live access.</p>
+    <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Pressing <strong>Send brief to Copilot</strong> consents to sending that brief. Selecting a mode or loading the page sends no brief; readiness does not verify login, subscription, or live access. Do not enter personal information.</p>
     <button id="refresh-status" class="button outline">Retry status</button>
-    <button id="choose-copilot" class="button outline" ${copilotEnabled || plannerState === 'needs-auth' ? '' : 'disabled'}>Use Copilot planning</button>
+    <button id="choose-copilot" class="button primary">Use Copilot planning</button>
+    <hr><p><strong>Local AI (Ollama)</strong> — optional original custom planning on the <strong>BrickLab server host</strong>, not automatically on this browser's device. In a Codespace it runs on that remote host. Configure Ollama with <code>OLLAMA_NO_CLOUD=1</code> and a downloaded local model first. Loopback alone does not prove offline operation; remote model metadata is rejected, but the configured service must be trusted.</p>
+    <p id="local-planner-status" role="status">${esc(localPlanner.message)}</p>
+    <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
+    <button id="choose-local-ai" class="button outline">Use Local AI</button>
+    <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls. Host charges may still apply.</p>
+    <button id="choose-local" class="button outline">Use offline templates</button>
     <hr><p><strong>Three model decisions via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two builder models concurrently. Each chooses a real task priority. PlanBot and CheckBot remain local rule-based agents, making five crew members, not five model calls. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
     <p>This workflow needs repository access and GitHub Models availability. It has not been live-verified in this environment. It uses three bounded requests, no additional model keys, and no model tools. Do not enter personal information in workflow inputs.</p>
     <p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
-  $('#choose-local').addEventListener('click', () => { mode = 'local'; updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
-  $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
+  $('#choose-local').addEventListener('click', () => { mode = 'local'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
+  $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
+  $('#choose-local-ai').addEventListener('click', () => { mode = 'local-ai'; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
   $('#refresh-status').addEventListener('click', () => { void refreshStatus(true); });
 });
 
@@ -525,10 +536,13 @@ window.addEventListener('beforeunload', save);
 restore();
 render();
 function updateMode() {
-  $('#mode-label').textContent = mode === 'local' ? 'Local rule-based agents' : 'Copilot planner + local builders';
+  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
-    ? 'Local mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
-    : 'Describe any static brick design. Copilot proposes bounded geometry; local builders execute it.';
+    ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
+    : mode === 'local-ai'
+      ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
+      : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
+  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'local-ai' ? 'Plan with Local AI' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
 }
 async function refreshStatus(inDialog = false) {
@@ -540,17 +554,20 @@ async function refreshStatus(inDialog = false) {
     copilotEnabled = data.copilot === true;
     plannerState = typeof data.planner?.state === 'string' ? data.planner.state : 'unavailable';
     plannerMessage = typeof data.planner?.message === 'string' ? data.planner.message : 'Planner status unavailable.';
+    if (data.localPlanner && typeof data.localPlanner.message === 'string')
+      localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
+    if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
     copilotEnabled = false;
     plannerState = 'unavailable';
     plannerMessage = `Local server status unavailable: ${error instanceof Error ? error.message : 'unknown error'}. Rule-based building still works.`;
-    if (!inDialog) notice(plannerMessage);
+    if (!inDialog && mode !== 'local') notice(plannerMessage);
   }
   if (inDialog) {
     const status = document.querySelector<HTMLElement>('#planner-status');
     if (status) status.textContent = plannerMessage;
-    const button = document.querySelector<HTMLButtonElement>('#choose-copilot');
-    if (button) button.disabled = !copilotEnabled && plannerState !== 'needs-auth';
+    const localStatus = document.querySelector<HTMLElement>('#local-planner-status');
+    if (localStatus) localStatus.textContent = localPlanner.message;
   }
 }
 updateMode();
