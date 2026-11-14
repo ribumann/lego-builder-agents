@@ -84,6 +84,13 @@ export class BrickBatch {
       }
     }
   }
+  finishAnimation() {
+    for (const entry of this.entries) {
+      entry.born = 0;
+      this.place(entry, 0);
+    }
+    this.active.clear();
+  }
   animate(now: number) {
     for (const entry of this.active) {
       this.place(entry, this.lift(entry, now));

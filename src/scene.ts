@@ -22,7 +22,8 @@ export class Workbench {
   private frame = 0;
   private resize: ResizeObserver;
   private exploded = false;
-  private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+  private reduced = this.motionPreference.matches;
   private agentTargets = new Map<string, THREE.Vector3>();
   private onSelect: (brick: Brick) => void;
   private bricks = new Map<string, Brick>();
@@ -47,6 +48,7 @@ export class Workbench {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 3, 0);
     this.controls.enableDamping = !this.reduced;
+    this.motionPreference.addEventListener('change', this.updateMotionPreference);
     this.controls.minDistance = 16;
     this.controls.maxDistance = 500;
     this.controls.maxPolarAngle = Math.PI / 2.08;
@@ -251,6 +253,14 @@ export class Workbench {
     this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }
+  private updateMotionPreference = () => {
+    this.reduced = this.motionPreference.matches;
+    this.controls.enableDamping = !this.reduced;
+    if (this.reduced) {
+      this.born.clear();
+      this.modelBatch?.finishAnimation();
+    }
+  };
   private animate = () => {
     this.frame = requestAnimationFrame(this.animate);
     const now = performance.now();
@@ -259,7 +269,7 @@ export class Workbench {
       const target = this.agentTargets.get(robot.name);
       if (target) {
         robot.position.lerp(target, this.reduced ? 1 : 0.025);
-        robot.rotation.y = Math.sin(now / 1700) * 0.2;
+        robot.rotation.y = this.reduced ? 0 : Math.sin(now / 1700) * 0.2;
       }
     }
     this.controls.update();
@@ -287,6 +297,7 @@ export class Workbench {
     cancelAnimationFrame(this.frame);
     this.resize.disconnect();
     this.controls.dispose();
+    this.motionPreference.removeEventListener('change', this.updateMotionPreference);
     this.renderer.dispose();
     this.modelBatch?.dispose();
     this.blueprintBatch?.dispose();

@@ -200,9 +200,14 @@ test('instanced selection and placement animation preserve brick geometry', () =
   assert.ok(hits.length > 0);
   assert.equal(hits[0].object.userData.brickIds[hits[0].instanceId!], b.id);
   batch.dispose();
-  const reduced = new BrickBatch([b], cube, stud, () => material, new Map(), false, 100);
+  const reduced = new BrickBatch([b], cube, stud, () => material, new Map([[b.id, 100]]), false, 100);
+  reduced.finishAnimation();
+  reduced.animate(101);
   (reduced.group.children[0] as THREE.InstancedMesh).getMatrixAt(0, matrix);
   assert.ok(Math.abs(matrix.elements[13] - 0.73) < 0.00001);
+  reduced.setExploded(true, 102);
+  (reduced.group.children[0] as THREE.InstancedMesh).getMatrixAt(0, matrix);
+  assert.ok(Math.abs(matrix.elements[13] - (0.73 * 1.45 + 1)) < 0.00001);
   reduced.dispose(); cube.dispose(); stud.dispose(); material.dispose();
 });
 
