@@ -1,3 +1,5 @@
+import { validatePlanningImage } from './planning-image.mjs';
+
 const MAX_PROMPT_BYTES = 32_000;
 const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_CONTENT_BYTES = 128_000;
@@ -28,18 +30,20 @@ function validateEndpoint(endpoint) {
 
 /**
  * Server-only, opt-in factory: { enabled:false, endpoint, model, apiKey?,
- * fetchImpl? }. endpoint is the complete chat-completions URL, not a base URL.
+ * fetchImpl?, vision:false }. `vision` is an operator assertion, not a verified
+ * provider capability. endpoint is the complete chat-completions URL, not a base URL.
  * status() is configuration-only and discloses neither endpoint nor credentials.
- * plan({ prompt, signal? }) posts one user message, stream:false, JSON-object
+ * plan({ prompt, signal?, image?, imageConsent? }) posts one user message, stream:false, JSON-object
  * output and max_tokens:12000. It returns a parsed JSON object; the caller must
  * validate custom-spec geometry. No preflight, retries, fallback or deployment.
  */
 export function createOpenAICompatiblePlanner(configuration = {}) {
   if (!object(configuration) || Object.keys(configuration).some(key =>
-    !['enabled', 'endpoint', 'model', 'apiKey', 'fetchImpl'].includes(key)))
+    !['enabled', 'endpoint', 'model', 'apiKey', 'fetchImpl', 'vision'].includes(key)))
     fail('Compatible AI configuration is invalid.');
-  const { enabled = false, endpoint, model, apiKey, fetchImpl = fetch } = configuration;
+  const { enabled = false, endpoint, model, apiKey, fetchImpl = fetch, vision = false } = configuration;
   if (typeof enabled !== 'boolean') fail('Compatible AI enabled must be a boolean.');
+  if (typeof vision !== 'boolean') fail('Compatible AI vision setting must be a boolean.');
   if (enabled || endpoint !== undefined) validateEndpoint(endpoint);
   if ((enabled || model !== undefined) && (typeof model !== 'string'
       || model.length > 256 || !/^[a-zA-Z0-9]/.test(model) || /[^a-zA-Z0-9:/._-]/.test(model)))
@@ -59,12 +63,14 @@ export function createOpenAICompatiblePlanner(configuration = {}) {
 
     async plan(request) {
       if (!enabled) fail('Compatible AI is off.');
-      if (!object(request) || Object.keys(request).some(key => !['prompt', 'signal'].includes(key))
+      if (!object(request) || Object.keys(request).some(key => !['prompt', 'signal', 'image', 'imageConsent'].includes(key))
           || typeof request.prompt !== 'string' || !request.prompt.trim()
           || Buffer.byteLength(request.prompt) > MAX_PROMPT_BYTES
           || (request.signal !== undefined && !(request.signal instanceof AbortSignal)))
         fail('Compatible AI planning request is invalid or too large.');
       const { prompt, signal } = request;
+      const image = validatePlanningImage(request.image, request.imageConsent);
+      if (image && !vision) fail('Compatible AI image input is not enabled for this configured model.');
       try {
         if (signal?.aborted) fail('Compatible AI planning was cancelled.');
         const response = await fetchImpl(endpoint, {
@@ -72,7 +78,10 @@ export function createOpenAICompatiblePlanner(configuration = {}) {
           headers: { Accept: 'application/json', 'Content-Type': 'application/json',
             ...(apiKey === undefined ? {} : { Authorization: `Bearer ${apiKey}` }) },
           body: JSON.stringify({
-            model, messages: [{ role: 'user', content: prompt }],
+            model, messages: [{ role: 'user', content: image
+              ? [{ type: 'text', text: prompt }, { type: 'image_url',
+                image_url: { url: `data:${image.mimeType};base64,${image.data}` } }]
+              : prompt }],
             stream: false, max_tokens: 12000, response_format: { type: 'json_object' },
           }),
         });
