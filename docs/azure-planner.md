@@ -14,7 +14,7 @@ seconds and returns a transcript; it does not start planning. The custom
 domain must use the same name as its Speech account. It uses managed identity
 and the resource-bound Entra bearer required by
 [Speech REST](https://learn.microsoft.com/azure/ai-services/speech-service/rest-speech-to-text-short).
-No Speech resource, route, or working cloud transcription is provided here.
+No server route or hosted cloud transcription is enabled by this adapter.
 
 The adapter requires a reservation callback before token acquisition or audio
 transmission. `createAzureSpeechBudgetGate` reserves $0.016667 for each
@@ -23,13 +23,24 @@ the same ETag-protected `daily-budget.json` ledger as planning. Configure both
 gates with the same storage account and container: separate ledgers would not
 enforce a combined limit. The speech gate verifies a Sweden Central, S0,
 identity-only Speech account and the current S1 speech-to-text retail meter.
-Its resource checks and billing assumptions have not been verified against a
-real Speech resource; actual contract charges may differ from retail.
+One staging request verified these resource checks, managed identity and
+transcription against a dedicated private Speech S0 account. It reserved
+$0.016667 in the shared ledger and transcribed 1.83 seconds of synthetic audio.
+This does not verify actual billing or other environments; contract charges may
+differ from retail.
 
 A production caller must also enforce authenticated access, explicit informed
 consent, abuse controls, and privacy and retention policies. Verify the
 resource, identity, pricing and billing before use; do not enable paid speech
 publicly without these controls. Audio and transcripts must not be logged.
+
+`infra/speech-private.bicep` is a staging template that creates a private
+Speech account, private endpoint, DNS links, and a scoped role for a specified
+temporary test runner. It requires the existing BrickLab private network and
+a connected test VNet. Delete the temporary runner role and DNS link after
+testing; redeploying this template recreates them. It does not grant the app
+identity Speech access or enable a route. The account, private endpoint and
+DNS zone may incur ongoing charges.
 
 ## Azure planning
 
