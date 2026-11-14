@@ -12,18 +12,33 @@ selected world. The adapter sends one request, caps output tokens and response
 size, rejects incomplete responses, and invokes inference only once without a
 fallback. The identity SDK may retry its own token acquisition requests.
 
-Do not enable it on a public service until authenticated access, exact host and
-origin checks, a durable bounded usage limit, concurrency control, transport
-timeouts and cancellation are implemented and verified. Configuration alone
-does not establish model access or successful generation.
+Do not enable it on a public service until edge abuse controls, exact host and
+origin checks, a durable budget, concurrency control, transport timeouts and
+cancellation are implemented and verified. Configuration alone does not
+establish model access or successful generation.
 
-`azure-usage.mjs` provides an independent daily request reservation gate. Set up
-a private Blob container and **pre-provision** `daily-usage.json` with
-`{"day":"2000-01-01","count":0}`; give the host identity Storage Blob Data
-Contributor on that container. Construct `createAzureUsageGate({ account,
-container, limit })`, then call `reserve({ signal })` after authenticating and
-validating the request but before starting inference. The default cap is 12
-calls per UTC day; operators may choose 1–100. It is a request limit, not a
-monetary guarantee. Each successful reservation remains charged to the limit
-even if generation fails or is cancelled. Missing, invalid or inaccessible
-state denies calls. Never delete or reset the state to troubleshoot.
+For the deployed GPT-5.4 Data Zone model, `azure-budget.mjs` reserves estimated
+inference cost atomically before each call. Pre-provision `daily-budget.json`
+in a private Blob container with `{"day":"2000-01-01","reservedMicros":0}`
+and grant the host identity Storage Blob Data Contributor on that container.
+Create `createAzureBudgetGate({ account, container, endpoint, deployment })`;
+after validating the request and acquiring the shared in-flight slot, call
+`reserve({ signal })` immediately before inference. Exhaustion, a UTC day
+boundary, and unavailable state or pricing have distinct error codes.
+
+The gate reserves $0.55 per request against $50 per UTC day, using a conservative
+128,000 input-token allowance and 12,000 completion tokens including reasoning.
+It checks the current Sweden Central GPT-5.4 Data Zone retail meters before
+every reservation and denies calls if they exceed $2.75 input or $16.50 output
+per million tokens. Reservations are never refunded. Calls cannot start within
+six minutes of UTC midnight. Missing, corrupt or inaccessible state fails closed;
+never delete or reset it to troubleshoot.
+
+This is an inference estimate, not a guarantee of the entire Azure bill: retail
+pricing may differ from the subscription's actual contract, prices may change
+after verification, billing timing and tokenization may differ, and hosting,
+network, storage, tax and other usage are excluded. It only covers calls through
+this gate to the pinned deployment, not other clients or model deployments.
+The older `azure-usage.mjs` request-count gate is separate and is not the $50
+budget. Platform WAF rate limits are per IP and per edge location, not a global
+spend limit.
