@@ -233,7 +233,7 @@ function render() {
   if (revision !== lastEventCount) {
     lastEventCount = revision;
     const events = team?.events.slice().reverse() ?? [
-      { agent: 'build' as const, kind: 'plan', message: 'Hello, director! Give us a dinosaur or spaceship brief. I’ll split it into jobs for our crew.', tick: 0 },
+      { agent: 'build' as const, kind: 'plan', message: 'Hello, director! Describe any brick design. I’ll split it into jobs for our crew.', tick: 0 },
       { agent: 'plan' as const, kind: 'observe', message: 'I review the task dependencies and check whether the planned bricks connect.', tick: 0 },
       { agent: 'frame' as const, kind: 'observe', message: 'I build the body and structure. I’ll tell DetailBot when a supporting part is ready.', tick: 0 },
       { agent: 'detail' as const, kind: 'observe', message: 'Eyes, plates, cockpits, engines… I make the finishing touches. We share one task board.', tick: 0 },

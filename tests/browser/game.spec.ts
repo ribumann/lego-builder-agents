@@ -158,6 +158,7 @@ test('cloud is default but unavailable setup never submits or falls back to temp
   await page.route('**/api/local-plan', route => { localRequests++; return route.abort(); });
   await page.goto('/');
   await expect(page.locator('#mode-label')).toContainText('Copilot cloud planning');
+  await expect(page.locator('#event-list')).toContainText('Describe any brick design.');
   await expect(page.getByRole('alert')).toContainText('BRICKLAB_COPILOT=1');
   await page.getByLabel('What shall we build?').fill('An original kinetic sculpture with a canopy.');
   await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
