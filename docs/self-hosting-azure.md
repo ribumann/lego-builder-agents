@@ -15,6 +15,9 @@ An independent sample also deployed the base, private-storage and edge
 templates, built revision `084cfb4` on a private runner and served its immutable
 package through the default Front Door hostname with planners disabled. That
 sample did not reproduce custom-domain binding or initialize a second budget.
+The sample's ARM deployment reported success while its new Front Door hostname
+still returned 404 for several minutes; wait for the real endpoint to work
+over verified HTTPS before considering the edge ready.
 Two synthetic streams through the sample edge, from separate clients, each
 delivered 22 ordered heartbeats over 315 seconds with maximum observed delivery
 lag below two seconds. Other attempts ended in client connection resets without
@@ -175,6 +178,8 @@ Verify direct access is denied even when a client supplies the Front Door ID.
 The WAF custom rule limits the paid route per client IP and per edge location;
 distributed Front Door servers can allow requests above its low threshold.
 It is approximate and is not a global spending cap or authentication.
+In one synthetic sample burst of 20 sequential requests, 19 reached the origin
+and one received 429 despite the configured 10-per-minute threshold.
 Do not trust client-supplied forwarded host headers. Configure the exact
 `BRICKLAB_HOSTED_ORIGIN` as `https://` plus your DNS hostname, with no trailing
 slash, port, path, or credentials.
