@@ -10,8 +10,8 @@ env.backends.onnx.wasm.wasmPaths = { wasm: wasmUrl, mjs: mjsUrl };
 
 self.onmessage = async (event: MessageEvent<{ audio: Float32Array; language: string }>) => {
   try {
-    const transcriber = await pipeline('automatic-speech-recognition', 'onnx-community/whisper-tiny', {
-      revision: 'ff4177021cc41f7db950912b73ea4fdf7d01d8e7',
+    const transcriber = await pipeline('automatic-speech-recognition', 'Xenova/whisper-tiny', {
+      revision: '5332fcc35e32a33b86612b9a57a89be7906102b1',
       dtype: 'q8',
       device: 'wasm',
     });
