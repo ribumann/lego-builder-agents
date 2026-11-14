@@ -18,7 +18,7 @@ test('one planning request offers waiting twice and stops at five minutes', asyn
   await page.goto('/');
   await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
   const dialog = page.getByRole('dialog', { name: 'Planning in progress' });
-  await expect(dialog).toContainText('estimate is unavailable');
+  await expect(dialog).toContainText('Estimate unknown; sampled Copilot requests took about 20–183 seconds');
   await page.clock.fastForward(100_000);
   await expect(dialog).toContainText('Elapsed: 100 seconds');
   await dialog.getByRole('button', { name: 'Continue waiting' }).click();
@@ -30,6 +30,33 @@ test('one planning request offers waiting twice and stops at five minutes', asyn
   await expect(dialog).toBeHidden();
   await expect(page.getByRole('alert')).toContainText('300-second limit');
   expect(await page.evaluate(() => (window as Window & { planCount?: number }).planCount)).toBe(1);
+});
+
+test('planning estimates use only the explicit brief and only the measured provider', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
+    azurePlanner: { enabled: true, state: 'configured', message: 'Ready' },
+  } }));
+  await page.addInitScript(() => {
+    const original = window.fetch;
+    window.fetch = (input, init) => ['/api/plan', '/api/azure-plan'].includes(String(input))
+      ? new Promise((_resolve, reject) => {
+        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
+      }) : original(input, init);
+  });
+  await page.goto('/');
+  await page.getByLabel('What shall we build?').fill('A 500-brick lighthouse');
+  await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
+  const dialog = page.getByRole('dialog', { name: 'Planning in progress' });
+  await expect(dialog).toContainText('For 500 requested bricks, a small Copilot study suggests about 55–175 seconds');
+  await expect(dialog).toContainText('not a deadline');
+  await dialog.getByRole('button', { name: 'Abort planning' }).click();
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(dialog).toContainText('Estimate unknown; Azure Foundry was not measured in the Copilot study');
+  await expect(dialog).not.toContainText('55–175');
+  await dialog.getByRole('button', { name: 'Abort planning' }).click();
 });
 
 test('aborting planning leaves the current scene untouched', async ({ page }) => {

@@ -4,6 +4,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
+import { copilotPlanningEstimate } from './planning-estimate';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -282,7 +283,7 @@ function render() {
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
 }
 
-function startPlanningWait(controller: AbortController, provider: string) {
+function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot', planningBrief: string) {
   const modal = $<HTMLDialogElement>('#planning-dialog');
   const started = Date.now();
   let nextReminder = 100;
@@ -301,7 +302,9 @@ function startPlanningWait(controller: AbortController, provider: string) {
   $('#planning-reminder').hidden = true;
   $('#continue-planning').hidden = true;
   $('#planning-elapsed').textContent = 'Elapsed: 0 seconds';
-  $('#planning-description').textContent = `One ${provider} request is running. An estimate is unavailable; the maximum wait is 300 seconds.`;
+  const estimate = provider === 'Copilot' ? copilotPlanningEstimate(planningBrief)
+    : 'Estimate unknown; Azure Foundry was not measured in the Copilot study.';
+  $('#planning-description').textContent = `One ${provider} request is running. ${estimate} Times vary; this is not a deadline. Maximum wait: 300 seconds.`;
   const abort = () => controller.abort();
   const cancel = (event: Event) => { event.preventDefault(); abort(); };
   const continueWaiting = () => {
@@ -392,7 +395,7 @@ async function makePlan(demo = false) {
       planning = true; render();
       const controller = new AbortController();
       planningController = controller;
-      if (!localAI) wait = startPlanningWait(controller, azure ? 'Azure Foundry' : 'Copilot');
+      if (!localAI) wait = startPlanningWait(controller, azure ? 'Azure Foundry' : 'Copilot', brief.value);
       const response = await fetch(azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
         body: JSON.stringify({ world, brief: brief.value }), signal: controller.signal });
