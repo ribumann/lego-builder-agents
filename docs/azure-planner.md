@@ -35,12 +35,24 @@ resource, identity, pricing and billing before use; do not enable paid speech
 publicly without these controls. Audio and transcripts must not be logged.
 
 `infra/speech-private.bicep` is a staging template that creates a private
-Speech account, private endpoint, DNS links, and a scoped role for a specified
-temporary test runner. It requires the existing BrickLab private network and
-a connected test VNet. Delete the temporary runner role and DNS link after
-testing; redeploying this template recreates them. It does not grant the app
-identity Speech access or enable a route. The account, private endpoint and
-DNS zone may incur ongoing charges.
+Speech account, private endpoint and app network DNS link. It requires the
+existing BrickLab private network. It does not grant a runner or the app
+identity Speech access, or enable a route. The separate
+`infra/speech-test-access.bicep` explicitly grants a specified connected test
+runner a scoped Speech role and DNS link. Save its output IDs and remove both
+after testing. Incremental redeployments do not remove previously created
+access; redeploying the test-access template recreates it. The account, private
+endpoint and DNS zone may incur ongoing charges.
+
+When temporarily using the test-access template, capture its
+`temporaryRoleId` and `temporaryDnsLinkId` outputs. After the test, remove
+those exact resources and verify the runner is no longer authorized:
+
+```bash
+az role assignment delete --subscription "$SUBSCRIPTION" --ids "$TEMPORARY_ROLE_ID"
+az network private-dns link vnet delete --subscription "$SUBSCRIPTION" \
+  --ids "$TEMPORARY_DNS_LINK_ID" --yes
+```
 
 ## Azure planning
 
