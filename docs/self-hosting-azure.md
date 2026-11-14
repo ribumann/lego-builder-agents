@@ -2,10 +2,12 @@
 
 This guide describes an isolated, public Azure deployment with an Azure-hosted
 planner. **It is not yet a validated end-to-end deployment:** the templates
-have provisioned the individual resources, but private package delivery,
-end-to-end edge and streaming checks, and hosted model generation have not
-been verified. The current server deliberately refuses to enable the hosted
-Azure planner. Do not remove that safeguard to make the site appear ready.
+have provisioned the individual resources. One staging deployment loaded a
+private Blob package with managed identity, and a non-paid synthetic stream
+completed after 271.6 seconds; an earlier stream closed early. Full
+reproducibility, reliable streaming, edge protections and hosted model
+generation have not been verified. The current server deliberately refuses
+to enable the hosted Azure planner. Do not remove that safeguard to make the site appear ready.
 Until these checks and the application integration are complete, this is a
 staging guide, not a production recipe.
 
@@ -135,7 +137,8 @@ Front Door backend service tag with that exact ID; SCM is deny-by-default.
 Apply it before opening the origin and verify that direct-origin and wrong-ID
 requests are denied, and that WAF is associated with both active domains.
 The WAF custom rule limits the paid route per client IP and per edge location;
-it is approximate and is not a global spending cap or authentication.
+distributed Front Door servers can allow requests above its low threshold.
+It is approximate and is not a global spending cap or authentication.
 Do not trust client-supplied forwarded host headers. Configure the exact
 `BRICKLAB_HOSTED_ORIGIN` as `https://` plus your DNS hostname, with no trailing
 slash, port, path, or credentials.
@@ -151,8 +154,8 @@ using `az storage blob upload --auth-mode login`. Never upload your local
 Copilot or GitHub credential caches. Configure `WEBSITE_RUN_FROM_PACKAGE`
 to the private Blob URL and the web app's system-assigned identity to read it.
 See [run from package with managed identity](https://learn.microsoft.com/azure/app-service/deploy-run-package#access-a-package-in-azure-blob-storage-using-a-managed-identity).
-Private package retrieval and routing have **not** yet been validated here;
-test them in your environment without relaxing your network policy.
+Private package retrieval succeeded in one staging deployment; test it in your
+environment without relaxing your network policy.
 
 The hosted app settings are `HOST=0.0.0.0`, `BRICKLAB_HOSTED=1`, and the
 exact `BRICKLAB_HOSTED_ORIGIN`. Azure injects `PORT`. For the currently
