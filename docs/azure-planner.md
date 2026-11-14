@@ -6,6 +6,27 @@ HTTPS `*.openai.azure.com` resource endpoint) and `AZURE_OPENAI_DEPLOYMENT`.
 Grant that identity the Cognitive Services OpenAI User role on its dedicated
 Azure OpenAI resource. No key or developer credentials are used.
 
+## Speech adapter (not enabled)
+
+`azure-speech.mjs` provides a server-side adapter for Azure Speech short-audio
+transcription. It accepts canonical 16-bit mono 16 kHz PCM WAV up to 60
+seconds and returns a transcript; it does not start planning. The custom
+domain must use the same name as its Speech account. It uses managed identity
+and the resource-bound Entra bearer required by
+[Speech REST](https://learn.microsoft.com/azure/ai-services/speech-service/rest-speech-to-text-short).
+No Speech resource, route, or working cloud transcription is provided here.
+
+The adapter requires a reservation callback before token acquisition or audio
+transmission. A production caller must provide a verified, fail-closed speech
+reservation in the same durable daily ledger as planning, as well as
+authenticated access, explicit informed consent, abuse controls, and privacy
+and retention policies. The existing text-only budget gate does not provide
+speech reservations. Verify the resource, identity, pricing and billing before
+use; do not enable paid speech publicly without these controls. Audio and
+transcripts must not be logged.
+
+## Azure planning
+
 The caller supplies the shared planning prompt and an AbortSignal to
 `planAzure({ prompt, signal })`, then validates the returned custom design and
 selected world. The adapter sends one request, caps output tokens and response
