@@ -202,7 +202,7 @@ let storageWarningShown = false;
 let quizWon = false;
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
-brief.value = EXAMPLES.jurassic[0];
+brief.value = translate(EXAMPLES.jurassic[0]);
 const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
 const clearNotice = () => { noticeSource = ''; $('#notice').hidden = true; };
 const setButton = (id: string, disabled: boolean) => { $<HTMLButtonElement>(id).disabled = disabled; };
@@ -510,13 +510,13 @@ function restore() {
       team = null;
       hasSceneAppend = false;
       activeBrief = '';
-      brief.value = EXAMPLES[world][0];
+      brief.value = translate(EXAMPLES[world][0]);
       preview();
     }
   } catch (error) {
     team = null;
     hasSceneAppend = false;
-    brief.value = EXAMPLES[world][0];
+    brief.value = translate(EXAMPLES[world][0]);
     preview();
     notice(`Could not restore the saved build: ${error instanceof Error ? error.message : 'invalid data'}. Your old save has not been overwritten.`);
   }
@@ -546,8 +546,8 @@ function switchWorld(next: World) {
 $('#brief-form').addEventListener('submit', event => { event.preventDefault(); void makePlan(); });
 $('#jurassic').addEventListener('click', () => switchWorld('jurassic'));
 $('#space').addEventListener('click', () => switchWorld('space'));
-$('#inspire').addEventListener('click', () => { brief.value = EXAMPLES[world][++examples % EXAMPLES[world].length]; brief.focus(); });
-$('#demo').addEventListener('click', () => { mode = 'local'; modeChosen = true; updateMode(); brief.value = EXAMPLES[world][0]; void makePlan(true); });
+$('#inspire').addEventListener('click', () => { brief.value = translate(EXAMPLES[world][++examples % EXAMPLES[world].length]); brief.focus(); });
+$('#demo').addEventListener('click', () => { mode = 'local'; modeChosen = true; updateMode(); brief.value = translate(EXAMPLES[world][0]); void makePlan(true); });
 $('#run').addEventListener('click', () => {
   if (!team) return;
   replaying = false;

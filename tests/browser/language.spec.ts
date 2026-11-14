@@ -111,6 +111,30 @@ test('translated guide briefs and crew question buttons work in every language',
   }
 });
 
+test('suggested offline briefs are localized and retain their intended designs', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  for (const [language, snippet, model, color] of [
+    ['de', 'violetten', 'brachiosaurus', 'purple'],
+    ['fr', 'stégosaure orange', 'stegosaurus', 'orange'],
+    ['it', 'stegosauro verde', 'stegosaurus', 'green'],
+    ['es', 'braquiosaurio morado', 'brachiosaurus', 'purple'],
+    ['pt', 'estegossauro laranja', 'stegosaurus', 'orange'],
+    ['en', 'green stegosaurus', 'stegosaurus', 'green'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#inspire').click();
+    await expect(page.locator('#brief')).toHaveValue(new RegExp(snippet));
+    await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!));
+    expect(saved.spec).toMatchObject({ model, color });
+  }
+});
+
 test('known server status is localized without changing external messages', async ({ page }) => {
   const status = 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.';
   await page.route('**/api/status', route => route.fulfill({ json: {

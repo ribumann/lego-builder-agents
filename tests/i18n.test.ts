@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { elapsedText, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail } from '../src/i18n';
+import { EXAMPLES, parseBrief, type World } from '../src/engine';
 
 test('planning estimates stay provider-specific in every supported language', () => {
   for (const language of languages) {
@@ -56,6 +57,19 @@ test('known Local AI status translates while preserving unknown provider text', 
     assert.notEqual(translate(status), status);
     assert.match(translate(status), /OLLAMA_NO_CLOUD=1/);
     assert.equal(translate('Provider says 🚀'), 'Provider says 🚀');
+  }
+  setLanguage('en');
+});
+
+test('every translated suggested offline brief produces the same specification', () => {
+  for (const language of languages) {
+    setLanguage(language);
+    for (const world of ['jurassic', 'space'] as World[]) {
+      for (const example of EXAMPLES[world]) {
+        assert.deepEqual(parseBrief(world, translate(example)).spec, parseBrief(world, example).spec,
+          `${language}: ${example}`);
+      }
+    }
   }
   setLanguage('en');
 });
