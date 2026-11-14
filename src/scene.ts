@@ -1,18 +1,21 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AGENTS, type Brick, type World } from './engine';
+import { BrickBatch } from './brick-batch';
 
 const UNIT_Y = 0.7;
 export class Workbench {
   private renderer: THREE.WebGLRenderer;
   private scene = new THREE.Scene();
-  private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 250);
+  private camera = new THREE.PerspectiveCamera(38, 1, 0.1, 900);
   private controls: OrbitControls;
   private scenery = new THREE.Group();
   private model = new THREE.Group();
   private blueprint = new THREE.Group();
   private robots = new THREE.Group();
-  private meshes = new Map<string, THREE.Group>();
+  private modelBatch?: BrickBatch;
+  private blueprintBatch?: BrickBatch;
+  private born = new Map<string, number>();
   private materials = new Map<string, THREE.MeshStandardMaterial>();
   private cube = new THREE.BoxGeometry(0.94, 0.65, 0.94);
   private stud = new THREE.CylinderGeometry(0.29, 0.29, 0.13, 16);
@@ -20,11 +23,13 @@ export class Workbench {
   private resize: ResizeObserver;
   private exploded = false;
   private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  private world: World = 'jurassic';
   private agentTargets = new Map<string, THREE.Vector3>();
   private onSelect: (brick: Brick) => void;
   private bricks = new Map<string, Brick>();
   private down = { x: 0, y: 0 };
+  private cameraTarget = new THREE.Vector3(-1, 3, 0);
+  private cameraDistance = 39;
+  private renderMetricsDirty = true;
   constructor(host: HTMLElement, onSelect: (brick: Brick) => void) {
     this.onSelect = onSelect;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -41,7 +46,7 @@ export class Workbench {
     this.controls.target.set(0, 3, 0);
     this.controls.enableDamping = !this.reduced;
     this.controls.minDistance = 16;
-    this.controls.maxDistance = 65;
+    this.controls.maxDistance = 500;
     this.controls.maxPolarAngle = Math.PI / 2.08;
     this.controls.enablePan = false;
     const ambient = new THREE.HemisphereLight('#fff9e2', '#6c998f', 2.8);
@@ -67,7 +72,8 @@ export class Workbench {
       ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1,
         -(e.clientY - rect.top) / rect.height * 2 + 1), this.camera);
       const hit = ray.intersectObjects(this.model.children, true)[0];
-      const brick = hit && this.bricks.get(hit.object.parent?.userData.id);
+      const id = hit?.instanceId === undefined ? undefined : hit.object.userData.brickIds?.[hit.instanceId];
+      const brick = id && this.bricks.get(id);
       if (brick) this.onSelect(brick);
     });
     this.setWorld('jurassic');
@@ -81,33 +87,21 @@ export class Workbench {
     }));
     return this.materials.get(id)!;
   }
-  private brickMesh(brick: Brick, ghost = false) {
-    const group = new THREE.Group();
-    const body = new THREE.Mesh(this.cube, this.material(brick.color, ghost));
-    body.castShadow = !ghost;
-    body.receiveShadow = !ghost;
-    const stud = new THREE.Mesh(this.stud, this.material(brick.color, ghost));
-    stud.position.y = 0.37;
-    stud.castShadow = !ghost;
-    group.add(body, stud);
-    group.position.set(brick.x, brick.y * UNIT_Y + 0.38, brick.z);
-    group.userData = { id: brick.id, base: group.position.clone(), born: performance.now() };
-    return group;
-  }
   setWorld(world: World) {
-    this.world = world;
     this.clearGroup(this.scenery, true);
     this.clearGroup(this.robots, true);
     const space = world === 'space';
     const bg = space ? '#152b48' : '#cce6df';
     this.scene.background = new THREE.Color(bg);
-    this.scene.fog = new THREE.Fog(bg, 55, 115);
+    this.scene.fog = new THREE.Fog(bg, 600, 900);
     const ground = new THREE.Mesh(new THREE.CylinderGeometry(17, 18, 0.8, 64),
       this.material(space ? '#536c89' : '#77b798'));
+    ground.name = 'build-ground';
     ground.position.y = -0.5;
     ground.receiveShadow = true;
     this.scenery.add(ground);
     const plate = new THREE.Mesh(new THREE.BoxGeometry(26, 0.3, 22), this.material(space ? '#334e6b' : '#a2c89c'));
+    plate.name = 'build-plate';
     plate.position.y = -0.2;
     plate.receiveShadow = true;
     this.scenery.add(plate);
@@ -154,16 +148,19 @@ export class Workbench {
         }
         tree.position.set(x, 0, z);
         tree.scale.setScalar(scale);
+        tree.name = 'site-decoration';
         this.scenery.add(tree);
       }
       const mountain = new THREE.Mesh(new THREE.ConeGeometry(6, 10, 7), this.material('#7a9c92'));
       mountain.position.set(-16, 2, -20);
+      mountain.name = 'site-decoration';
       this.scenery.add(mountain);
       const peak = new THREE.Mesh(new THREE.ConeGeometry(1.7, 2.8, 7), this.material('#d7ba92'));
       peak.position.set(-16, 6.5, -20);
+      peak.name = 'site-decoration';
       this.scenery.add(peak);
     }
-    for (const [i, id] of (['build', 'frame', 'detail'] as const).entries()) {
+    for (const [i, id] of (['build', 'plan', 'frame', 'detail', 'check'] as const).entries()) {
       const robot = new THREE.Group();
       const color = AGENTS[id].color;
       const body = new THREE.Mesh(new THREE.BoxGeometry(1, 1, 0.8), this.material(color));
@@ -176,48 +173,72 @@ export class Workbench {
       foot.position.y = 0.15;
       robot.add(body, head, visor, foot);
       robot.name = id;
-      robot.position.set(-5 + i * 5, 0, 8);
+      robot.position.set(-8 + i * 4, 0, 8);
       this.robots.add(robot);
     }
     this.resetCamera();
   }
   setBlueprint(bricks: Brick[]) {
-    this.clearGroup(this.blueprint);
-    for (const brick of bricks) this.blueprint.add(this.brickMesh(brick, true));
+    this.modelBatch?.dispose();
+    this.modelBatch = undefined;
+    this.model.clear();
+    this.bricks.clear();
+    this.born.clear();
+    this.blueprintBatch?.dispose();
+    this.blueprint.clear();
+    this.blueprintBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color, true), new Map(), true, performance.now());
+    this.blueprint.add(this.blueprintBatch.group);
+    const largeSite = bricks.some(b => b.x < -13 || b.x + (b.width ?? 1) > 13 || b.z < -11 || b.z + (b.depth ?? 1) > 11);
+    const ground = this.scenery.getObjectByName('build-ground');
+    const plate = this.scenery.getObjectByName('build-plate');
+    const radius = bricks.length ? Math.max(...bricks.map(b => Math.max(Math.abs(b.x), Math.abs(b.x + (b.width ?? 1)), Math.abs(b.z), Math.abs(b.z + (b.depth ?? 1))))) : 13;
+    const size = largeSite ? Math.max(2, (radius + 2) / 11) : 1;
+    ground?.scale.set(size, 1, size);
+    plate?.scale.set(size, 1, size);
+    for (const decoration of this.scenery.children)
+      if (decoration.name === 'site-decoration') decoration.visible = !largeSite;
+    if (bricks.some(b => b.width !== undefined)) {
+      const minX = Math.min(...bricks.map(b => b.x)), maxX = Math.max(...bricks.map(b => b.x + (b.width ?? 1) - 1));
+      const minY = Math.min(...bricks.map(b => b.y)) * UNIT_Y, maxY = Math.max(...bricks.map(b => b.y + (b.height ?? 1))) * UNIT_Y;
+      const minZ = Math.min(...bricks.map(b => b.z)), maxZ = Math.max(...bricks.map(b => b.z + (b.depth ?? 1) - 1));
+      this.cameraTarget.set((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+      this.cameraDistance = Math.max(25, Math.hypot(maxX - minX + 1, maxY - minY, maxZ - minZ + 1) * 1.8);
+    } else {
+      this.cameraTarget.set(-1, 3, 0);
+      this.cameraDistance = 39;
+    }
+    this.resetCamera();
   }
   showBlueprint(show: boolean) { this.blueprint.visible = show; }
   sync(bricks: Brick[]) {
     const present = new Set(bricks.map(b => b.id));
-    for (const [id, mesh] of this.meshes) if (!present.has(id)) {
-      this.model.remove(mesh);
-      this.meshes.delete(id);
-      this.bricks.delete(id);
-    }
+    if (present.size === this.bricks.size && [...present].every(id => this.bricks.has(id))) return;
+    for (const id of this.bricks.keys()) if (!present.has(id)) this.born.delete(id);
+    const now = performance.now();
     for (const brick of bricks) {
-      if (this.meshes.has(brick.id)) continue;
-      const mesh = this.brickMesh(brick);
-      this.model.add(mesh);
-      this.meshes.set(brick.id, mesh);
-      this.bricks.set(brick.id, brick);
-      this.agentTargets.set(brick.agent, new THREE.Vector3(brick.x, 0, Math.min(9, brick.z + 5)));
+      if (!this.bricks.has(brick.id)) {
+        this.born.set(brick.id, this.reduced ? 0 : now);
+        this.agentTargets.set(brick.agent, new THREE.Vector3(brick.x, 0, Math.min(9, brick.z + 5)));
+      }
     }
+    this.bricks = new Map(bricks.map(b => [b.id, b]));
+    this.modelBatch?.dispose();
+    this.model.clear();
+    this.modelBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color), this.born, false, now);
+    this.modelBatch.setExploded(this.exploded, now);
+    this.model.add(this.modelBatch.group);
+    this.renderMetricsDirty = true;
   }
-  explode(value: boolean) { this.exploded = value; }
+  explode(value: boolean) { this.exploded = value; this.modelBatch?.setExploded(value, performance.now()); }
   resetCamera() {
-    this.camera.position.set(this.world === 'space' ? 23 : 21, 17, 27);
-    this.controls.target.set(-1, 3, 0);
+    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(0.55, 0.35, 0.7).normalize().multiplyScalar(this.cameraDistance));
+    this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }
   private animate = () => {
     this.frame = requestAnimationFrame(this.animate);
     const now = performance.now();
-    for (const mesh of this.meshes.values()) {
-      const base = mesh.userData.base as THREE.Vector3;
-      const offset = this.exploded ? new THREE.Vector3(base.x * 0.3, base.y * 0.45 + 1, base.z * 0.5) : new THREE.Vector3();
-      const target = base.clone().add(offset);
-      if (!this.reduced && now - mesh.userData.born < 320) target.y += 3 * (1 - (now - mesh.userData.born) / 320) ** 3;
-      mesh.position.lerp(target, this.reduced ? 1 : 0.2);
-    }
+    this.modelBatch?.animate(now);
     for (const robot of this.robots.children) {
       const target = this.agentTargets.get(robot.name);
       if (target) {
@@ -227,6 +248,15 @@ export class Workbench {
     }
     this.controls.update();
     this.renderer.render(this.scene, this.camera);
+    if (this.renderMetricsDirty) {
+      const meshes = (this.modelBatch?.group.children ?? []) as THREE.InstancedMesh[];
+      const canvas = this.renderer.domElement;
+      canvas.dataset.modelBodies = String(meshes.filter((_, i) => i % 2 === 0).reduce((sum, mesh) => sum + mesh.count, 0));
+      canvas.dataset.modelStuds = String(meshes.filter((_, i) => i % 2 === 1).reduce((sum, mesh) => sum + mesh.count, 0));
+      canvas.dataset.renderCalls = String(this.renderer.info.render.calls);
+      canvas.dataset.renderTriangles = String(this.renderer.info.render.triangles);
+      this.renderMetricsDirty = false;
+    }
   };
   private clearGroup(group: THREE.Group, dispose = false) {
     if (dispose) group.traverse(object => {
@@ -242,6 +272,8 @@ export class Workbench {
     this.resize.disconnect();
     this.controls.dispose();
     this.renderer.dispose();
+    this.modelBatch?.dispose();
+    this.blueprintBatch?.dispose();
     this.cube.dispose();
     this.stud.dispose();
     for (const material of this.materials.values()) material.dispose();

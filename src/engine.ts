@@ -1,7 +1,10 @@
+import { expandCustomBricks, validateCustomSpec } from './custom-design.mjs';
+
 export type World = 'jurassic' | 'space';
-export type AgentId = 'build' | 'frame' | 'detail';
+export type AgentId = 'build' | 'plan' | 'frame' | 'detail' | 'check';
+export type ModelAgentId = 'build' | 'frame' | 'detail';
 export type Color = 'green' | 'orange' | 'blue' | 'purple' | 'red' | 'white';
-export type Model = 'stegosaurus' | 'brachiosaurus' | 'explorer' | 'cargo';
+export type Model = 'stegosaurus' | 'brachiosaurus' | 'explorer' | 'cargo' | 'custom';
 export type Status = 'ready' | 'planned' | 'building' | 'paused' | 'complete' | 'damaged';
 export interface Spec {
   world: World;
@@ -10,6 +13,13 @@ export interface Spec {
   longTail: boolean;
   wideWings: boolean;
   budget: number;
+  design?: { name: string; bricks?: CustomBrick[]; objects?: { name: string; bricks: CustomBrick[] }[] };
+}
+export interface CustomBrick {
+  x: number; y: number; z: number;
+  width: number; height: number; depth: number;
+  color: Color; part: 'frame' | 'detail';
+  repeat?: { count: number; dx: number; dy: number; dz: number };
 }
 export interface Brick {
   id: string;
@@ -19,6 +29,10 @@ export interface Brick {
   color: string;
   part: string;
   agent: 'frame' | 'detail';
+  width?: number;
+  height?: number;
+  depth?: number;
+  object?: string;
 }
 export interface BuildTask {
   id: string;
@@ -31,10 +45,10 @@ export interface Plan {
   spec: Spec;
   tasks: BuildTask[];
   assumptions: string[];
-  source: 'local' | 'copilot' | 'github-models';
+  source: 'local' | 'copilot' | 'local-ai' | 'github-models';
 }
 export interface AgentDecision {
-  agent: AgentId;
+  agent: ModelAgentId;
   explanation: string;
   taskOrder: string[];
 }
@@ -83,8 +97,10 @@ export const EXAMPLES: Record<World, string[]> = {
 };
 export const AGENTS = {
   build: { name: 'BuildBot', role: 'Coordinator', short: 'B', color: '#e6a51a' },
+  plan: { name: 'PlanBot', role: 'Plan verifier', short: 'P', color: '#6f62a3' },
   frame: { name: 'FrameBot', role: 'Structure specialist', short: 'F', color: '#427cbd' },
   detail: { name: 'DetailBot', role: 'Finishing specialist', short: 'D', color: '#c36570' },
+  check: { name: 'CheckBot', role: 'Quality inspector', short: 'C', color: '#39836d' },
 } as const;
 const models: Model[] = ['stegosaurus', 'brachiosaurus', 'explorer', 'cargo'];
 const colorNames = Object.keys(COLORS) as Color[];
@@ -129,6 +145,11 @@ export function parseBrief(world: World, prompt: string): { spec: Spec; assumpti
 export function validateSpec(value: unknown, world: World): Spec {
   if (!value || typeof value !== 'object') throw new Error('The model returned no build specification.');
   const s = value as Record<string, unknown>;
+  if (s.model === 'custom') {
+    const spec = validateCustomSpec(s);
+    if (spec.world !== world) throw new Error('The model chose a different world.');
+    return spec;
+  }
   if (s.world !== world || !models.includes(s.model as Model) || !colorNames.includes(s.color as Color)
       || typeof s.longTail !== 'boolean' || typeof s.wideWings !== 'boolean'
       || !Number.isInteger(s.budget) || Number(s.budget) < 1 || Number(s.budget) > 1000)
@@ -140,6 +161,29 @@ export function validateSpec(value: unknown, world: World): Spec {
 }
 
 export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan['source'] = 'local'): Plan {
+  if (spec.model === 'custom') {
+    const canonical = validateCustomSpec(spec);
+    const tasks: BuildTask[] = [];
+    const design = canonical.design!;
+    const multi = !!design.objects;
+    const objects = design.objects ?? [{ name: design.name, bricks: design.bricks! }];
+    for (const [index, object] of objects.entries()) {
+      const groups = new Map<'frame' | 'detail', Brick[]>();
+      for (const b of expandCustomBricks(object.bricks)) {
+        const brick: Brick = { ...b, id: key(b.x, b.y, b.z), agent: b.part, color: COLORS[b.color],
+          ...(multi ? { object: object.name } : {}) };
+        if (!groups.has(b.part)) groups.set(b.part, []);
+        groups.get(b.part)!.push(brick);
+      }
+      for (const agent of ['frame', 'detail'] as const) {
+        const bricks = groups.get(agent);
+        const suffix = multi ? `object-${index}` : agent;
+        if (bricks) tasks.push({ id: `${agent}:${suffix}`, label: multi ? `${object.name} · ${agent === 'frame' ? 'structure' : 'details'}` : agent === 'frame' ? 'Structure' : 'Finishing details',
+          agent, depends: agent === 'detail' && groups.has('frame') ? [`frame:${multi ? `object-${index}` : 'frame'}`] : [], bricks: sortBricks(bricks) });
+      }
+    }
+    return { spec: canonical, tasks, assumptions, source };
+  }
   const voxels = new Map<string, Brick>();
   const main = COLORS[spec.color];
   const add = (x: number, y: number, z: number, part: string, agent: Brick['agent'], color = main) => {
@@ -235,18 +279,48 @@ export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan[
 const sortBricks = (bricks: Brick[]) => bricks.sort((a, b) => a.y - b.y || a.x - b.x || a.z - b.z);
 export const allBricks = (plan: Plan) => plan.tasks.flatMap(t => t.bricks);
 
+// PlanBot checks the actual dependency graph before any specialist can run.
+function reviewPlan(plan: Plan): { dependencyCount: number; connected: boolean } {
+  const tasks = new Map(plan.tasks.map(task => [task.id, task]));
+  if (!tasks.size || tasks.size !== plan.tasks.length) throw new Error('PlanBot found missing or duplicate tasks.');
+  const visiting = new Set<string>(), reviewed = new Set<string>();
+  const visit = (id: string) => {
+    if (visiting.has(id)) throw new Error('PlanBot found a cycle in task dependencies.');
+    if (reviewed.has(id)) return;
+    const task = tasks.get(id);
+    if (!task) throw new Error(`PlanBot found an unknown task dependency: ${id}.`);
+    visiting.add(id);
+    for (const dependency of task.depends) visit(dependency);
+    visiting.delete(id);
+    reviewed.add(id);
+  };
+  for (const task of plan.tasks) visit(task.id);
+  return {
+    dependencyCount: plan.tasks.reduce((count, task) => count + task.depends.length, 0),
+    connected: inspect(plan, allBricks(plan)).find(check => check.label === 'Connected model' || check.label === 'Connected objects')!.pass,
+  };
+}
+
 export class Team {
   plan: Plan;
   bricks = new Map<string, Brick>();
   events: AgentEvent[] = [];
   tick = 0;
   status: Status = 'planned';
+  private cachedInspection?: { signature: string; checks: Check[] };
+  private readonly deferPartialConnectivity: boolean;
   constructor(plan: Plan) {
+    const review = reviewPlan(plan);
     this.plan = plan;
-    this.log('build', 'plan', `I split this ${plan.spec.model} into ${plan.tasks.length} tasks for two specialists.`);
+    const planned = allBricks(plan);
+    this.deferPartialConnectivity = planned.length > 1000
+      || planned.reduce((sum, b) => sum + (b.width ?? 1) * (b.height ?? 1) * (b.depth ?? 1), 0) > 32768;
+    this.log('build', 'plan', `I split this ${plan.spec.model} into ${plan.tasks.length} tasks for the two builders.`);
     for (const a of plan.assumptions) this.log('build', 'observe', a);
+    this.log('plan', 'verify', `I checked ${plan.tasks.length} tasks and ${review.dependencyCount} dependencies: no missing tasks or cycles. ${review.connected ? plan.spec.design?.objects ? 'Each planned object is face-connected.' : 'The planned bricks are face-connected.' : 'The planned bricks are disconnected; CheckBot will flag this at inspection.'}`);
     this.log('build', 'delegate', 'FrameBot: build the structure. DetailBot: add each detail when its supporting part is ready. Work together from the shared board.');
     this.log('detail', 'observe', 'I can work alongside FrameBot, but each detail needs its supporting part first.');
+    this.log('check', 'observe', 'I will inspect the finished model and identify missing bricks if a repair is needed.');
   }
   log(agent: AgentId, kind: AgentEvent['kind'], message: string) {
     this.events.push({ agent, kind, message, tick: this.tick });
@@ -255,7 +329,17 @@ export class Team {
   taskDone(task: BuildTask) { return task.bricks.every(b => this.bricks.has(b.id)); }
   get progress() { return this.bricks.size / allBricks(this.plan).length; }
   get completedTasks() { return this.plan.tasks.filter(t => this.taskDone(t)).length; }
-  get checks() { return inspect(this.plan, [...this.bricks.values()]); }
+  get checks() {
+    const signature = `${this.tick}:${this.bricks.size}:${this.status === 'damaged' ? 'damaged' : 'active'}`;
+    if (this.cachedInspection?.signature !== signature) {
+      const expected = allBricks(this.plan).length;
+      const checks = this.deferPartialConnectivity && this.bricks.size < expected && this.status !== 'damaged'
+        ? pendingInspection(this.plan, this.bricks.size, expected)
+        : inspect(this.plan, [...this.bricks.values()]);
+      this.cachedInspection = { signature, checks };
+    }
+    return this.cachedInspection.checks;
+  }
   step(batch = 5): boolean {
     if (this.status === 'complete' || this.status === 'damaged') return false;
     this.status = 'building';
@@ -274,25 +358,32 @@ export class Team {
     if (this.plan.tasks.every(t => this.taskDone(t))) {
       const checks = this.checks;
       this.status = checks.every(c => c.pass) ? 'complete' : 'damaged';
-      this.log('build', 'verify', `${checks.filter(c => c.pass).length}/${checks.length} checks passed. ${this.status === 'complete' ? 'Mission built. You were the director!' : 'Inspection found a problem. Use repair to investigate.'}`);
+      const failures = checks.filter(c => !c.pass);
+      this.log('check', 'verify', `${checks.length - failures.length}/${checks.length} checks passed. ${failures.length ? `Needs attention: ${failures.map(c => c.label).join(', ')}.` : 'The finished model passed inspection.'}`);
+      this.log('build', 'observe', this.status === 'complete' ? 'Mission built. You were the director!' : 'CheckBot found a problem. Use repair to investigate.');
     }
     return true;
   }
   damage() {
     if (this.status !== 'complete') return;
-    const brick = allBricks(this.plan).find(b => b.part === (this.plan.spec.world === 'space' ? 'cockpit' : 'eyes'));
+    const brick = this.plan.spec.model === 'custom'
+      ? allBricks(this.plan).find(b => b.agent === 'detail') ?? allBricks(this.plan)[0]
+      : allBricks(this.plan).find(b => b.part === (this.plan.spec.world === 'space' ? 'cockpit' : 'eyes'));
     if (!brick) return;
     this.bricks.delete(brick.id);
     this.status = 'damaged';
     this.log('build', 'observe', 'A finishing brick was removed for the test. Can the team notice without being told which one?');
+    const missing = allBricks(this.plan).filter(b => !this.bricks.has(b.id));
+    this.log('check', 'verify', `I compared the build with the plan and found ${missing.length} missing brick${missing.length === 1 ? '' : 's'}. Repair can return it to its owner.`);
   }
   repair() {
     if (this.status !== 'damaged') return;
     const missing = allBricks(this.plan).filter(b => !this.bricks.has(b.id));
     if (!missing.length) {
-      this.log('build', 'verify', 'No missing bricks found. This prototype cannot automatically repair a different topology problem.');
+      this.log('check', 'verify', 'No missing bricks found. This prototype cannot automatically repair a different topology problem.');
       return;
     }
+    this.log('check', 'verify', `I identified ${missing.length} missing brick${missing.length === 1 ? '' : 's'}; the owning builder can replace ${missing.length === 1 ? 'it' : 'them'}.`);
     for (const agent of ['frame', 'detail'] as const) {
       const owned = missing.filter(b => b.agent === agent);
       if (owned.length) this.log(agent, 'repair', `I compared the world with the plan and found ${owned.length} missing ${owned[0].part} brick${owned.length > 1 ? 's' : ''}. Reclaiming my task.`);
@@ -306,30 +397,57 @@ export class Team {
   }
 }
 
+function pendingInspection(plan: Plan, count: number, expected: number): Check[] {
+  return [
+    { label: 'Brief fulfilled', pass: false, detail: `${expected - count} planned bricks missing.` },
+    { label: plan.spec.design?.objects ? 'Connected objects' : 'Connected model', pass: false,
+      detail: 'Connectivity will be checked when all planned bricks are placed.' },
+    ...(plan.spec.model === 'custom' ? [] : [{ label: 'Balanced sides', pass: false, detail: 'Symmetry will be checked when complete.' }]),
+    { label: 'Within budget', pass: count <= plan.spec.budget, detail: `${count} of ${plan.spec.budget} allowed bricks. No model cost is implied.` },
+  ];
+}
+
 export function inspect(plan: Plan, bricks: Brick[]): Check[] {
   const expected = allBricks(plan);
   const present = new Set(bricks.map(b => b.id));
   const missing = expected.filter(b => !present.has(b.id));
-  const seen = new Set<string>();
-  const pending = bricks.length ? [bricks[0]] : [];
-  const map = new Map(bricks.map(b => [b.id, b]));
-  while (pending.length) {
-    const b = pending.pop()!;
-    if (seen.has(b.id)) continue;
-    seen.add(b.id);
-    for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
-      const n = map.get(key(b.x + dx, b.y + dy, b.z + dz));
-      if (n && !seen.has(n.id)) pending.push(n);
+  const grouped = new Map<string, Brick[]>();
+  const objectNames = plan.spec.design?.objects?.map(o => o.name) ?? [''];
+  for (const name of objectNames) grouped.set(name, []);
+  for (const b of bricks) grouped.get(b.object ?? '')?.push(b);
+  const map = new Map<string, Brick>();
+  for (const b of bricks)
+    for (let x = b.x; x < b.x + (b.width ?? 1); x++)
+      for (let y = b.y; y < b.y + (b.height ?? 1); y++)
+        for (let z = b.z; z < b.z + (b.depth ?? 1); z++) map.set(key(x, y, z), b);
+  const connectivity = [...grouped].map(([name, group]) => {
+    const seen = new Set<string>();
+    const pending = group.length ? [group[0]] : [];
+    while (pending.length) {
+      const b = pending.pop()!;
+      if (seen.has(b.id)) continue;
+      seen.add(b.id);
+      for (let x = b.x; x < b.x + (b.width ?? 1); x++)
+        for (let y = b.y; y < b.y + (b.height ?? 1); y++)
+          for (let z = b.z; z < b.z + (b.depth ?? 1); z++)
+            for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+              const n = map.get(key(x + dx, y + dy, z + dz));
+              if (n && (n.object ?? '') === name && !seen.has(n.id)) pending.push(n);
+            }
     }
-  }
+    return { name, seen: seen.size, count: group.length, pass: group.length > 0 && seen.size === group.length };
+  });
   const symmetric = bricks.every(b => present.has(key(b.x, b.y, -b.z)));
   return [
     { label: 'Brief fulfilled', pass: !missing.length && bricks.length === expected.length,
       detail: missing.length ? `${missing.length} planned brick${missing.length > 1 ? 's' : ''} missing.` : `${expected.length} planned bricks placed.` },
-    { label: 'Connected model', pass: bricks.length > 0 && seen.size === bricks.length,
-      detail: `${seen.size}/${bricks.length} bricks face-connected. Connectivity check, not a physical clutch or stability simulation.` },
-    { label: 'Balanced sides', pass: bricks.length > 0 && symmetric,
-      detail: symmetric ? 'Left and right brick positions mirror each other.' : 'The two sides do not match yet.' },
+    { label: plan.spec.design?.objects ? 'Connected objects' : 'Connected model',
+      pass: connectivity.every(c => c.pass),
+      detail: plan.spec.design?.objects
+        ? `${connectivity.map(c => `${c.name}: ${c.seen}/${c.count} face-connected`).join('; ')}. Not a physical stability simulation.`
+        : `${connectivity[0].seen}/${bricks.length} bricks face-connected. Connectivity check, not a physical clutch or stability simulation.` },
+    ...(plan.spec.model === 'custom' ? [] : [{ label: 'Balanced sides', pass: bricks.length > 0 && symmetric,
+      detail: symmetric ? 'Left and right brick positions mirror each other.' : 'The two sides do not match yet.' }]),
     { label: 'Within budget', pass: bricks.length <= plan.spec.budget,
       detail: `${bricks.length} of ${plan.spec.budget} allowed bricks. No model cost is implied.` },
   ];
@@ -344,7 +462,7 @@ export function restoreSnapshot(value: unknown): { team: Team; prompt: string } 
     throw new Error('Saved build format is invalid or from a different version.');
   const spec = validateSpec(s.spec, s.world);
   const source = s.source === undefined ? 'local' : s.source;
-  if (source !== 'local' && source !== 'copilot' && source !== 'github-models')
+  if (source !== 'local' && source !== 'copilot' && source !== 'local-ai' && source !== 'github-models')
     throw new Error('Saved build has an invalid source.');
   const plan = createPlan(spec, [], source);
   if (s.taskOrder !== undefined) {
@@ -382,19 +500,19 @@ export function loadAIMission(value: unknown): { team: Team; prompt: string } {
     throw new Error('AI mission has no supported world.');
   const spec = validateSpec(inputSpec, inputSpec.world);
   const plan = createPlan(spec, [`Loaded AI mission attributed to ${mission.model}. Imported files are not proof that a model ran.`], 'github-models');
-  const decisions = new Map<AgentId, AgentDecision>();
+  const decisions = new Map<ModelAgentId, AgentDecision>();
   for (const raw of mission.decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('Agent decision is invalid.');
     const d = raw as Record<string, unknown>;
     if (!['build','frame','detail'].includes(String(d.agent)) || typeof d.explanation !== 'string'
       || !d.explanation.trim() || d.explanation.length > 1200 || !Array.isArray(d.taskOrder)
-      || d.taskOrder.some(id => typeof id !== 'string') || decisions.has(d.agent as AgentId))
-      throw new Error('AI mission must have one valid decision per agent.');
+      || d.taskOrder.some(id => typeof id !== 'string') || decisions.has(d.agent as ModelAgentId))
+      throw new Error('AI mission must have one valid decision per model agent.');
     const owned = plan.tasks.filter(t => t.agent === d.agent).map(t => t.id);
     if (new Set(d.taskOrder).size !== owned.length || d.taskOrder.length !== owned.length
       || d.taskOrder.some(id => !owned.includes(id)))
       throw new Error('Agent task priorities must contain exactly the tasks that agent owns.');
-    decisions.set(d.agent as AgentId, { agent: d.agent as AgentId, explanation: d.explanation, taskOrder: d.taskOrder as string[] });
+    decisions.set(d.agent as ModelAgentId, { agent: d.agent as ModelAgentId, explanation: d.explanation, taskOrder: d.taskOrder as string[] });
   }
   const order = [...decisions.get('frame')!.taskOrder, ...decisions.get('detail')!.taskOrder];
   plan.tasks.sort((a, b) => order.indexOf(a.id) - order.indexOf(b.id));

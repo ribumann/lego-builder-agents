@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { Team, EXAMPLES, allBricks, createPlan, parseBrief, restoreSnapshot, validateSpec, type World } from '../src/engine';
+import { AGENTS, Team, EXAMPLES, allBricks, createPlan, loadAIMission, parseBrief, restoreSnapshot, validateSpec, type World } from '../src/engine';
 
 function finish(team: Team) {
   for (let i = 0; i < 2000 && team.status !== 'complete' && team.status !== 'damaged'; i++) team.step(16);
@@ -84,4 +84,44 @@ test('fast-forward produces exactly the same model as single-step execution', ()
   finish(fast);
   assert.deepEqual([...slow.bricks.keys()].sort(), [...fast.bricks.keys()].sort());
   assert.ok(slow.tick > fast.tick);
+});
+
+test('five agents review, build, inspect and coordinate repair', () => {
+  assert.deepEqual(Object.keys(AGENTS), ['build', 'plan', 'frame', 'detail', 'check']);
+  const team = new Team(createPlan(parseBrief('jurassic', EXAMPLES.jurassic[0]).spec));
+  assert.ok(team.events.some(e => e.agent === 'plan' && /dependencies: no missing tasks or cycles/.test(e.message)));
+  finish(team);
+  for (const agent of ['build', 'plan', 'frame', 'detail', 'check']) assert.ok(team.events.some(e => e.agent === agent));
+  assert.ok(team.events.some(e => e.agent === 'check' && e.kind === 'verify' && /passed inspection/.test(e.message)));
+  team.damage();
+  assert.ok(team.events.some(e => e.agent === 'check' && /found 1 missing brick/.test(e.message)));
+  team.repair();
+  assert.ok(team.events.some(e => e.agent === 'check' && /owning builder/.test(e.message)));
+  finish(team);
+  assert.equal(restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot('old save compatible')))).team.status, 'complete');
+});
+
+test('PlanBot blocks unresolved and cyclic task graphs before execution', () => {
+  const plan = createPlan(parseBrief('space', 'blue explorer').spec);
+  const invalid = { ...plan, tasks: plan.tasks.map(task => ({ ...task, depends: [...task.depends] })) };
+  invalid.tasks[0].depends.push('frame:does-not-exist');
+  assert.throws(() => new Team(invalid), /PlanBot.*unknown task dependency/);
+  invalid.tasks[0].depends = [invalid.tasks[0].id];
+  assert.throws(() => new Team(invalid), /PlanBot.*cycle/);
+});
+
+test('legacy three-decision AI mission still uses local PlanBot and CheckBot', () => {
+  const spec = parseBrief('space', 'blue explorer').spec;
+  const plan = createPlan(spec);
+  const mission = {
+    kind: 'bricklab-ai-mission', version: 1, brief: 'blue explorer', model: 'fixture-only', spec,
+    decisions: ['build', 'frame', 'detail'].map(agent => ({
+      agent, explanation: 'Fixture decision.', taskOrder: plan.tasks.filter(task => task.agent === agent).map(task => task.id),
+    })),
+  };
+  const { team } = loadAIMission(mission);
+  assert.ok(team.events.some(e => e.agent === 'plan' && e.kind === 'verify'));
+  finish(team);
+  assert.ok(team.events.some(e => e.agent === 'check' && e.kind === 'verify'));
+  assert.equal(team.events.filter(e => e.message.includes('AI mission decision:')).length, 3);
 });
