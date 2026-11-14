@@ -74,6 +74,16 @@ export class BrickBatch {
     this.exploded = value;
     for (const entry of this.entries) this.place(entry, this.active.has(entry) ? this.lift(entry, now) : 0);
   }
+  setCutaway(plane?: THREE.Plane) {
+    for (const mesh of this.group.children as THREE.InstancedMesh[]) {
+      const materials = Array.isArray(mesh.material) ? mesh.material : [mesh.material];
+      for (const material of materials) {
+        material.clippingPlanes = plane ? [plane] : [];
+        material.clipShadows = !!plane;
+        material.needsUpdate = true;
+      }
+    }
+  }
   animate(now: number) {
     for (const entry of this.active) {
       this.place(entry, this.lift(entry, now));

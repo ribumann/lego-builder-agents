@@ -21,6 +21,7 @@ const icon = (name: string) => {
     help: '<circle cx="12" cy="12" r="9"/><path d="M9 9a3 3 0 0 1 6 0c0 2-3 2-3 4m0 3v1"/>',
     leaf: '<path d="M4 20 17 7M5 16C-1 5 12 3 21 3c0 9-2 22-13 16"/>',
     rocket: '<path d="M8 16c-4 0-5 5-5 5s5-1 5-5zm1-1L5 11l4-4c5-5 12-4 12-4s1 7-4 12l-4 4z"/><circle cx="15" cy="9" r="2"/>',
+    cutaway: '<path d="M4 20V4h10l6 8-6 8H4zm5-1V5m4 14V5"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.cube}</svg>`;
 };
@@ -67,6 +68,7 @@ app.innerHTML = `
         <div class="stage-tools" role="group" aria-label="Workbench view controls">
           <button id="blueprint" class="tool-button" aria-label="Toggle blueprint" aria-pressed="true" title="Blueprint">${icon('scan')}</button>
           <button id="explode" class="tool-button" aria-label="Toggle exploded view" aria-pressed="false" title="Exploded view">${icon('cube')}</button>
+          <button id="interior-view" class="tool-button" aria-label="Toggle cutaway view" aria-pressed="false" title="Cutaway view">${icon('cutaway')}</button>
           <button id="camera" class="tool-button" aria-label="Reset camera" title="Reset camera">${icon('reset')}</button>
         </div>
         <div class="scene-caption" id="scene-caption"><strong>A big idea starts with a small brief.</strong><span>The translucent bricks are a preview, not an agent-built result.</span></div>
@@ -86,7 +88,7 @@ app.innerHTML = `
         <div class="team-content" id="team-content"><div id="event-list" role="log" aria-label="Agent actions and explanations"></div><div id="task-list" hidden></div></div>
         <div class="team-question">
           <form id="question-form"><label for="question">Ask your crew</label><div class="question-input"><input id="question" maxlength="240" placeholder="Why do you need a plan?" autocomplete="off"/><button class="send-question" aria-label="Ask crew">${icon('arrow')}</button></div></form>
-          <div class="crew-prompts"><button type="button" class="text-button" id="ask-roles">Who does what?</button> <button type="button" class="text-button" id="ask-wait">Why wait?</button></div>
+          <div class="crew-prompts"><button type="button" class="text-button" id="ask-roles">Who does what?</button> <button type="button" class="text-button" id="ask-wait">Why wait?</button> <button type="button" class="text-button" id="ask-interior">How can a model be hollow?</button></div>
           <div id="crew-answer" role="status">Choose a question above or ask in English.</div>
         </div>
       </aside>
@@ -95,6 +97,7 @@ app.innerHTML = `
       <form id="brief-form" class="brief-form">
         <div class="brief-label"><label for="brief">What shall we build?</label><button type="button" id="inspire" class="text-button">Try an idea ${icon('star')}</button></div>
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
+        <label class="interior-option"><input id="hollow-interior" type="checkbox" aria-describedby="interior-help"><span><strong>Try a hollow interior</strong><small id="interior-help">Custom planning only. It asks for an empty space and usable opening when the design supports it; geometry remains model-generated.</small></span></label>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
         <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Your brief, model output and external error details are not translated. Names created by local examples stay in the language selected when created.</p>
@@ -183,6 +186,7 @@ let lastEventCount = -1;
 let eventRevision = 0;
 let showGhost = true;
 let exploded = false;
+let interiorView = false;
 let mode: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'copilot';
 let modeChosen = false;
 let hosted = false;
@@ -265,12 +269,14 @@ function render() {
   setButton('#repair', status !== 'damaged');
   setButton('#export', !count);
   setButton('#plan', planning);
+  setButton('#interior-view', !scene);
   setButton('#demo', planning);
   setButton('#herd-example', planning);
   setButton('#fleet-example', planning);
   setButton('#jurassic', planning);
   setButton('#space', planning);
   document.querySelectorAll<HTMLInputElement>('input[name="scene-action"]').forEach(input => { input.disabled = planning; });
+  $<HTMLInputElement>('#hollow-interior').disabled = planning || mode === 'local';
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
   $('#transport-note').textContent = planning ? 'One bounded planning request. No template fallback; the crew executes locally.'
@@ -444,7 +450,7 @@ async function makePlan(demo = false) {
       if (!localAI) wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot', brief.value);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
-        body: JSON.stringify({ world, brief: brief.value }), signal: controller.signal });
+        body: JSON.stringify({ world, brief: brief.value, hollowInterior: $<HTMLInputElement>('#hollow-interior').checked }), signal: controller.signal });
       const data = await planningResponse(response);
       if (controller.signal.aborted) throw new DOMException('Planning aborted.', 'AbortError');
       if (!response.ok || data.error) {
@@ -475,6 +481,7 @@ async function makePlan(demo = false) {
     eventRevision += 1000;
     scene?.setBlueprint(allBricks(team.plan));
     scene?.sync([...team.bricks.values()]);
+    scene?.setInteriorView(interiorView);
     if (demo) {
       speed = 4;
       updateSpeed();
@@ -560,6 +567,11 @@ $('#step').addEventListener('click', () => { if (team) { replaying = false; team
 $('#speed').addEventListener('click', () => { speed = speed === 1 ? 4 : speed === 4 ? 16 : 1; updateSpeed(); render(); });
 $('#blueprint').addEventListener('click', () => { showGhost = !showGhost; scene?.showBlueprint(showGhost); $('#blueprint').setAttribute('aria-pressed', String(showGhost)); });
 $('#explode').addEventListener('click', () => { exploded = !exploded; scene?.explode(exploded); $('#explode').setAttribute('aria-pressed', String(exploded)); });
+$('#interior-view').addEventListener('click', () => {
+  interiorView = !interiorView;
+  scene?.setInteriorView(interiorView);
+  $('#interior-view').setAttribute('aria-pressed', String(interiorView));
+});
 $('#camera').addEventListener('click', () => scene?.resetCamera());
 $('#damage').addEventListener('click', () => { replaying = false; team?.damage(); eventRevision++; render(); save(); });
 $('#repair').addEventListener('click', () => { replaying = false; team?.repair(); running = team?.status === 'building'; eventRevision++; render(); save(); });
@@ -590,6 +602,7 @@ function answer(question: string, agent?: AgentId) {
   let response = responses[id];
   if (/who.*what/.test(q)) response = 'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.';
   else if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
+  else if (/hollow|interior|cavity/.test(q)) response = 'The hollow-interior preference asks custom planning to leave an empty space and a usable opening when the design supports it. Use Cutaway view to inspect the cross-section. It is a preference, not a guarantee.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
@@ -600,6 +613,7 @@ function answer(question: string, agent?: AgentId) {
 }
 $('#ask-roles').addEventListener('click', () => answer('Who does what?'));
 $('#ask-wait').addEventListener('click', () => answer('', 'detail'));
+$('#ask-interior').addEventListener('click', () => answer('How can a model be hollow?'));
 $('#question-form').addEventListener('submit', event => {
   event.preventDefault();
   const input = $<HTMLInputElement>('#question');
@@ -683,6 +697,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>This workshop makes agent teamwork visible. Choose <strong>Jurassic valley</strong> or <strong>Space dock</strong>, then describe your build.</p>
   <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies and handoffs.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×. Choose <strong>Add to scene</strong> to grow the build without replacing it.</li><li><strong>Experiment:</strong> hide about a third of the bricks, ask for a repair, or replay the placement timeline. Repair cannot fix a disconnected blueprint.</li></ol>
   <p>Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.</p>
+  <p>${esc(translate('Try the hollow-interior preference with custom planning, then use Cutaway view to inspect the cross-section. It is a preference, not a guarantee; connectivity checks do not prove physical stability.'))}</p>
   <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
   <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
   <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
@@ -735,6 +750,7 @@ window.addEventListener('beforeunload', () => { planningController?.abort(); sav
 restore();
 render();
 function updateMode() {
+  $<HTMLInputElement>('#hollow-interior').disabled = planning || mode === 'local';
   $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'

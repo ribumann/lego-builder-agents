@@ -77,6 +77,11 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   await expect(page.locator('#mission-title')).toHaveText('A little prehistoric. A lot of possibility.');
   await expect(page.locator('.agent-name strong')).toHaveText(['BuildBot', 'PlanBot', 'FrameBot', 'DetailBot', 'CheckBot']);
   await expect(page.locator('.agent-name small')).toHaveText(['Build coordinator', 'Plan & dependency verifier', 'Structure builder', 'Detail & support builder', 'Inspector & repair lead']);
+  await expect(page.locator('#hollow-interior')).toBeEnabled();
+  await page.locator('#hollow-interior').check();
+  await expect(page.locator('#hollow-interior')).toBeChecked();
+  await page.getByRole('button', { name: 'Toggle cutaway view' }).click();
+  await expect(page.getByRole('button', { name: 'Toggle cutaway view' })).toHaveAttribute('aria-pressed', 'true');
   for (const role of await page.locator('.agent-name small').all()) await expect(role).toBeVisible();
   expect(await page.locator('.stage + .transport + .team-panel').count()).toBe(1);
   const quiz = await page.locator('#quiz-options').boundingBox();

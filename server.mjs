@@ -154,9 +154,9 @@ export function extractSpec(text, provider = 'Copilot') {
   return validateCustomSpec(parsed);
 }
 
-function askCopilot(world, brief, signal) {
+function askCopilot(world, brief, signal, hollowInterior) {
   const workdir = resolve(root, '.agent-home');
-  const prompt = planningPrompt(world, brief);
+  const prompt = planningPrompt(world, brief, hollowInterior);
   let release;
   const finished = new Promise(resolvePromise => { release = resolvePromise; });
   const result = new Promise((resolvePromise, reject) => {
@@ -343,13 +343,14 @@ const server = http.createServer(async (req, res) => {
         raw += chunk;
         if (Buffer.byteLength(raw) > 4096) { send(res, 413, { error: 'Request too large.' }); return; }
       }
-      const { world, brief } = JSON.parse(raw) ?? {};
-      if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000)
+      const { world, brief, hollowInterior = false } = JSON.parse(raw) ?? {};
+      if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
+          || typeof hollowInterior !== 'boolean')
         return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
       if (!localAI && (res.destroyed || controller.signal.aborted)) return;
       if (copilotAI) calls++;
       let spec;
-      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief)), 'Local AI');
+      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior)), 'Local AI');
       else {
         deadline = setTimeout(() => controller.abort(Object.assign(
           new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
@@ -392,7 +393,7 @@ const server = http.createServer(async (req, res) => {
             }
             // A reservation that completes after cancellation must never start a late model call.
             controller.signal.throwIfAborted();
-            const parsed = await planAzure({ prompt: planningPrompt(world, brief), signal: controller.signal });
+            const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior), signal: controller.signal });
             controller.signal.throwIfAborted();
             if (parsed?.model !== 'custom')
               throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
@@ -403,7 +404,7 @@ const server = http.createServer(async (req, res) => {
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else if (compatibleAI) {
           const work = (async () => {
-            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief), signal: controller.signal });
+            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior), signal: controller.signal });
             controller.signal.throwIfAborted();
             if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
             return validateCustomSpec(parsed);
@@ -411,7 +412,7 @@ const server = http.createServer(async (req, res) => {
           finished = work.then(() => {}, () => {});
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else {
-          const invocation = askCopilot(world, brief, controller.signal);
+          const invocation = askCopilot(world, brief, controller.signal, hollowInterior);
           finished = invocation.finished;
           spec = await invocation.result;
         }

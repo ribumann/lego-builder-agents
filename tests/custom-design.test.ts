@@ -14,6 +14,12 @@ const design = (name: string, bricks: ReturnType<typeof brick>[]) => ({
 const fixtures = [
   design('Lighthouse', [brick(0, 0, 0, 3, 1, 3), brick(1, 1, 1, 1, 4, 1), brick(0, 5, 0, 3, 1, 3, 'detail')]),
   design('Garden bench', [brick(-3, 0, 0, 1, 2, 2), brick(1, 0, 0, 1, 2, 2), brick(-3, 2, 0, 5, 1, 2), brick(-3, 3, 1, 5, 2, 1, 'detail')]),
+  design('Hollow room', [
+    brick(0, 0, 0, 5, 1, 5), brick(0, 1, 0, 5, 3, 1),
+    brick(0, 1, 1, 1, 3, 4), brick(4, 1, 1, 1, 3, 4),
+    brick(1, 1, 4, 1, 3, 1), brick(3, 1, 4, 1, 3, 1),
+    brick(0, 4, 0, 5, 1, 5), brick(1, 1, 2, 1, 1, 1, 'detail'),
+  ]),
 ];
 for (const fixture of fixtures) test(`${fixture.design.name}: execute, inspect, repair and restore custom geometry`, () => {
   const spec = validateSpec(fixture, 'space');
@@ -164,6 +170,17 @@ test('world bodies and studs are instanced by color and retain selection IDs', (
   batch.setExploded(true, 1000);
   body.getMatrixAt(0, matrix);
   assert.notEqual(matrix.elements[12], b.x + (b.width! - 1) / 2);
+  const cut = new THREE.Plane(new THREE.Vector3(1, 0, 0), -1);
+  batch.setCutaway(cut);
+  assert.ok(meshes.every(mesh => {
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    return material.clippingPlanes?.[0] === cut && material.clipShadows;
+  }));
+  batch.setCutaway();
+  assert.ok(meshes.every(mesh => {
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    return material.clippingPlanes?.length === 0 && !material.clipShadows;
+  }));
   batch.dispose(); cube.dispose(); stud.dispose(); material.dispose();
 });
 
