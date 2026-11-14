@@ -39,10 +39,12 @@ test('damage, repair and inspection activity is localized in every non-English l
     'CheckBot found 4 missing identities. I am returning them to their original builder tasks; PlanBot will recheck dependencies.',
     '8/12 bricks face-connected. Connectivity check, not a physical clutch or stability simulation.',
     'Added to the scene at grid offset (-10, 4). Existing bricks remain in place.',
+    'Could not load this file: external 🚀. The current build is unchanged.',
   ];
   for (const language of languages.slice(1)) {
     setLanguage(language);
     for (const message of messages) assert.notEqual(translateActivity(message), message, `${language}: ${message}`);
+    assert.match(translateActivity(messages.at(-1)!), /external 🚀/);
   }
   setLanguage('en');
 });
