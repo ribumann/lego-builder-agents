@@ -509,7 +509,7 @@ async function makePlan(demo = false) {
       if (!localAI) wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot', brief.value);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
-        body: JSON.stringify({ world, brief: brief.value, hollowInterior: $<HTMLInputElement>('#hollow-interior').checked }), signal: controller.signal });
+        body: JSON.stringify({ world, brief: brief.value, ...($<HTMLInputElement>('#hollow-interior').checked ? { hollowInterior: true } : {}) }), signal: controller.signal });
       const data = await planningResponse(response);
       if (controller.signal.aborted) throw new DOMException('Planning aborted.', 'AbortError');
       if (!response.ok || data.error) {

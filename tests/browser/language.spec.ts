@@ -295,7 +295,7 @@ test('guide and planning choices are available in all six languages', async ({ p
     ['de', 'Du führst Regie. Sie sind das Team.', 'Wähle die Planung des Teams', 'Missionsschritte', 'Planungsoptionen und Datenschutz', 'Zeit- und Designgrenzen'],
     ['fr', 'Vous dirigez. Ils forment l’équipe.', 'Choisissez le mode de planification', 'Étapes de la mission', 'Options de planification et confidentialité', 'Délais et limites de conception'],
     ['it', 'Tu dirigi. Loro sono la squadra.', 'Scegli come pianifica la squadra', 'Fasi della missione', 'Scelte di pianificazione e privacy', 'Tempi e limiti di progettazione'],
-    ['es', 'Tú diriges. Ellos son el equipo', 'Elige cómo planifica el equipo', 'Pasos de la misión', 'Opciones de planificación y privacidad', 'Tiempos y límites de diseño'],
+    ['es', 'Tú diriges. Ellos son el equipo.', 'Elige cómo planifica el equipo', 'Pasos de la misión', 'Opciones de planificación y privacidad', 'Tiempos y límites de diseño'],
     ['pt', 'Você dirige. Eles são a equipe.', 'Escolha como a equipe planeja', 'Etapas da missão', 'Opções de planejamento e privacidade', 'Tempo e limites de projeto'],
   ]) {
     await page.locator('#language').selectOption(language);
