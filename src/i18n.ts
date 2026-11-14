@@ -533,7 +533,7 @@ export function translate(text: string): string {
   return catalog[text]?.[languages.indexOf(language) - 1] ?? text;
 }
 
-export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', brief: string): string {
+export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', brief: string): string {
   const index = languages.indexOf(language);
   const estimate = provider === 'Copilot' ? copilotPlanningEstimate(brief) : '';
   const match = /^For ([\d,]+) requested bricks, a small Copilot study suggests about (\d+)–(\d+) seconds\.$/.exec(estimate);
@@ -918,7 +918,7 @@ const originalText = new WeakMap<Text, { source: string; rendered: string }>();
 const originalAttributes = new WeakMap<Element, Map<string, { source: string; rendered: string }>>();
 
 export function translateInterface(root: HTMLElement): void {
-  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status';
+  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status, #image-input, .voice-panel';
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;

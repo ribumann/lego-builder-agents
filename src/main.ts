@@ -5,6 +5,9 @@ import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
 import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, translateTaskName, type Language } from './i18n';
+import { createVoiceInput, type VoiceUpdate } from './voice-input';
+import { voiceLabels } from './voice-labels';
+import { createPlanningImageInput } from './planning-image-input';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -97,6 +100,24 @@ app.innerHTML = `
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
+        <div id="image-input"></div>
+        <section class="voice-panel" aria-labelledby="voice-title">
+          <h3 id="voice-title">Optional voice input</h3>
+          <p id="voice-disclosure">Voice is optional. With your permission, record up to 30 seconds. Transcription runs on this device; audio is not sent to a speech service. The first use downloads about 45 MB of model files from Hugging Face and its CDN. This contacts those services and exposes ordinary network metadata, including your IP address; recordings and transcripts are not sent there. Model files may stay in browser cache, be evicted, and can be removed with site data. Network charges may apply. Speed, memory needs, and accuracy vary; local transcription may fail. Other planning choices may separately send the brief you choose to use.</p>
+          <p id="voice-language">Speech recognition uses the selected app language when recording starts.</p>
+          <div class="voice-controls">
+            <button id="voice-start" class="button outline" type="button">Allow and record</button>
+            <button id="voice-stop" class="button outline" type="button" disabled>Stop and transcribe</button>
+            <button id="voice-cancel" class="button outline" type="button" disabled>Cancel voice input</button>
+          </div>
+          <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true">Ready for voice input</p>
+          <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
+          <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
+          <div class="voice-meta"><p id="voice-review-help">Review and edit the text before planning. It stays separate until you choose to use it.</p><p id="voice-count">0 / 1,000 characters</p></div>
+          <p id="voice-length-warning" class="voice-warning" role="status" hidden></p>
+          <div id="voice-pending" class="voice-pending" hidden><p id="voice-pending-note"></p><p id="voice-pending-text"></p><button id="voice-use-pending" class="button outline" type="button">Replace with new transcription</button> <button id="voice-discard-pending" class="button outline" type="button">Discard new transcription</button></div>
+          <button id="voice-apply" class="button outline voice-apply" type="button" disabled>Use transcription in brief</button>
+        </section>
         <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Your brief, model output and external error details are not translated. Names created by local examples stay in the language selected when created.</p>
       </form>
       <div class="transport">
@@ -132,6 +153,50 @@ app.innerHTML = `
 let noticeSource = '';
 let answerSource: { id: AgentId; response: string } | undefined;
 let sceneErrorDetail = '';
+let voiceUpdate: VoiceUpdate = { state: 'idle' };
+let voiceTranscriptAtStart = '';
+let voiceTranscriptRevision = 0;
+let voiceRevisionAtStart = 0;
+let pendingVoiceTranscript: string | null = null;
+let voiceInput: ReturnType<typeof createVoiceInput> | undefined;
+let imageInput: ReturnType<typeof createPlanningImageInput> | undefined;
+const refreshVoiceUI = () => {
+  const labels = voiceLabels[getLanguage()];
+  const transcript = $<HTMLTextAreaElement>('#voice-transcript');
+  const active = ['requesting', 'recording', 'processing'].includes(voiceUpdate.state);
+  const start = $<HTMLButtonElement>('#voice-start');
+  const stop = $<HTMLButtonElement>('#voice-stop');
+  const cancel = $<HTMLButtonElement>('#voice-cancel');
+  const apply = $<HTMLButtonElement>('#voice-apply');
+  const tooLong = transcript.value.length > 1000;
+  start.disabled = active || pendingVoiceTranscript !== null;
+  stop.disabled = voiceUpdate.state !== 'recording';
+  cancel.disabled = voiceUpdate.state === 'idle';
+  apply.disabled = !transcript.value.trim() || tooLong;
+  $('#voice-status').textContent = `${labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
+  $('#voice-count').textContent = labels.count.replace('{count}', String(transcript.value.length));
+  const warning = $<HTMLParagraphElement>('#voice-length-warning');
+  warning.textContent = tooLong ? labels.tooLong.replace('{count}', String(transcript.value.length)) : '';
+  warning.hidden = !tooLong;
+  $('#voice-pending').hidden = pendingVoiceTranscript === null;
+  $('#voice-pending-note').textContent = pendingVoiceTranscript === null ? '' : labels.pending;
+  $('#voice-pending-text').textContent = pendingVoiceTranscript ?? '';
+};
+const applyVoiceLabels = () => {
+  const labels = voiceLabels[getLanguage()];
+  $('#voice-title').textContent = labels.title;
+  $('#voice-disclosure').textContent = `${labels.disclosure} ${labels.runtime}`;
+  $('#voice-language').textContent = labels.language;
+  $('#voice-start').textContent = labels.start;
+  $('#voice-stop').textContent = labels.stop;
+  $('#voice-cancel').textContent = labels.cancel;
+  $('#voice-transcript-label').textContent = labels.transcript;
+  $('#voice-review-help').textContent = labels.review;
+  $('#voice-use-pending').textContent = labels.replace;
+  $('#voice-discard-pending').textContent = labels.discard;
+  $('#voice-apply').textContent = labels.apply;
+  refreshVoiceUI();
+};
 try {
   const savedLanguage = localStorage.getItem('bricklab-language');
   if (languages.some(language => language === savedLanguage)) setLanguage(savedLanguage as Language);
@@ -141,6 +206,8 @@ const applyLanguage = () => {
   document.documentElement.lang = getLanguage();
   languageSelect.value = getLanguage();
   translateInterface(app);
+  applyVoiceLabels();
+  imageInput?.refresh();
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
   if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${translate(sceneErrorDetail)}. ${translate('You can still build using the task board and text inspection below.')}`;
@@ -203,6 +270,41 @@ let quizWon = false;
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = translate(EXAMPLES.jurassic[0]);
+imageInput = createPlanningImageInput($('#image-input'), () => hosted ? 'hosted' : mode);
+const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
+voiceInput = createVoiceInput(
+  update => { voiceUpdate = update; refreshVoiceUI(); },
+  text => {
+    if (!voiceTranscriptAtStart && voiceTranscriptRevision === voiceRevisionAtStart) voiceTranscript.value = text;
+    else pendingVoiceTranscript = text;
+    refreshVoiceUI();
+  },
+);
+voiceTranscript.addEventListener('input', () => { voiceTranscriptRevision++; refreshVoiceUI(); });
+$('#voice-start').addEventListener('click', () => {
+  voiceTranscriptAtStart = voiceTranscript.value;
+  voiceRevisionAtStart = voiceTranscriptRevision;
+  void voiceInput?.start(true, getLanguage());
+});
+$('#voice-stop').addEventListener('click', () => voiceInput?.stop());
+$('#voice-cancel').addEventListener('click', () => voiceInput?.cancel());
+$('#voice-use-pending').addEventListener('click', () => {
+  if (pendingVoiceTranscript === null) return;
+  voiceTranscript.value = pendingVoiceTranscript;
+  pendingVoiceTranscript = null;
+  refreshVoiceUI();
+  voiceTranscript.focus();
+});
+$('#voice-discard-pending').addEventListener('click', () => {
+  pendingVoiceTranscript = null;
+  refreshVoiceUI();
+  voiceTranscript.focus();
+});
+$('#voice-apply').addEventListener('click', () => {
+  if (!voiceTranscript.value.trim() || voiceTranscript.value.length > 1000) return;
+  brief.value = voiceTranscript.value;
+  brief.focus();
+});
 const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
 const clearNotice = () => { noticeSource = ''; $('#notice').hidden = true; };
 const setButton = (id: string, disabled: boolean) => { $<HTMLButtonElement>(id).disabled = disabled; };
@@ -335,7 +437,7 @@ function render() {
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
 }
 
-function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', planningBrief: string) {
+function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', planningBrief: string) {
   const modal = $<HTMLDialogElement>('#planning-dialog');
   const started = Date.now();
   let nextReminder = 100;
@@ -432,6 +534,8 @@ async function makePlan(demo = false) {
   try {
     if (!brief.value.trim() || brief.value.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
+    planning = true; render();
+    const image = demo ? undefined : await imageInput?.take();
     let spec;
     let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
@@ -443,13 +547,12 @@ async function makePlan(demo = false) {
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
-      planning = true; render();
       const controller = new AbortController();
       planningController = controller;
-      if (!localAI) wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot', brief.value);
+      wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', brief.value);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
-        body: JSON.stringify({ world, brief: brief.value }), signal: controller.signal });
+        body: JSON.stringify({ world, brief: brief.value, ...(image ? { image, imageConsent: true } : {}) }), signal: controller.signal });
       const data = await planningResponse(response);
       if (controller.signal.aborted) throw new DOMException('Planning aborted.', 'AbortError');
       if (!response.ok || data.error) {
@@ -744,10 +847,12 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); save(); }
 });
-window.addEventListener('beforeunload', () => { planningController?.abort(); save(); });
+window.addEventListener('beforeunload', () => { planningController?.abort(); voiceInput?.cancel(); save(); });
+window.addEventListener('pagehide', () => { planningController?.abort(); voiceInput?.cancel(); });
 restore();
 render();
 function updateMode() {
+  imageInput?.refresh(true);
   $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
@@ -778,6 +883,7 @@ async function refreshStatus(inDialog = false) {
       compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state), message: data.compatiblePlanner.message };
     hosted = data.hosted === true;
     if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
+    imageInput?.refresh();
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
