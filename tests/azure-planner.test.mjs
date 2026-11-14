@@ -28,7 +28,7 @@ test('Azure planner rejects untrusted endpoints and incomplete or oversized resp
     envelope('x'.repeat(128_001)), envelope('not json')]) {
     const plan = createAzurePlanner({ endpoint, deployment: 'model', credential,
       fetchImpl: async () => new Response(body) });
-    await assert.rejects(plan({ prompt: 'brief' }), /Azure planning failed/);
+    await assert.rejects(plan({ prompt: 'brief' }), /Azure OpenAI returned/);
   }
 });
 
@@ -47,4 +47,16 @@ test('Azure planner forwards cancellation and never exposes provider errors', as
   const rejected = createAzurePlanner({ endpoint, deployment: 'model', credential,
     fetchImpl: async () => new Response('sensitive provider detail', { status: 403 }) });
   await assert.rejects(rejected({ prompt: 'brief' }), error => !error.message.includes('sensitive'));
+});
+
+test('Azure planner exposes sanitized distinct identity, access, quota and service failures', async () => {
+  const missingIdentity = createAzurePlanner({ endpoint, deployment: 'model',
+    credential: { async getToken() { throw new Error('private token'); } } });
+  await assert.rejects(missingIdentity({ prompt: 'brief' }), /managed identity is unavailable/);
+  for (const [status, message] of [[401, /denied model access/], [403, /denied model access/],
+    [429, /rate or quota limit/], [503, /service is unavailable/]]) {
+    const plan = createAzurePlanner({ endpoint, deployment: 'model', credential,
+      fetchImpl: async () => new Response('sensitive details', { status }) });
+    await assert.rejects(plan({ prompt: 'brief' }), error => message.test(error.message) && !error.message.includes('sensitive'));
+  }
 });

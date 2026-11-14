@@ -4,6 +4,8 @@ const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_CONTENT_BYTES = 128_000;
 const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
+class AzurePlannerError extends Error {}
+
 export function createAzurePlanner({ endpoint, deployment, credential = new ManagedIdentityCredential(), fetchImpl = fetch }) {
   if (typeof endpoint !== 'string'
       || !/^https:\/\/[a-z0-9][a-z0-9-]{0,62}\.openai\.azure\.com\/?$/i.test(endpoint))
@@ -16,8 +18,10 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
     if (typeof prompt !== 'string' || !prompt || Buffer.byteLength(prompt) > 32_000)
       throw new Error('Azure planning prompt is invalid or too large.');
     try {
-      const token = await credential.getToken(SCOPE, { abortSignal: signal });
-      if (!token?.token) throw new Error('No managed identity token.');
+      let token;
+      try { token = await credential.getToken(SCOPE, { abortSignal: signal }); }
+      catch { throw new AzurePlannerError('Azure managed identity is unavailable. Check the hosting identity configuration.'); }
+      if (!token?.token) throw new AzurePlannerError('Azure managed identity is unavailable. Check the hosting identity configuration.');
       const response = await fetchImpl(url, {
         method: 'POST',
         redirect: 'error',
@@ -31,7 +35,11 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
       });
       if (!response.ok || !response.body) {
         response.body?.cancel().catch(() => {});
-        throw new Error('Azure OpenAI request failed.');
+        if (response.status === 401 || response.status === 403)
+          throw new AzurePlannerError('Azure OpenAI denied model access. Check the managed identity role and resource configuration.');
+        if (response.status === 429)
+          throw new AzurePlannerError('Azure OpenAI rate or quota limit reached. No retry was attempted.');
+        throw new AzurePlannerError('Azure OpenAI service is unavailable. No retry was attempted.');
       }
       const reader = response.body.getReader();
       const chunks = [];
@@ -41,22 +49,26 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
           const { done, value } = await reader.read();
           if (done) break;
           size += value.byteLength;
-          if (size > MAX_RESPONSE_BYTES) throw new Error('Azure response too large.');
+          if (size > MAX_RESPONSE_BYTES) throw new AzurePlannerError('Azure OpenAI returned an oversized response.');
           chunks.push(value);
         }
       } finally {
         await reader.cancel().catch(() => {});
       }
-      const envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+      let envelope;
+      try { envelope = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size))); }
+      catch { throw new AzurePlannerError('Azure OpenAI returned a malformed or incomplete response.'); }
       const choice = envelope?.choices?.[0];
       const content = choice?.message?.content;
       if (choice?.finish_reason !== 'stop' || typeof content !== 'string'
           || Buffer.byteLength(content) > MAX_CONTENT_BYTES)
-        throw new Error('Azure response was incomplete.');
-      return JSON.parse(content);
+        throw new AzurePlannerError('Azure OpenAI returned a malformed or incomplete response.');
+      try { return JSON.parse(content); }
+      catch { throw new AzurePlannerError('Azure OpenAI returned a malformed or incomplete response.'); }
     } catch (error) {
       if (signal?.aborted) throw new Error('Azure planning was cancelled.');
-      throw new Error('Azure planning failed or returned an invalid response. No retry or fallback was attempted.');
+      if (error instanceof AzurePlannerError) throw error;
+      throw new Error('Azure OpenAI service could not be reached. No retry was attempted.');
     }
   };
 }
