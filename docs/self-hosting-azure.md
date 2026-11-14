@@ -18,6 +18,15 @@ The result passed geometry validation with a declared budget of 20 and 19
 expanded bricks, so it did not exactly meet the 20-brick brief. This does not
 validate the unmodified prompt, a clean-room deployment, hosted planning, or
 300-second transport. The experiment is not enabled in the application.
+An independent sample also deployed the base, private-storage and edge
+templates, built that revision on a private runner and served its immutable
+package through the default Front Door hostname with planners disabled. That
+sample did not reproduce custom-domain binding or initialize a second budget.
+Two synthetic streams through the sample edge, from separate clients, each
+delivered 22 ordered heartbeats over 315 seconds with maximum observed delivery
+lag below two seconds. Other attempts ended in client connection resets without
+adequate progress telemetry; their cause remains unknown. These results do not
+establish reliable transport through the production custom domain.
 
 ## Prerequisites and costs
 
@@ -144,6 +153,32 @@ not the profile resource ID. Its origin restriction allows only the Azure
 Front Door backend service tag with that exact ID; SCM is deny-by-default.
 Apply it before opening the origin and verify that direct-origin and wrong-ID
 requests are denied, and that WAF is associated with both active domains.
+For a fresh deployment, obtain the Front Door ID and install the restriction
+before enabling public origin access. Inspect the returned restrictions and
+confirm both origin and SCM defaults are `Deny`:
+
+```bash
+FRONTDOOR_ID=$(az deployment group show --subscription "$SUBSCRIPTION" \
+  --resource-group "$RG" --name bricklab-edge \
+  --query 'properties.outputs.frontDoorId.value' --output tsv)
+test -n "$FRONTDOOR_ID" || { echo "Missing Front Door ID" >&2; exit 1; }
+az webapp config access-restriction add --subscription "$SUBSCRIPTION" \
+  --resource-group "$RG" --name "$WEB" --rule-name frontdoor-only \
+  --priority 100 --action Allow --service-tag AzureFrontDoor.Backend \
+  --http-headers "x-azure-fdid=$FRONTDOOR_ID"
+az webapp config access-restriction show --subscription "$SUBSCRIPTION" \
+  --resource-group "$RG" --name "$WEB"
+```
+
+After confirming the restriction and configuring the private package and
+hosted settings below, enable origin access:
+
+```bash
+az webapp update --subscription "$SUBSCRIPTION" --resource-group "$RG" \
+  --name "$WEB" --set publicNetworkAccess=Enabled
+```
+
+Verify direct access is denied even when a client supplies the Front Door ID.
 The WAF custom rule limits the paid route per client IP and per edge location;
 distributed Front Door servers can allow requests above its low threshold.
 It is approximate and is not a global spending cap or authentication.
@@ -160,7 +195,9 @@ excluding `.git` and development-only material. Upload a uniquely named ZIP
 to the private `packages` container from the connected operator machine,
 using `az storage blob upload --auth-mode login`. Never upload your local
 Copilot or GitHub credential caches. Configure `WEBSITE_RUN_FROM_PACKAGE`
-to the private Blob URL and the web app's system-assigned identity to read it.
+to the private Blob URL and set
+`WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned` so the web app
+uses its system-assigned identity to read it.
 See [run from package with managed identity](https://learn.microsoft.com/azure/app-service/deploy-run-package#access-a-package-in-azure-blob-storage-using-a-managed-identity).
 Private package retrieval succeeded in one staging deployment; test it in your
 environment without relaxing your network policy.
