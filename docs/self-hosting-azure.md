@@ -11,6 +11,14 @@ to enable the hosted Azure planner. Do not remove that safeguard to make the sit
 Until these checks and the application integration are complete, this is a
 staging guide, not a production recipe.
 
+On 2026-11-14, a private runner built revision `084cfb4` and used the existing
+shared budget gate for one Azure model sample. An isolated prompt experiment
+requested the `budget` field after the geometry without changing validation.
+The result passed geometry validation with a declared budget of 20 and 19
+expanded bricks, so it did not exactly meet the 20-brick brief. This does not
+validate the unmodified prompt, a clean-room deployment, hosted planning, or
+300-second transport. The experiment is not enabled in the application.
+
 ## Prerequisites and costs
 
 Use your own Azure subscription, a dedicated resource group, and a DNS name
