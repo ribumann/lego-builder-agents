@@ -142,6 +142,12 @@ const applyLanguage = () => {
   translateInterface(app);
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
+  const statuses = [['#planner-status', plannerMessage], ['#local-planner-status', localPlanner.message],
+    ['#azure-planner-status', azurePlanner.message]] as const;
+  for (const [selector, message] of statuses) {
+    const element = document.querySelector<HTMLElement>(selector);
+    if (element) element.textContent = translate(message);
+  }
 };
 languageSelect.addEventListener('change', () => {
   const selected = languageSelect.value;
@@ -156,8 +162,6 @@ languageSelect.addEventListener('change', () => {
 const languageObserver = new MutationObserver(() => translateInterface(app));
 languageObserver.observe(app, { subtree: true, childList: true, characterData: true, attributes: true,
   attributeFilter: ['aria-label', 'title', 'placeholder'] });
-applyLanguage();
-
 const phoneLayout = window.matchMedia('(max-width: 700px)');
 const transport = $('.transport');
 const positionTransport = () => {
@@ -194,6 +198,7 @@ let examples = 0;
 let scene: Workbench | undefined;
 let storageWarningShown = false;
 let quizWon = false;
+applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = EXAMPLES.jurassic[0];
 const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
@@ -680,16 +685,16 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
     ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. When enabled, an explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
-    <p id="azure-planner-status" role="status">${esc(azurePlanner.message)}</p>
+    <p id="azure-planner-status" role="status">${esc(translate(azurePlanner.message))}</p>
     <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
     <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Default limit: 12 CLI invocations per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
-    <p id="planner-status" role="status">${esc(plannerMessage)}</p>
+    <p id="planner-status" role="status">${esc(translate(plannerMessage))}</p>
     <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Pressing <strong>Send brief to Copilot</strong> consents to sending that brief. Selecting a mode or loading the page sends no brief; readiness does not verify login, subscription, or live access. Do not enter personal information.</p>
     <button id="refresh-status" class="button outline">Retry status</button>
     <button id="choose-copilot" class="button primary">Use Copilot planning</button>
     <hr><p><strong>Local AI (Ollama)</strong> — optional original custom planning on the <strong>BrickLab server host</strong>, not automatically on this browser's device. In a Codespace it runs on that remote host. Configure Ollama with <code>OLLAMA_NO_CLOUD=1</code> and a downloaded local model first. Loopback alone does not prove offline operation; remote model metadata is rejected, but the configured service must be trusted.</p>
-    <p id="local-planner-status" role="status">${esc(localPlanner.message)}</p>
+    <p id="local-planner-status" role="status">${esc(translate(localPlanner.message))}</p>
     <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
     <button id="choose-local-ai" class="button outline">Use Local AI</button>
     ${!hosted ? `<hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
@@ -763,11 +768,11 @@ async function refreshStatus(inDialog = false) {
   }
   if (inDialog) {
     const status = document.querySelector<HTMLElement>('#planner-status');
-    if (status) status.textContent = plannerMessage;
+    if (status) status.textContent = translate(plannerMessage);
     const localStatus = document.querySelector<HTMLElement>('#local-planner-status');
-    if (localStatus) localStatus.textContent = localPlanner.message;
+    if (localStatus) localStatus.textContent = translate(localPlanner.message);
     const azureStatus = document.querySelector<HTMLElement>('#azure-planner-status');
-    if (azureStatus) azureStatus.textContent = azurePlanner.message;
+    if (azureStatus) azureStatus.textContent = translate(azurePlanner.message);
     const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
     if (compatibleStatus) compatibleStatus.textContent = compatiblePlanner.message;
   }

@@ -108,3 +108,18 @@ test('translated guide briefs and crew question buttons work in every language',
     expect(await page.locator('#brief').inputValue()).toBe(prompt);
   }
 });
+
+test('known server status is localized without changing external messages', async ({ page }) => {
+  const status = 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.';
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    hosted: true, sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'external 🚀' },
+    azurePlanner: { enabled: false, state: 'off', message: status },
+  } }));
+  await page.goto('/');
+  await page.locator('#language').selectOption('fr');
+  await page.locator('#settings').click();
+  await expect(page.locator('#planner-status')).toHaveText('external 🚀');
+  await expect(page.locator('#azure-planner-status')).toContainText('planification Azure est désactivée');
+  await page.locator('#close-dialog').click();
+  await expect(page.locator('#language')).toHaveValue('fr');
+});
