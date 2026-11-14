@@ -111,29 +111,23 @@ function customRecords(objects: ObjectGeometry[], parts: Map<string, Brick['agen
     for (const brick of object.bricks) {
       const part = parts.get(brick.id);
       if (!part) throw new Error('Cannot append geometry that differs from its canonical specification.');
-      if ((brick.width ?? 1) !== 1 || (brick.height ?? 1) !== 1 || (brick.depth ?? 1) !== 1) {
-        records.push({
-          x: brick.x, y: brick.y, z: brick.z,
-          width: brick.width ?? 1, height: brick.height ?? 1, depth: brick.depth ?? 1,
-          color: paletteColor(brick.color), part,
-        });
-        continue;
-      }
       const color = paletteColor(brick.color);
-      const key = `${brick.y}:${brick.z}:${color}:${part}`;
+      const key = `${brick.y}:${brick.z}:${brick.width ?? 1}:${brick.height ?? 1}:${brick.depth ?? 1}:${color}:${part}`;
       if (!rows.has(key)) rows.set(key, []);
       rows.get(key)!.push(brick);
     }
     for (const row of rows.values()) {
       row.sort((a, b) => a.x - b.x);
       for (let i = 0; i < row.length;) {
-        let end = i + 1;
-        while (end < row.length && row[end].x === row[end - 1].x + 1) end++;
+        const dx = i + 1 < row.length ? row[i + 1].x - row[i].x : 0;
+        let end = i + (dx > 0 && dx <= 127 ? 2 : 1);
+        while (end < row.length && row[end].x === row[end - 1].x + dx) end++;
         const record: CustomBrick = {
-          x: row[i].x, y: row[i].y, z: row[i].z, width: 1, height: 1, depth: 1,
+          x: row[i].x, y: row[i].y, z: row[i].z,
+          width: row[i].width ?? 1, height: row[i].height ?? 1, depth: row[i].depth ?? 1,
           color: paletteColor(row[i].color), part: parts.get(row[i].id)!,
         };
-        if (end - i > 1) record.repeat = { count: end - i, dx: 1, dy: 0, dz: 0 };
+        if (end - i > 1) record.repeat = { count: end - i, dx, dy: 0, dz: 0 };
         records.push(record);
         i = end;
       }

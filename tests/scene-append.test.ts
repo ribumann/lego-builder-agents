@@ -71,6 +71,39 @@ test('appends overlapping template Plans deterministically and preserves existin
   assert.equal(first.team.checks.at(-1)?.label, 'Within budget');
 });
 
+test('compact mixed-size repeated geometry stays appendable and survives save and restore', () => {
+  const spec = validateSpec({
+    world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 300,
+    design: { name: 'Four rows', objects: [{ name: 'Four rows', bricks: [0, 1, 2, 3].map(z => ({
+      x: -64, y: 0, z, width: 2, height: 1, depth: 1,
+      color: z % 2 ? 'orange' : 'blue', part: z % 2 ? 'detail' : 'frame',
+      repeat: { count: 64, dx: 2, dy: 0, dz: 0 },
+    })) }] },
+  }, 'space');
+  const previous = new Team(createPlan(spec, [], 'copilot'));
+  previous.step(12);
+  assert.ok(previous.bricks.size > 0);
+  const added = customPlan('Marker', 'local', [{
+    name: 'Marker', bricks: [{ x: 0, y: 0, z: 8, width: 1, height: 1, depth: 1, color: 'white', part: 'frame' }],
+  }]);
+  const result = appendScene(previous, added);
+  const objects = result.team.plan.spec.design!.objects!;
+  assert.equal(objects.reduce((count, object) => count + object.bricks.length, 0), 5);
+  assert.deepEqual(result.offset, { x: 0, z: 0 });
+  assert.equal(allBricks(result.team.plan).length, 257);
+  assert.equal(cells(allBricks(result.team.plan)).size, 513);
+  const appearance = (brick: Brick) => {
+    const { id, x, y, z, width, height, depth, color, part } = brick;
+    return { id, x, y, z, width, height, depth, color, part };
+  };
+  const original = new Map(allBricks(previous.plan).map(brick => [brick.id, appearance(brick)]));
+  const restored = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(result.team, 'Rows'))));
+  for (const brick of allBricks(restored.team.plan).filter(item => item.object === 'Four rows'))
+    assert.deepEqual(appearance(brick), original.get(brick.id));
+  assert.deepEqual([...restored.team.bricks.keys()].sort(), [...previous.bricks.keys()].sort());
+  assert.deepEqual(restored.provenance, result.provenance);
+});
+
 for (const model of ['explorer', 'custom'] as const) {
   test(`fully built original ${model} retains named membership and completes after append and reload`, () => {
     const spec = validateSpec(model === 'explorer' ? {
