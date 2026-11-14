@@ -4,6 +4,7 @@ type Translations = readonly [string, string, string, string, string];
 
 // Only application-owned strings belong here; briefs, object names and model output are never translated.
 const catalog: Record<string, Translations> = {
+  'Copilot image cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.': ['Das Bereinigen der Copilot-Bilddaten konnte nicht bestätigt werden. Die Planung ist gesperrt; der Serverbetreiber muss die Bereinigung vor einem Neustart prüfen.', 'Le nettoyage des données d’image Copilot n’a pas pu être confirmé. La planification est bloquée ; l’administrateur du serveur doit vérifier le nettoyage avant de redémarrer.', 'La pulizia dei dati immagine Copilot non è stata confermata. La pianificazione è bloccata; il gestore del server deve verificare la pulizia prima di riavviare.', 'No se pudo confirmar la limpieza de los datos de imagen de Copilot. La planificación está bloqueada; el operador del servidor debe verificar la limpieza antes de reiniciar.', 'Não foi possível confirmar a limpeza dos dados de imagem do Copilot. O planejamento está bloqueado; o operador do servidor deve verificar a limpeza antes de reiniciar.'],
   'Extended agent insights': ['Erweiterte Agenteneinblicke', 'Comprendre les agents en détail', 'Approfondimenti sugli agenti', 'Información avanzada sobre agentes', 'Conheça os agentes em detalhe'],
   'This read-only view shows local program state and recorded actions, not hidden model reasoning. Opening it makes no model request.': ['Diese schreibgeschützte Ansicht zeigt lokalen Programmzustand und protokollierte Aktionen, keine verborgenen Modellgedanken. Beim Öffnen wird kein Modell angefragt.', 'Cette vue en lecture seule montre l’état du programme local et les actions enregistrées, pas le raisonnement caché du modèle. L’ouvrir ne lance aucune requête au modèle.', 'Questa vista di sola lettura mostra lo stato del programma locale e le azioni registrate, non il ragionamento nascosto del modello. Aprirla non invia richieste al modello.', 'Esta vista de solo lectura muestra el estado del programa local y las acciones registradas, no el razonamiento oculto del modelo. Abrirla no envía solicitudes al modelo.', 'Esta visualização somente para leitura mostra o estado do programa local e as ações registradas, não o raciocínio oculto do modelo. Abri-la não envia solicitações ao modelo.'],
   'Shared memory': ['Gemeinsamer Speicher', 'Mémoire partagée', 'Memoria condivisa', 'Memoria compartida', 'Memória compartilhada'],
@@ -597,10 +598,10 @@ export function translate(text: string): string {
   return catalog[text]?.[languages.indexOf(language) - 1] ?? text;
 }
 
-export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', brief: string): string {
+export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', brief: string, image = false): string {
   const index = languages.indexOf(language);
   const maximum = provider === 'Local AI' ? 90 : 300;
-  const estimate = provider === 'Copilot' ? copilotPlanningEstimate(brief) : '';
+  const estimate = provider === 'Copilot' && !image ? copilotPlanningEstimate(brief) : '';
   const match = /^For ([\d,]+) requested bricks, a small Copilot study suggests about (\d+)–(\d+) seconds\.$/.exec(estimate);
   const count = match ? new Intl.NumberFormat(language).format(Number(match[1].replaceAll(',', ''))) : '';
   const reference = match ? [
@@ -610,6 +611,13 @@ export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Com
     `Per ${count} mattoncini richiesti, un piccolo studio Copilot indica circa ${match[2]}–${match[3]} secondi.`,
     `Para ${count} bloques solicitados, un pequeño estudio de Copilot indica unos ${match[2]}–${match[3]} segundos.`,
     `Para ${count} blocos solicitados, um pequeno estudo do Copilot indica cerca de ${match[2]}–${match[3]} segundos.`,
+  ][index] : provider === 'Copilot' && image ? [
+    'Estimate unknown; Copilot image requests were not measured in the Copilot study.',
+    'Schätzung unbekannt; Copilot-Bildanfragen wurden in der Copilot-Studie nicht untersucht.',
+    'Estimation inconnue ; les requêtes d’image Copilot n’ont pas été mesurées dans l’étude Copilot.',
+    'Stima sconosciuta; le richieste di immagini Copilot non sono state misurate nello studio Copilot.',
+    'Estimación desconocida; las solicitudes de imágenes de Copilot no se midieron en el estudio de Copilot.',
+    'Estimativa desconhecida; solicitações de imagens do Copilot não foram medidas no estudo do Copilot.',
   ][index] : provider === 'Copilot' ? [
     'Estimate unknown; sampled Copilot requests took about 20–183 seconds.',
     'Schätzung unbekannt; untersuchte Copilot-Anfragen dauerten etwa 20–183 Sekunden.',

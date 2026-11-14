@@ -144,6 +144,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
       let overflow = false;
       let settled = false;
       let cancelSent = false;
+      let cancelSignalOwned = false;
       let cancelSignalError = false;
       let inputFailed = false;
 
@@ -152,6 +153,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
         cancelSent = true;
         try {
           writeFileSync(cancelSignalPath, 'cancel', { flag: 'wx', mode: 0o600 });
+          cancelSignalOwned = true;
         } catch (error) {
           if (error.code !== 'EEXIST') cancelSignalError = true;
         }
@@ -173,7 +175,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
       child.stdin.on('error', () => { inputFailed = true; cancel(); });
       child.on('error', () => finish(failure('Windows Copilot process containment is unavailable.', !child.pid)));
       child.on('close', async () => {
-        try { await rm(cancelSignalPath, { force: true }); }
+        try { if (cancelSignalOwned) await rm(cancelSignalPath); }
         catch { finish(failure('Cancellation signal cleanup could not be confirmed.')); return; }
         if (overflow) {
           finish(failure('Copilot process cleanup could not be confirmed.'));

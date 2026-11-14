@@ -270,6 +270,7 @@ let modeChosen = false;
 let hosted = false;
 let apiKey = '';
 let copilotEnabled = false;
+let copilotImagesEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
 let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
@@ -285,7 +286,7 @@ let quizWon = false;
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = translate(EXAMPLES.jurassic[0]);
-imageInput = createPlanningImageInput($('#image-input'), () => hosted ? 'hosted' : mode);
+imageInput = createPlanningImageInput($('#image-input'), () => hosted ? 'hosted' : mode, () => copilotImagesEnabled);
 const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
 voiceInput = createVoiceInput(
   update => { voiceUpdate = update; refreshVoiceUI(); },
@@ -497,7 +498,7 @@ function renderInsights() {
 }
 $('#agent-insights').addEventListener('toggle', renderInsights);
 
-function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', planningBrief: string) {
+function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', planningBrief: string, image = false) {
   const modal = $<HTMLDialogElement>('#planning-dialog');
   const started = Date.now();
   const maximum = provider === 'Local AI' ? 90 : 300;
@@ -517,7 +518,7 @@ function startPlanningWait(controller: AbortController, provider: 'Azure Foundry
   $('#planning-reminder').hidden = true;
   $('#continue-planning').hidden = true;
   $('#planning-elapsed').textContent = elapsedText(0);
-  $('#planning-description').textContent = planningDescription(provider, planningBrief);
+  $('#planning-description').textContent = planningDescription(provider, planningBrief, image);
   const abort = () => controller.abort();
   const cancel = (event: Event) => { event.preventDefault(); abort(); };
   const continueWaiting = () => {
@@ -612,7 +613,7 @@ async function makePlan(demo = false) {
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
-      wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief);
+      wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
         body: JSON.stringify({ world, brief: planningBrief,
@@ -952,6 +953,7 @@ async function refreshStatus(inDialog = false) {
     const data = await response.json();
     apiKey = typeof data.sessionKey === 'string' ? data.sessionKey : '';
     copilotEnabled = data.copilot === true;
+    copilotImagesEnabled = data.copilotImages === true && data.hosted !== true;
     plannerState = typeof data.planner?.state === 'string' ? data.planner.state : 'unavailable';
     plannerMessage = typeof data.planner?.message === 'string' ? data.planner.message : 'Planner status unavailable.';
     if (data.localPlanner && typeof data.localPlanner.message === 'string')
@@ -967,6 +969,8 @@ async function refreshStatus(inDialog = false) {
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
     copilotEnabled = false;
+    copilotImagesEnabled = false;
+    imageInput?.refresh(true);
     plannerState = 'unavailable';
     plannerMessage = `Local server status unavailable: ${error instanceof Error ? error.message : 'unknown error'}. Rule-based building still works.`;
     if (!inDialog && mode !== 'local') notice(plannerMessage);

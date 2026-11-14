@@ -323,6 +323,46 @@ Architecture: `src/engine.ts` (typed specs, task graph, five-agent loop, inspect
 
 Models use stylized solid bricks, not official LEGO part geometry. Face connectivity is not a clutch, collision, stability, flight or physical safety simulation. No physical construction instructions or product compatibility are promised. Browser storage stays on the device; downloads include the brief. Clearing site data clears saves. The local rule-based application works without network access after it loads; Copilot planning requires network access. No analytics, accounts, telemetry code or public sharing is included by the app.
 
-Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates, hosted/Azure and Copilot planning do not accept images; Copilot image attachments remain disabled until process-tree containment and safe cleanup are verified. Local Ollama must report vision support; a compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
+Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates and hosted/Azure planning do not accept images. Local Ollama must report vision support; a compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
+
+### Optional Windows Copilot images (private server only)
+
+Copilot images are **off by default** and unavailable on POSIX or public hosted
+deployments. The Windows path requires the Microsoft Store PowerShell 7 package,
+an absolute native Copilot `.exe` path, and both server opt-ins. For example, in
+PowerShell after installing and authenticating the standalone CLI:
+
+```powershell
+$env:BRICKLAB_COPILOT = '1'
+$env:BRICKLAB_COPILOT_IMAGES = '1'
+$env:BRICKLAB_COPILOT_BIN = 'C:\path\to\copilot.exe'
+npm start
+```
+
+Build first with `npm run build`, or use `npm run dev` for local development.
+The image destination disclosure appears only when the server is configured for
+this path. Configuration does not prove runtime availability or model vision
+support. Select **Copilot**, choose an image, review the GitHub destination and
+metadata disclosure, consent, and explicitly submit. This sends the brief and
+original image to GitHub and may consume Copilot quota; selecting a file or mode
+does not submit it.
+
+Before any image bytes are written, the helper exclusively creates a directory
+with an owner-only ACL, verifies its actual owner/ACL and the new file's ACL, and
+rejects existing paths or reparse points without modifying them. The CLI starts
+suspended inside a kill-on-close Windows Job Object, with tools and inherited
+agent instructions disabled. Cancellation and the shared 300-second deadline
+terminate the job, not just its leader. Combined output is capped at 1 MiB,
+final content at 128 KB, and normal JSONL/custom-geometry validation still
+applies. Attachments are deleted only after the job is confirmed empty.
+
+The helper has independent Windows ARM64 verification, not a guarantee for every
+Windows configuration or model. Unsupported runtimes, unverifiable ACLs,
+containment and cleanup fail closed. Unconfirmed cleanup locks all planning:
+the operator must verify process termination and any remaining private temporary
+files before restarting. Abrupt server/host termination may leave owner-only
+attachment files; automatic deletion after a crash is not guaranteed. Local
+administrators and processes running as the same user are outside this isolation
+boundary. No personal Copilot credentials belong in a public deployment.
 
 Independent educational demo, not affiliated with or endorsed by the LEGO Group, Microsoft, or the author of the reference post. LEGO is a trademark of the LEGO Group.

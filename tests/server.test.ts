@@ -44,6 +44,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
   const child = spawn(process.execPath, [...nodeArgs, 'server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
       BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '',
+      BRICKLAB_COPILOT_IMAGES: '0',
       BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
@@ -128,6 +129,8 @@ const azureEvents = [];
 const azureConfig = [];
 const reservations = [];
 const azurePlans = [];
+const jobEvents = [];
+const jobs = [];
 const notify = () => { for (const waiter of waiters.splice(0)) waiter(); };
 const boundary = (type, entries, details) => new Promise((resolve, reject) => {
   azureEvents.push({ type, ...details });
@@ -148,13 +151,26 @@ globalThis.azureBoundaries = {
     return { reserve: details => boundary('reserve', reservations, details) };
   }
 };
+globalThis.windowsJobBoundary = {
+  run(details) {
+    return new Promise((resolve, reject) => {
+      jobEvents.push(details);
+      jobs.push({ resolve, reject });
+      notify();
+    });
+  }
+};
 registerHooks({
   resolve(specifier, context, next) {
+    if (context.parentURL?.endsWith('/server.mjs') && specifier === './src/windows-copilot-job-runner.mjs')
+      return { url: 'fixture:windows-job', shortCircuit: true };
     if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs', './azure-budget.mjs'].includes(specifier))
       return { url: 'fixture:' + specifier, shortCircuit: true };
     return next(specifier, context);
   },
   load(url, context, next) {
+    if (url === 'fixture:windows-job') return { format: 'module', shortCircuit: true, source:
+      'export const createWindowsCopilotJobRunner = () => globalThis.windowsJobBoundary;' };
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
       'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' +
@@ -208,10 +224,12 @@ process.on('message', message => {
     id: message.id, count: children.length, imageDirectories, signals, heartbeatWrites, azureConfig,
     prompts: children.map(child => child.args[1]), childArgs: children.map(child => child.args),
     azureEvents: azureEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
+    jobEvents: jobEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
     timers: [...timers.values()].map(t => t.at - now)
   }));
   const child = children[message.index ?? 0];
   if (message.action === 'started' && children.length < message.count) { waiters.push(reply); return; }
+  if (message.action === 'job-started' && jobEvents.length < message.count) { waiters.push(reply); return; }
   if (message.action === 'azure-started' && azureEvents.filter(event => event.type === message.type).length < message.count) {
     waiters.push(reply); return;
   }
@@ -241,6 +259,11 @@ process.on('message', message => {
   if (message.action === 'azure-refuse') reservations[message.index ?? 0].reject(Object.assign(new Error(message.error), { code: message.code }));
   if (message.action === 'azure-complete') azurePlans[message.index ?? 0].resolve(message.spec);
   if (message.action === 'azure-fail') azurePlans[message.index ?? 0].reject(new Error('Azure OpenAI service is unavailable. No retry was attempted.'));
+  if (message.action === 'job-complete') jobs[message.index ?? 0].resolve(message.output);
+  if (message.action === 'job-fail') jobs[message.index ?? 0].reject(Object.assign(new Error(
+    'Private fixture brief and image data:image/png;base64,private-payload C:\\\\private\\\\image.png'), {
+      cleanupConfirmed: message.cleanupConfirmed,
+    }));
   reply();
 });
 `);
@@ -871,7 +894,7 @@ test('local API rejects cross-origin, wrong-host, malformed and unapproved model
   assert.equal(forwarded.status, 403, 'Forwarding is not implicitly enabled');
 });
 
-test('Copilot images fail closed on every platform before attachment creation or invocation', { timeout: 30_000 }, async t => {
+test('Copilot images fail closed without a supported Windows opt-in before attachment creation or invocation', { timeout: 30_000 }, async t => {
   const jpeg = await readFile(new URL('./fixtures/vision-fixture.jpg', import.meta.url));
   const metadata = Buffer.alloc(5000);
   metadata[0] = 0xff;
@@ -882,7 +905,10 @@ test('Copilot images fail closed on every platform before attachment creation or
   const payload = JSON.stringify({ world: 'space', brief: 'A tiny observatory', image, imageConsent: true });
   assert.ok(Buffer.byteLength(payload) > 4096, 'The bounded image request must exceed the text-only limit');
   for (const platform of ['linux', 'darwin', 'win32']) {
-    const server = await startLifecycleServer(t, platform);
+    const server = await startLifecycleServer(t, platform, {
+      BRICKLAB_COPILOT_IMAGES: platform === 'win32' ? '0' : '1',
+      BRICKLAB_COPILOT_BIN: join(process.cwd(), 'fixture-copilot.exe'),
+    });
     assert.equal((await server.post({}, JSON.stringify({ world: 'space', brief: 'A sculpture', image }))).status, 400,
       'Consent is required before any planning invocation');
     assert.equal((await server.post({}, JSON.stringify({ image, imageConsent: true }))).status, 400,
@@ -903,6 +929,120 @@ test('Copilot images fail closed on every platform before attachment creation or
     await server.command({ action: 'started', count: 1 });
     await server.command({ action: 'complete', spec: lifecycleSpec });
     assert.equal((await text).status, 200, 'Text-only Copilot remains available');
+  }
+});
+
+const windowsImageConfig = { BRICKLAB_COPILOT_IMAGES: '1',
+  BRICKLAB_COPILOT_BIN: join(process.cwd(), 'fixture-copilot.exe') };
+const windowsImageBody = JSON.stringify({ world: 'space', brief: 'A tiny observatory',
+  hollowInterior: true, image: consentedTestImage, imageConsent: true });
+const imageJobOutput = (spec: unknown = lifecycleSpec) => ({
+  exitCode: 0, stdout: JSON.stringify({ type: 'assistant.message', data: { content: JSON.stringify(spec) } })
+    + '\n' + JSON.stringify({ type: 'result', exitCode: 0 }) + '\n',
+  stderr: '', cleanupConfirmed: true, privateAclVerified: true,
+});
+
+test('Windows image opt-in requires a native executable and no hosted deployment', async t => {
+  const nonNative = await startLifecycleServer(t, 'win32', { BRICKLAB_COPILOT_IMAGES: '1', BRICKLAB_COPILOT_BIN: '' });
+  assert.equal((await nonNative.post({}, windowsImageBody)).status, 503);
+  const hosted = await startLifecycleServer(t, 'win32', { ...windowsImageConfig, BRICKLAB_HOSTED: '1' });
+  assert.equal((await hosted.post({}, windowsImageBody)).status, 403);
+  assert.equal((await (await hosted.get()).json() as { copilotImages: boolean }).copilotImages, false);
+  assert.equal((await hosted.command({ action: 'inspect' })).jobEvents.length, 0);
+});
+
+test('consented Windows image planning uses one bounded job and the strict custom-geometry parser', async t => {
+  const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
+  assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, true);
+  assert.equal((await server.command({ action: 'inspect' })).jobEvents.length, 0, 'Status never invokes a job');
+  assert.equal((await server.post({ 'X-Bricklab-Key': '' }, windowsImageBody)).status, 403);
+  assert.equal((await server.post({}, JSON.stringify({
+    world: 'space', brief: 'A sculpture', image: consentedTestImage,
+  }))).status, 400);
+  const response = await server.post(ndjson, windowsImageBody);
+  const state = await server.command({ action: 'job-started', count: 1 });
+  assert.equal(state.count, 0, 'Images never use the legacy spawn path');
+  assert.equal(state.jobEvents.length, 1);
+  const call = state.jobEvents[0];
+  assert.equal(call.timeoutMs, 300_000);
+  assert.equal(call.maxOutputBytes, 1_048_576);
+  assert.equal(call.imageConsent, true);
+  assert.deepEqual(call.image, consentedTestImage);
+  assert.match(call.args[1], /user selected a hollow-interior preference/);
+  assert.match(call.args[1], /User brief: "A tiny observatory"$/);
+  assert.deepEqual(call.args.slice(2), ['--output-format=json', '--stream=off', '--available-tools=',
+    '--disable-builtin-mcps', '--no-custom-instructions', '--no-ask-user', '--no-auto-update', '--disable-client-telemetry']);
+  assert.equal((await server.post()).status, 429);
+  await server.command({ action: 'job-complete', output: imageJobOutput() });
+  const lines = (await response.text()).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(lines.at(-1).type, 'result');
+  assert.deepEqual(lines.at(-1).spec, lifecycleSpec);
+  assert.equal(lines.at(-1).source, 'copilot');
+  assert.equal(lines.at(-1).calls, 1);
+  assert.equal((await server.post({}, '{}')).status, 400, 'Confirmed cleanup releases concurrency');
+});
+
+test('Windows image output, geometry and ACL failures never become a scene or leak provider content', async t => {
+  const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
+  const invalid = [
+    { ...imageJobOutput(), stdout: 'private invalid JSONL C:\\private\\image.png' },
+    imageJobOutput({ ...lifecycleSpec, model: 'explorer' }),
+    imageJobOutput({ ...lifecycleSpec, world: 'jurassic' }),
+    { ...imageJobOutput(), stdout: 'x'.repeat(1_048_577) },
+    { ...imageJobOutput(), privateAclVerified: false },
+    { ...imageJobOutput(), exitCode: 1, stderr: 'private provider content' },
+  ];
+  for (const [index, output] of invalid.entries()) {
+    const response = server.post({}, windowsImageBody);
+    await server.command({ action: 'job-started', count: index + 1 });
+    await server.command({ action: 'job-complete', index, output });
+    const result = await response;
+    assert.equal(result.status, 502);
+    const body = await result.text();
+    assert.match(body, /Image planning failed/);
+    assert.doesNotMatch(body, /private|data:image|tiny observatory/);
+  }
+});
+
+test('Windows image timeout ends HTTP at 300 seconds but retains the slot until cleanup', async t => {
+  const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
+  const response = await server.post(ndjson, windowsImageBody);
+  await server.command({ action: 'job-started', count: 1 });
+  const state = await server.command({ action: 'advance', ms: 300_000 });
+  assert.equal(state.jobEvents[0].aborted, true);
+  const lines = (await response.text()).trim().split('\n').map(line => JSON.parse(line));
+  assert.equal(lines.at(-1).type, 'error');
+  assert.match(lines.at(-1).error, /300 seconds/);
+  assert.equal((await server.post()).status, 429);
+  await server.command({ action: 'job-complete', output: imageJobOutput() });
+  assert.equal((await server.post({}, '{}')).status, 400);
+  assert.equal((await server.command({ action: 'inspect' })).jobEvents.length, 1, 'No retries or late-result build');
+});
+
+test('Windows image disconnect aborts the same job and waits for confirmed cleanup', async t => {
+  const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
+  const response = await server.post(ndjson, windowsImageBody);
+  await server.command({ action: 'job-started', count: 1 });
+  await response.body!.cancel();
+  assert.equal((await server.post()).status, 429);
+  const state = await server.command({ action: 'inspect' });
+  assert.equal(state.jobEvents[0].aborted, true);
+  await server.command({ action: 'job-fail', cleanupConfirmed: true });
+  assert.equal((await server.post({}, '{}')).status, 400);
+});
+
+test('unconfirmed Windows image cleanup permanently quarantines the shared slot with a private error', async t => {
+  for (const action of ['job-fail', 'job-complete']) {
+    const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
+    const response = server.post({}, windowsImageBody);
+    await server.command({ action: 'job-started', count: 1 });
+    await server.command({ action, output: { ...imageJobOutput(), cleanupConfirmed: false }, cleanupConfirmed: false });
+    const result = await response;
+    assert.equal(result.status, 502);
+    assert.doesNotMatch(await result.text(), /private|data:image|tiny observatory/);
+    assert.equal((await server.post()).status, 429);
+    assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, false);
+    assert.equal((await server.command({ action: 'inspect' })).jobEvents.length, 1);
   }
 });
 

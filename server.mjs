@@ -15,6 +15,7 @@ import { createAzureUsageGate } from './azure-usage.mjs';
 import { createAzureBudgetGate } from './azure-budget.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
 import { MAX_IMAGE_BYTES, validatePlanningImage } from './planning-image.mjs';
+import { createWindowsCopilotJobRunner } from './src/windows-copilot-job-runner.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const production = process.argv.includes('--production');
@@ -82,6 +83,12 @@ const copilotExecutable = process.env.BRICKLAB_COPILOT_BIN || 'copilot';
 if (process.env.BRICKLAB_COPILOT_BIN
     && (!isAbsolute(copilotExecutable) || /\.(?:cmd|bat)$/i.test(copilotExecutable)))
   throw new Error('BRICKLAB_COPILOT_BIN must be an absolute path to the standalone Copilot executable (native .exe on Windows), not a shell script launcher.');
+const copilotImagesEnabled = liveEnabled && process.platform === 'win32'
+  && process.env.BRICKLAB_COPILOT_IMAGES === '1'
+  && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable);
+const windowsCopilotRunner = copilotImagesEnabled ? createWindowsCopilotJobRunner() : null;
+let copilotImageQuarantined = false;
+const copilotImageLockMessage = 'Copilot image cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.';
 const codespaces = process.env.BRICKLAB_CODESPACES === '1';
 const codespaceName = process.env.CODESPACE_NAME;
 if (codespaces && (!production || process.env.CODESPACES !== 'true'
@@ -174,6 +181,7 @@ async function verifyPrivatePort() {
 const missingCliOutput = /not installed|not found|install (?:the )?(?:github )?copilot cli/i;
 const missingCliStatus = { state: 'missing-cli', message: 'Copilot CLI is not installed or this command is only a shim. VS Code/app sign-in is separate. Run npm install -g @github/copilot and copilot login in the server terminal, then retry server status. On Windows, BRICKLAB_COPILOT_BIN can select the full native .exe path instead of a shim.' };
 async function plannerStatus() {
+  if (copilotImageQuarantined) return { state: 'unavailable', message: copilotImageLockMessage };
   if (!liveEnabled) return { state: 'off', message: hosted ? 'Copilot CLI is disabled in hosted mode.'
     : 'Copilot is off. Install with npm install -g @github/copilot, run copilot login in the server terminal, then restart with BRICKLAB_COPILOT=1 (and BRICKLAB_CODESPACES=1 for the private Codespace browser URL).' };
   try {
@@ -198,6 +206,10 @@ export function extractSpec(text, provider = 'Copilot') {
     throw new Error(`${provider} returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.`);
   return validateCustomSpec(parsed);
 }
+
+const copilotArguments = prompt => ['-p', prompt, '--output-format=json', '--stream=off',
+  '--available-tools=', '--disable-builtin-mcps', '--no-custom-instructions',
+  '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'];
 
 function askCopilot(world, brief, signal, hollowInterior) {
   const workdir = resolve(root, '.agent-home');
@@ -265,9 +277,7 @@ function askCopilot(world, brief, signal, hollowInterior) {
     mkdir(workdir, { recursive: true }).then(() => {
       if (settled) return;
       // No shell interpolation and no agent tools. Only the brief and fixed schema go to the model.
-      child = spawn(copilotExecutable, ['-p', prompt, '--output-format=json', '--stream=off',
-        '--available-tools=', '--disable-builtin-mcps',
-        '--no-custom-instructions', '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'], {
+      child = spawn(copilotExecutable, copilotArguments(prompt), {
         cwd: workdir, env: { ...process.env, COPILOT_ALLOW_ALL: 'false', COPILOT_PLUGIN_DIR_ONLY: 'true' },
         stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
       });
@@ -347,7 +357,8 @@ const server = http.createServer(async (req, res) => {
       const planner = await plannerStatus();
       return send(res, 200, { copilot: liveEnabled && !['missing-cli', 'unavailable'].includes(planner.state),
         calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
-        azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted });
+        azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
+        copilotImages: copilotImagesEnabled && !copilotImageQuarantined });
     }
     const localAI = url.pathname === '/api/local-plan';
     const azureAI = url.pathname === '/api/azure-plan';
@@ -388,7 +399,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: azureAI ? azurePlannerStatus.message
         : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
         : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
-    if (copilotAI && image)
+    if (copilotAI && image && !copilotImagesEnabled)
       return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
     const today = new Date().toISOString().slice(0, 10);
     if (today !== day) { day = today; calls = 0; }
@@ -480,6 +491,42 @@ const server = http.createServer(async (req, res) => {
           })();
           finished = work.then(() => {}, () => {});
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+        } else if (image) {
+          const work = (async () => {
+            const workdir = resolve(root, '.agent-home');
+            await mkdir(workdir, { recursive: true });
+            controller.signal.throwIfAborted();
+            let output;
+            try {
+              output = await windowsCopilotRunner.run({
+                executable: copilotExecutable,
+                args: copilotArguments(planningPrompt(world, brief, hollowInterior)),
+                cwd: workdir, image: body.image, imageConsent: body.imageConsent,
+                signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
+              });
+            } catch (error) {
+              if (error?.cleanupConfirmed !== true) {
+                copilotImageQuarantined = true;
+                console.error('Copilot image cleanup could not be confirmed. Planning is locked pending operator verification and restart.');
+              }
+              throw error;
+            }
+            if (output?.cleanupConfirmed !== true) {
+              copilotImageQuarantined = true;
+              console.error('Copilot image cleanup could not be confirmed. Planning is locked pending operator verification and restart.');
+              throw new Error('Copilot image cleanup could not be confirmed.');
+            }
+            controller.signal.throwIfAborted();
+            if (output.privateAclVerified !== true || output.exitCode !== 0
+                || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
+                || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
+              throw new Error('Copilot image planning failed closed.');
+            const parsed = extractSpec(readCopilotResponse(output.stdout));
+            plannerFailure = null;
+            return parsed;
+          })();
+          finished = work.then(() => {}, () => {});
+          spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else {
           const invocation = askCopilot(world, brief, controller.signal, hollowInterior);
           finished = invocation.finished;
@@ -497,6 +544,7 @@ const server = http.createServer(async (req, res) => {
         : controller.signal.reason?.name === 'TimeoutError' ? 504 : azureAI && error?.statusCode === 429 ? 429
         : azureAI && error?.statusCode === 503 ? 503 : 502,
       { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
+        : copilotImageQuarantined ? copilotImageLockMessage
         : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
           : safePlanningError(error) });
     } finally {
@@ -504,7 +552,7 @@ const server = http.createServer(async (req, res) => {
       clearTimeout(heartbeat);
       res.removeListener('close', disconnect);
       await finished;
-      busy = false;
+      if (!copilotImageQuarantined) busy = false;
     }
     return;
   }
