@@ -176,6 +176,27 @@ progress::-moz-progress-bar { background: #6ca88c; border-radius: 4px; }
 .speed-button svg { width: 16px; height: 16px; }
 #transport-note { font-size: 8px; color: #506875; display: block; margin-top: 8px; }
 .notice { padding: 14px 20px; border: 1px solid #e6b66e; border-radius: 9px; background: #fff2d6; color: #684715; font-size: 12px; line-height: 1.6; margin-top: 15px; }
+.agent-insights { padding: 20px; margin-bottom: 24px; background: #fff; border: 1px solid var(--line); border-radius: 12px; }
+.agent-insights summary { cursor: pointer; font-size: 16px; font-weight: 900; }
+.agent-insights summary:focus-visible { outline: 3px solid var(--blue); outline-offset: 4px; }
+.agent-insights p { font-size: 13px; line-height: 1.7; max-width: 72ch; color: #4d6170; }
+.insight-context { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px 36px; margin-top: 24px; }
+.agent-insights h3 { font-size: 14px; }
+.agent-insights dl { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 9px 16px; font-size: 12px; line-height: 1.6; }
+.agent-insights dt { font-weight: 800; }
+.agent-insights dd { margin: 0; overflow-wrap: anywhere; }
+.agent-insights table { width: 100%; table-layout: fixed; border-collapse: collapse; margin: 24px 0; text-align: left; }
+.agent-insights caption { text-align: left; font-size: 14px; font-weight: 900; margin-bottom: 12px; }
+.agent-insights th, .agent-insights td { padding: 14px 12px; border-bottom: 1px solid var(--line); vertical-align: top; overflow-wrap: anywhere; }
+.agent-insights th { font-size: 13px; }
+.agent-insights td { font-size: 12px; }
+.agent-insights small { display: block; font-size: 11px; line-height: 1.6; font-weight: 500; color: #4d6170; }
+.agent-insights th p { font-weight: 500; }
+@media (max-width: 700px) {
+  .agent-insights { padding: 16px 12px; }
+  .insight-context { grid-template-columns: minmax(0, 1fr); }
+  .agent-insights th, .agent-insights td { padding: 12px 6px; }
+}
 .discovery { display: grid; grid-template-columns: 260px 1fr 337px; gap: 27px; padding: 35px 0 30px; }
 .discovery-intro h2 { font-size: 24px; line-height: 1.2; margin-bottom: 13px; letter-spacing: -.035em; }
 .discovery-intro p { font-size: 11px; color: var(--muted); line-height: 1.8; margin: 0; }

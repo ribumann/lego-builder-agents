@@ -4,6 +4,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
+import { agentInsights } from './agent-insights';
 import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, translateTaskName, type Language } from './i18n';
 
 const icon = (name: string) => {
@@ -119,6 +120,16 @@ app.innerHTML = `
       <div class="inspection"><div class="section-title"><h3>Build inspection</h3><span id="inspection-result">Waiting for a build</span></div><div id="checks"></div></div>
       <div class="experiments"><h3>Try a little what-if</h3><p>Remove about a third of the bricks. Watch the team compare reality with its plan and repair the gaps.</p><div class="experiment-actions"><button id="damage" class="button outline" disabled>Hide bricks</button><button id="repair" class="button outline" disabled>Ask team to repair</button></div><div class="replay-row"><label for="replay">Build replay</label><input id="replay" type="range" min="0" max="1" value="1" disabled aria-label="Replay placed bricks"/><button id="live-view" class="text-button">Live</button></div><span id="replay-label">Finish a build to explore its timeline.</span></div>
     </section>
+    <details id="agent-insights" class="agent-insights">
+      <summary>Extended agent insights</summary>
+      <p>This read-only view shows local program state and recorded actions, not hidden model reasoning. Opening it makes no model request.</p>
+      <div class="insight-context">
+        <section><h3>Shared memory</h3><p>The crew shares one plan, placed brick identities and a task board. The retained event log holds up to 120 actions, not a model conversation.</p><dl id="insight-state"></dl></section>
+        <section><h3>Context and tools</h3><p>Each builder reads its assigned tasks and prerequisites. A dependency-ready task is eligible work, not permission to build while paused or damaged.</p><p><code>step</code> / <code>inspect</code> / <code>damage</code> / <code>repair</code></p><p>These are bounded application functions. They place planned bricks, check the scene, simulate damage and reopen missing-brick tasks. Local agents cannot browse, run shell commands or invent extra tools.</p><p>The brief, scene and retained actions can be saved on this browser or exported. This panel sends no data and adds no private agent memory.</p></section>
+      </div>
+      <div id="insight-agents"></div>
+      <p>Planning source is saved attribution, not independent proof. Counts are bricks and tasks, not model tokens. Connectivity checks do not prove physical stability.</p>
+    </details>
     <section class="learning-strip"><span class="learning-symbol">${icon('help')}</span><div><h3 id="quiz-title">Quick thought: what makes this a team of agents?</h3><div id="quiz-options"><button data-answer="wrong">They all use the same color</button><button data-answer="right">They choose actions and share progress</button><button data-answer="wrong">They build without any plan</button></div><p id="quiz-feedback" role="status">Make a prediction, then watch the crew.</p></div><div class="file-actions"><button id="herd-example" class="button outline">Load local Jurassic herd</button><button id="fleet-example" class="button outline">Load local space fleet</button><button id="export" class="button outline" disabled>${icon('download')} Save build file</button><button id="import" class="button outline">Load build / AI mission</button><input id="import-file" type="file" accept=".json,application/json" hidden aria-label="Choose a build or AI mission JSON file"/></div></section>
     <footer><span>BrickLab <span class="footer-dot">·</span> A hands-on introduction to agentic teamwork.</span><span>Independent educational demo. Not affiliated with the LEGO Group.</span></footer>
   </main>
@@ -303,7 +314,7 @@ function render() {
     const text = id === 'build' ? planning ? 'Waiting' : running ? 'Checking' : team ? 'Watching' : 'Ready'
       : id === 'plan' ? team ? 'Reviewed' : 'Ready'
       : id === 'check' ? status === 'complete' ? 'Passed' : status === 'damaged' ? 'Problem found' : team ? 'Waiting' : 'Ready'
-      : running && team?.plan.tasks.some(t => t.agent === id && !team!.taskDone(t) && t.depends.every(d => team!.taskDone(team!.plan.tasks.find(p => p.id === d)!))) ? 'Building'
+      : running && team?.readyTask(id) ? 'Building'
       : status === 'complete' ? 'Done' : team ? 'Waiting' : 'Ready';
     $(`#${id}-state`).textContent = text;
     $(`#${id}-state`).classList.toggle('working', text === 'Building');
@@ -339,7 +350,50 @@ function render() {
   if (replaying && team) $('#replay-label').textContent = `${translate('Replay:')} ${replay.value} / ${count} ${translate('placed bricks. Your saved build is unchanged.')}`;
   if (status === 'complete' && !replaying) $('#replay-label').textContent = 'Scrub through the actual order bricks were placed.';
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
+  renderInsights();
 }
+
+function renderInsights() {
+  if (!$<HTMLDetailsElement>('#agent-insights').open) return;
+  const text = (value: string) => esc(translate(value));
+  if (!team) {
+    $('#insight-state').innerHTML = `<dt>${text('Current brief')}</dt><dd>${text('No plan loaded')}</dd>`;
+    $('#insight-agents').innerHTML = '';
+    return;
+  }
+  const view = agentInsights(team);
+  const sourceNames = {
+    local: 'Local rule-based agents', copilot: 'Copilot cloud planning · custom designs', 'local-ai': 'Local AI · server-host model',
+    azure: 'Azure Foundry planning · custom designs', compatible: 'Compatible AI · custom designs', 'github-models': 'Imported model decisions',
+  } as const;
+  $('#insight-state').innerHTML = [
+    ['Current brief', activeBrief],
+    ['Planning source', translate(sourceNames[view.source])],
+    ['Placed / planned bricks', `${view.placed} / ${view.planned}`],
+    ['Not yet placed', String(view.missing)],
+    ['Completed / total tasks', `${view.completedTasks} / ${view.totalTasks}`],
+    ['Dependency links', String(view.dependencies)],
+  ].map(([label, value]) => `<dt>${text(label)}</dt><dd>${esc(value)}</dd>`).join('');
+  const actions: Record<AgentId, string> = {
+    build: 'Coordinates ready work and reports completion.',
+    plan: 'Checks the graph before construction and prerequisites at each handoff.',
+    frame: 'Places assigned structural bricks.',
+    detail: 'Assembles assigned supports and details.',
+    check: 'Inspects identities and connectivity; identifies missing bricks for repair.',
+  };
+  const taskName = (label: string) => esc(translateTaskName(label, team!.plan.spec.model !== 'custom', team!.plan.spec.design?.objects?.map(object => object.name)));
+  $('#insight-agents').innerHTML = `<table><caption>${text('Local agents: context and recorded actions')}</caption><thead><tr><th scope="col">${text('Agent and available actions')}</th><th scope="col">${text('Latest recorded action')}</th></tr></thead><tbody>${view.agents.map(agent => {
+    const event = agent.lastAction;
+    const task = agent.id === 'frame' || agent.id === 'detail'
+      ? `<p>${text('Completed / total tasks')}: ${agent.completed} / ${agent.tasks}</p><p>${agent.ready
+        ? `${text('Dependency-ready task')}: ${taskName(agent.ready.label)}`
+        : text(agent.completed === agent.tasks ? 'No pending assigned tasks' : 'Waiting for prerequisites')}</p>` : '';
+    return `<tr data-insight-agent="${agent.id}"><th scope="row">${AGENTS[agent.id].name}<small>${text(AGENTS[agent.id].role)}</small><p>${text(actions[agent.id])}</p>${task}</th><td>${event
+      ? `<small>${text('turn')} ${event.tick} · ${text(event.kind)}</small><p>${esc(translateActivity(event.message, team!.plan.spec.model !== 'custom', team!.plan.spec.design?.objects?.map(object => object.name)))}</p>`
+      : text('No action in the retained log')}</td></tr>`;
+  }).join('')}</tbody></table>`;
+}
+$('#agent-insights').addEventListener('toggle', renderInsights);
 
 function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', planningBrief: string) {
   const modal = $<HTMLDialogElement>('#planning-dialog');

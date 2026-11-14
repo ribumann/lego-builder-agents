@@ -29,6 +29,7 @@ Browser application with a Node server. Local and offline use require no Azure s
 - No required local models, downloaded brand assets or provisioned cloud infrastructure.
 - Original brick geometry, not official LEGO assets or affiliation.
 - Local persistence and downloadable builds; no accounts or public sharing.
+- Optional extended agent insights expose actual local task readiness, shared state and retained actions, separately from the ordinary learning flow. They add no model calls or private agent memory and do not claim access to hidden model reasoning.
 
 ## Evidence on Hand
 User-provided text of a LinkedIn post describing BauBot coordinating HolzBot and SteinBot to build a Minecraft castle for 60 children aged 11-15. Its reported $0.022 model cost is not a benchmark for this application.

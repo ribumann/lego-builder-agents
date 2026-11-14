@@ -163,6 +163,25 @@ The **local rule-based templates** support body colors green, orange, blue, purp
 
 This teaches goal decomposition, delegation, shared memory, dependencies, parallel work, observation, tool actions, verification and repair. It deliberately separates those concepts from a claim that every agent must be a language model.
 
+### Extended agent insights
+
+Open **Extended agent insights** beneath the experiments for an optional,
+read-only view. The ordinary building flow works with it closed. Make an offline
+plan, predict which builder has a dependency-ready task, then take one step and
+compare the actual retained action. After completion, hide bricks and compare
+the identity count before and after repair.
+
+The panel separates shared program memory (plan, placed identities and task
+board), task context (assignments and prerequisites), available bounded
+functions (`step`, `inspect`, `damage`, `repair`) and the retained action log.
+It shows the same data the local engine uses; it neither runs another model nor
+reveals hidden model reasoning. Its source identifier is saved attribution,
+not independently verified provenance. The log retains at most 120 actions,
+not an unlimited conversation, and counts are bricks/tasks rather than tokens.
+Opening or closing the panel does not alter saves or send data. All six
+interface languages are supported; user briefs and custom object names remain
+unchanged.
+
 **Cloud planning is hybrid:** a real Copilot model must propose custom geometry for the child's brief, including familiar subjects; selecting a pre-built template is rejected. The same two local construction specialists execute it, with PlanBot and CheckBot performing local checks. Optional Local AI uses this same custom-only contract and five-agent execution. Subjects are not limited to dinosaurs and spacecraft, but the result is still a bounded stylized brick design, not unrestricted text-to-3D or a guarantee of artistic fidelity or semantic originality. It is not five independent LLM calls. Crew Q&A remains a clearly labeled local teaching guide in every mode.
 
 **Optional GitHub Models workflow uses three model calls:** BuildBot interprets the brief and delegates; FrameBot and DetailBot are then called concurrently to choose their actual task priority orders and explain their coordination. Every proposed order is schema-validated against the specialist's owned tasks. The local runtime enforces prerequisites regardless of priority, runs the whole mission and checks the result before producing an artifact. Loading this artifact starts an observable real-time execution, not a video.

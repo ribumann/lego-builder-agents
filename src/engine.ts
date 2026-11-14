@@ -377,6 +377,10 @@ export class Team {
     if (this.events.length > 120) this.events.shift();
   }
   taskDone(task: BuildTask) { return task.bricks.every(b => this.bricks.has(b.id)); }
+  readyTask(agent: Brick['agent']) {
+    return this.plan.tasks.find(task => task.agent === agent && !this.taskDone(task)
+      && task.depends.every(id => this.taskDone(this.plan.tasks.find(dependency => dependency.id === id)!)));
+  }
   get progress() { return this.bricks.size / allBricks(this.plan).length; }
   get completedTasks() { return this.plan.tasks.filter(t => this.taskDone(t)).length; }
   get checks() {
@@ -396,8 +400,7 @@ export class Team {
     this.tick++;
     // BuildBot routes ready work; PlanBot rechecks its dependency contract before each handoff.
     for (const agent of ['frame', 'detail'] as const) {
-      const task = this.plan.tasks.find(t => t.agent === agent && !this.taskDone(t)
-        && t.depends.every(id => this.taskDone(this.plan.tasks.find(d => d.id === id)!)));
+      const task = this.readyTask(agent);
       if (!task) continue;
       const remaining = task.bricks.filter(b => !this.bricks.has(b.id));
       if (!this.handedOffTasks.has(task.id)) {
