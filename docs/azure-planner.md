@@ -21,12 +21,15 @@ For the deployed GPT-5.4 Data Zone model, `azure-budget.mjs` reserves estimated
 inference cost atomically before each call. Pre-provision `daily-budget.json`
 in a private Blob container with `{"day":"2000-01-01","reservedMicros":0}`
 and grant the host identity Storage Blob Data Contributor on that container.
-Create `createAzureBudgetGate({ account, container, endpoint, deployment })`;
+Create `createAzureBudgetGate({ account, container, endpoint, deployment,
+resourceId })` with the Azure OpenAI account's ARM resource ID;
 after validating the request and acquiring the shared in-flight slot, call
 `reserve({ signal })` immediately before inference. Exhaustion, a UTC day
 boundary, and unavailable state or pricing have distinct error codes.
 
-The gate reserves $0.55 per request against $50 per UTC day, using a conservative
+The gate checks the account, identity-only authentication, region, deployed
+model version and SKU against the priced configuration via Azure Resource
+Manager on every call. It reserves $0.55 per request against $50 per UTC day, using a conservative
 128,000 input-token allowance and 12,000 completion tokens including reasoning.
 It checks the current Sweden Central GPT-5.4 Data Zone retail meters before
 every reservation and denies calls if they exceed $2.75 input or $16.50 output

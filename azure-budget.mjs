@@ -1,8 +1,6 @@
 import { ManagedIdentityCredential } from '@azure/identity';
 import { BlobServiceClient } from '@azure/storage-blob';
 
-const ENDPOINT = 'https://bricklab-ai-rer5x4xnttoge.openai.azure.com';
-const DEPLOYMENT = 'bricklab-planner-gpt54';
 const DAILY_LIMIT = 50_000_000;
 // Reserve for 128k input tokens despite the adapter's 32k-byte prompt ceiling.
 // The output ceiling includes visible and reasoning tokens.
@@ -15,11 +13,8 @@ function failure(code, message) {
   return Object.assign(new Error(message), { code });
 }
 
-export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
-  const timeout = AbortSignal.timeout(10_000);
-  const response = await fetchImpl(PRICE_URL, { redirect: 'error',
-    signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
-  if (!response.ok || !response.body) throw new Error('Pricing unavailable.');
+async function boundedJSON(response, limit) {
+  if (!response.ok || !response.body) throw new Error('Verification unavailable.');
   const reader = response.body.getReader();
   const chunks = [];
   let size = 0;
@@ -28,11 +23,40 @@ export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
       const { done, value } = await reader.read();
       if (done) break;
       size += value.byteLength;
-      if (size > 1_048_576) throw new Error('Pricing response too large.');
+      if (size > limit) throw new Error('Verification response too large.');
       chunks.push(value);
     }
   } finally { await reader.cancel().catch(() => {}); }
-  const data = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+  return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+}
+
+export async function verifyDeploymentConfig({ resourceId, deployment, credential, signal, fetchImpl = fetch }) {
+  const timeout = AbortSignal.timeout(10_000);
+  const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
+  const token = await credential.getToken('https://management.azure.com/.default', { abortSignal: combined });
+  if (!token?.token) throw new Error('Management identity unavailable.');
+  const get = async path => boundedJSON(await fetchImpl(`https://management.azure.com${path}?api-version=2023-05-01`, {
+    headers: { Authorization: `Bearer ${token.token}` }, redirect: 'error', signal: combined,
+  }), 256_000);
+  const account = await get(resourceId);
+  const model = await get(`${resourceId}/deployments/${encodeURIComponent(deployment)}`);
+  const accountName = resourceId.slice(resourceId.lastIndexOf('/') + 1).toLowerCase();
+  if (account.location?.toLowerCase() !== 'swedencentral' || account.kind !== 'OpenAI'
+      || account.name?.toLowerCase() !== accountName
+      || account.properties?.customSubDomainName?.toLowerCase() !== accountName
+      || account.properties?.disableLocalAuth !== true
+      || account.properties?.provisioningState !== 'Succeeded'
+      || model.sku?.name !== 'DataZoneStandard' || model.properties?.provisioningState !== 'Succeeded'
+      || model.properties?.model?.format !== 'OpenAI' || model.properties?.model?.name !== 'gpt-5.4'
+      || model.properties?.model?.version !== '2026-03-05')
+    throw new Error('Deployment does not match the priced configuration.');
+}
+
+export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
+  const timeout = AbortSignal.timeout(10_000);
+  const response = await fetchImpl(PRICE_URL, { redirect: 'error',
+    signal: signal ? AbortSignal.any([signal, timeout]) : timeout });
+  const data = await boundedJSON(response, 1_048_576);
   if (!Array.isArray(data.Items) || data.NextPageLink) throw new Error('Incomplete pricing response.');
   for (const [sku, ceiling] of [['5.4 inp Dz', 2.75], ['5.4 opt Dz', 16.5]]) {
     const matches = data.Items.filter(item => item.productName === 'Azure OpenAI GPT5'
@@ -46,17 +70,21 @@ export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
   }
 }
 
-export function createAzureBudgetGate({ account, container, endpoint, deployment, blobClient,
-  now = () => new Date(), verifyPrices = verifyRetailPrices }) {
-  if (typeof endpoint !== 'string' || endpoint.replace(/\/$/, '') !== ENDPOINT || deployment !== DEPLOYMENT)
-    throw new Error('Azure budget only supports the approved GPT-5.4 deployment.');
+export function createAzureBudgetGate({ account, container, endpoint, deployment, resourceId, blobClient,
+  credential = new ManagedIdentityCredential(), now = () => new Date(),
+  verifyPrices = verifyRetailPrices, verifyConfig = verifyDeploymentConfig }) {
+  const match = typeof resourceId === 'string' && /^\/subscriptions\/[0-9a-f-]{36}\/resourceGroups\/[\w().-]{1,90}\/providers\/Microsoft\.CognitiveServices\/accounts\/([a-z0-9][a-z0-9-]{0,62})$/i.exec(resourceId);
+  if (!match || typeof endpoint !== 'string'
+      || endpoint.replace(/\/$/, '').toLowerCase() !== `https://${match[1].toLowerCase()}.openai.azure.com`
+      || typeof deployment !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(deployment))
+    throw new Error('Azure budget requires a matching Azure OpenAI resource ID, endpoint and deployment.');
   if (!blobClient) {
     if (typeof account !== 'string' || !/^[a-z0-9]{3,24}$/.test(account)
         || typeof container !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(container)
         || container.includes('--'))
       throw new Error('Azure budget storage account or container name is invalid.');
     const service = new BlobServiceClient(`https://${account}.blob.core.windows.net`,
-      new ManagedIdentityCredential(), { retryOptions: { maxTries: 1 } });
+      credential, { retryOptions: { maxTries: 1 } });
     blobClient = service.getContainerClient(container).getBlockBlobClient('daily-budget.json');
   }
 
@@ -72,7 +100,10 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
     async reserve({ signal } = {}) {
       try {
         currentDay();
-        await verifyPrices({ signal, now: now() });
+        await Promise.all([
+          verifyPrices({ signal, now: now() }),
+          verifyConfig({ resourceId, deployment, credential, signal }),
+        ]);
         for (let attempt = 0; attempt < 5; attempt++) {
           const today = currentDay();
           const response = await blobClient.download(0, undefined, { abortSignal: signal });
