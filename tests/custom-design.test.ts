@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { expandCustomBricks, validateCustomSpec } from '../src/custom-design.mjs';
-import { Team, allBricks, createPlan, restoreSnapshot, validateSpec } from '../src/engine';
+import { CUSTOM_DESIGN_PROMPT, expandCustomBricks, validateCustomSpec } from '../src/custom-design.mjs';
+import { COLORS, Team, allBricks, createPlan, restoreSnapshot, validateSpec, type Color } from '../src/engine';
 import { worldExample } from '../src/world-examples';
 import { BrickBatch, MAX_DECORATIVE_STUDS } from '../src/brick-batch';
 import * as THREE from 'three';
@@ -46,6 +46,38 @@ test('custom input rejects overlaps, out-of-bounds, unsafe values and excessive 
   assert.throws(() => validateCustomSpec(design('bad color', [{ ...brick(0, 0, 0, 1, 1, 1), color: 'url(evil)' }])), /color/);
   assert.throws(() => validateCustomSpec({ ...fixtures[0], budget: 1 }), /budget/);
   assert.throws(() => validateSpec(fixtures[0], 'jurassic'), /world/);
+});
+
+test('expanded palette is accepted by custom geometry, rendered, and preserved through save and reload', () => {
+  const colors: Color[] = ['black', 'yellow', 'gray', 'brown', 'pink'];
+  const spec = validateCustomSpec({
+    world: 'space', model: 'custom', color: 'black', longTail: false, wideWings: false, budget: 50,
+    design: { name: 'Color bar', bricks: colors.map((color, x) => ({
+      x, y: 0, z: 0, width: 1, height: 1, depth: 1, color, part: 'frame',
+    })) },
+  });
+  assert.equal(spec.color, 'black');
+  assert.ok(colors.every(color => CUSTOM_DESIGN_PROMPT.includes(`"${color}"`)));
+  const plan = createPlan(spec);
+  const bricks = allBricks(plan);
+  assert.deepEqual(bricks.map(brick => brick.color), colors.map(color => COLORS[color]));
+  const materials: string[] = [];
+  const cube = new THREE.BoxGeometry(), stud = new THREE.CylinderGeometry();
+  const material = new THREE.MeshBasicMaterial();
+  const batch = new BrickBatch(bricks, cube, stud, color => {
+    materials.push(color);
+    return material;
+  }, new Map(), false, 1000);
+  assert.deepEqual(new Set(materials), new Set(colors.map(color => COLORS[color])));
+  assert.equal(batch.group.children.length, colors.length * 2);
+  batch.dispose(); cube.dispose(); stud.dispose(); material.dispose();
+
+  const team = new Team(plan);
+  for (let i = 0; i < 100 && team.status !== 'complete'; i++) team.step(20);
+  assert.equal(team.status, 'complete');
+  const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot('Color bar'))));
+  assert.deepEqual(restored.team.plan.spec, spec);
+  assert.deepEqual(allBricks(restored.team.plan).map(brick => brick.color), colors.map(color => COLORS[color]));
 });
 
 test('repeat expansion is bounded, non-overlapping and canonical', () => {

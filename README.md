@@ -154,7 +154,7 @@ Build a blue explorer spaceship with wide wings and two engines.
 Build a white cargo spaceship. Budget 300 bricks.
 ```
 
-The **local rule-based templates** support body colors green, orange, blue, purple, red and white. Their plates, eyes, cockpit, engine and accent colors are fixed. Unsupported local requests do not create arbitrary geometry; the plan explains this limitation. T. rex and triceratops are excluded from the local Jurassic mission because they lived in the Cretaceous. Copilot's custom-design path below is not restricted to these four figures.
+The **local rule-based templates** support body colors green, orange, blue, purple, red, white, black, yellow, gray, brown and pink. Their plates, eyes, cockpit, engine and accent colors are fixed. Unsupported local requests do not create arbitrary geometry; the plan explains this limitation. T. rex and triceratops are excluded from the local Jurassic mission because they lived in the Cretaceous. Copilot's custom-design path below is not restricted to these four figures.
 
 ## What is actually agentic?
 

@@ -695,6 +695,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <details><summary>Planning choices and privacy</summary>
     <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
     <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
+    <p>Additional offline template body colors: black, yellow, gray, brown and pink.</p>
     <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
   </details>
   <details><summary>Timing and design limits</summary>

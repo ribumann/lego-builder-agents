@@ -24,6 +24,10 @@ test('mission navigation and guide disclosures have translations in all six lang
   for (const language of languages.slice(1)) {
     setLanguage(language);
     for (const text of interfaceText) assert.notEqual(translate(text), text, `${language}: ${text}`);
+    const paletteGuidance = 'Additional offline template body colors: black, yellow, gray, brown and pink.';
+    assert.notEqual(translate(paletteGuidance), paletteGuidance, `${language}: expanded color guidance`);
+    for (const color of ['black', 'yellow', 'gray', 'brown', 'pink'])
+      assert.notEqual(translate(color), color, `${language}: ${color}`);
   }
   setLanguage('en');
 });
