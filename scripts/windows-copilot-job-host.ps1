@@ -191,6 +191,8 @@ public static class BrickLabJobHost
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     private static extern IntPtr CreateJobObject(ref SecurityAttributes attributes, string name);
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, EntryPoint = "CreateDirectoryW", SetLastError = true)]
+    private static extern bool CreateDirectory(string path, ref SecurityAttributes attributes);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern bool SetInformationJobObject(IntPtr job, int informationClass, ref ExtendedLimitInformation information, uint length);
     [DllImport("kernel32.dll", SetLastError = true)]
@@ -225,6 +227,21 @@ public static class BrickLabJobHost
     private static extern bool CloseHandle(IntPtr handle);
     [DllImport("kernel32.dll", SetLastError = true)]
     private static extern void DeleteProcThreadAttributeList(IntPtr list);
+
+    public static void CreatePrivateDirectory(string path, byte[] descriptor)
+    {
+        GCHandle pinned = GCHandle.Alloc(descriptor, GCHandleType.Pinned);
+        try
+        {
+            SecurityAttributes attributes = new SecurityAttributes();
+            attributes.Length = Marshal.SizeOf(typeof(SecurityAttributes));
+            attributes.SecurityDescriptor = pinned.AddrOfPinnedObject();
+            attributes.InheritHandle = false;
+            if (!CreateDirectory(path, ref attributes))
+                throw new Win32Exception(Marshal.GetLastWin32Error());
+        }
+        finally { pinned.Free(); }
+    }
 
     public static BrickLabJobOutcome Run(string executable, string[] arguments, string attachment, string directory, int timeoutMs, int maxOutputBytes, Func<bool> isCancelled)
     {
@@ -486,8 +503,35 @@ public static class BrickLabJobHost
 
 $response = $null
 $directory = $null
+$directoryOwned = $false
 $safeToDelete = $true
 $stage = 'runtime'
+
+function Assert-PrivateAcl($acl, $sid) {
+    if ($acl.GetOwner([Security.Principal.SecurityIdentifier]).Value -ne $sid.Value) {
+        throw 'private-storage-unavailable'
+    }
+    $rules = $acl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
+    $hasUserFull = $false
+    foreach ($rule in $rules) {
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $rule.IdentityReference.Value -ne $sid.Value) {
+            throw 'private-storage-unavailable'
+        }
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny -and
+            $rule.IdentityReference.Value -eq $sid.Value) {
+            throw 'private-storage-unavailable'
+        }
+        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
+            $rule.IdentityReference.Value -eq $sid.Value -and
+            ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
+                [Security.AccessControl.FileSystemRights]::FullControl) {
+            $hasUserFull = $true
+        }
+    }
+    if (-not $hasUserFull) { throw 'private-storage-unavailable' }
+}
+
 try {
     if ($env:OS -ne 'Windows_NT' -or $ExecutionContext.SessionState.LanguageMode -ne 'FullLanguage') {
         throw 'unsupported-runtime'
@@ -535,37 +579,29 @@ try {
         [Security.AccessControl.AccessControlType]::Allow)
     $directoryAcl.AddAccessRule($userRule)
     $stage = 'create-directory'
-    [System.IO.FileSystemAclExtensions]::CreateDirectory($directoryAcl, $directory) | Out-Null
+    [BrickLabJobHost]::CreatePrivateDirectory($directory, $directoryAcl.GetSecurityDescriptorBinaryForm())
+    $directoryOwned = $true
     if (([IO.File]::GetAttributes($directory) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
         throw 'private-storage-unavailable'
     }
+    $stage = 'verify-directory-acl'
+    $actualDirectoryAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]$directory)
+    if (-not $actualDirectoryAcl.AreAccessRulesProtected) { throw 'private-storage-unavailable' }
+    Assert-PrivateAcl $actualDirectoryAcl $sid
     $path = Join-Path $directory $(if ($request.imageMimeType -eq 'image/png') { 'image.png' } else { 'image.jpg' })
-    $stage = 'write-attachment'
+    $stage = 'create-attachment'
     $fileStream = New-Object IO.FileStream($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try { $fileStream.Write($imageBytes, 0, $imageBytes.Length); $fileStream.Flush($true) }
-    finally { $fileStream.Dispose() }
-
-    $stage = 'verify-private-acl'
-    $fileAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl([IO.FileInfo]$path)
-    $rules = $fileAcl.GetAccessRules($true, $true, [Security.Principal.SecurityIdentifier])
-    $hasUserFull = $false
-    foreach ($rule in $rules) {
-        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-            $rule.IdentityReference.Value -ne $sid.Value) {
+    try {
+        $stage = 'verify-private-acl'
+        if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
             throw 'private-storage-unavailable'
         }
-        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Deny -and
-            $rule.IdentityReference.Value -eq $sid.Value) {
-            throw 'private-storage-unavailable'
-        }
-        if ($rule.AccessControlType -eq [Security.AccessControl.AccessControlType]::Allow -and
-            $rule.IdentityReference.Value -eq $sid.Value -and
-            ($rule.FileSystemRights -band [Security.AccessControl.FileSystemRights]::FullControl) -eq
-                [Security.AccessControl.FileSystemRights]::FullControl) {
-            $hasUserFull = $true
-        }
-    }
-    if (-not $hasUserFull) { throw 'private-storage-unavailable' }
+        $fileAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl($fileStream)
+        Assert-PrivateAcl $fileAcl $sid
+        $stage = 'write-attachment'
+        $fileStream.Write($imageBytes, 0, $imageBytes.Length)
+        $fileStream.Flush($true)
+    } finally { $fileStream.Dispose() }
 
     $cancelled = [Func[bool]] { [IO.File]::Exists($cancelSignalPath) }
     if ($cancelled.Invoke()) {
@@ -608,7 +644,7 @@ try {
         $response = [ordered]@{ ok = $false; status = 'launcher-failed'; cleanupConfirmed = $safeToDelete; failureStage = $stage }
     }
 } finally {
-    if ($directory -and $safeToDelete) {
+    if ($directoryOwned -and $safeToDelete) {
         try {
             if (Test-Path -LiteralPath $directory) {
                 Remove-Item -LiteralPath $directory -Recurse -Force -ErrorAction Stop

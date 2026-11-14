@@ -14,8 +14,9 @@ const HOST_SCRIPT = fileURLToPath(new URL('../scripts/windows-copilot-job-host.p
 const RESULT_PREFIX = 'BRICKLAB_JOB_RESULT:';
 const MAX_PROTOCOL_BYTES = 2_500_000;
 
-const invalid = () => new Error('Copilot image request is invalid.');
-const unsupported = () => new Error('Copilot image attachments require verified Windows process containment.');
+const failure = (message, cleanupConfirmed = false) => Object.assign(new Error(message), { cleanupConfirmed });
+const invalid = () => failure('Copilot image request is invalid.', true);
+const unsupported = () => failure('Copilot image attachments require verified Windows process containment.', true);
 
 function validateOptions(options) {
   if (!options || typeof options !== 'object' || Array.isArray(options)
@@ -37,7 +38,9 @@ function validateOptions(options) {
       || !Number.isInteger(maxOutputBytes) || maxOutputBytes < 1024
       || maxOutputBytes > MAX_COPILOT_JOB_OUTPUT_BYTES)
     throw invalid();
-  const validatedImage = validatePlanningImage(image, imageConsent);
+  let validatedImage;
+  try { validatedImage = validatePlanningImage(image, imageConsent); }
+  catch { throw invalid(); }
   if (!validatedImage) throw invalid();
   return { executable, args, cwd, signal, timeoutMs, maxOutputBytes, image: validatedImage };
 }
@@ -57,7 +60,7 @@ function findTrustedPowerShell() {
   const programFiles = process.env.ProgramFiles;
   if (typeof localAppData !== 'string' || !win32.isAbsolute(localAppData)
       || typeof programFiles !== 'string' || !win32.isAbsolute(programFiles))
-    throw new Error('Windows Copilot process containment is unavailable.');
+    throw failure('Windows Copilot process containment is unavailable.', true);
   // Resolve the registered Microsoft app alias instead of trusting PATH lookup.
   const alias = win32.join(localAppData, 'Microsoft', 'WindowsApps',
     'Microsoft.PowerShell_8wekyb3d8bbwe', 'pwsh.exe');
@@ -66,7 +69,7 @@ function findTrustedPowerShell() {
     if (!lstatSync(alias).isSymbolicLink()) throw new Error();
     executable = win32.resolve(readlinkSync(alias));
   } catch {
-    throw new Error('A trusted PowerShell 7 runtime is unavailable.');
+    throw failure('A trusted PowerShell 7 runtime is unavailable.', true);
   }
   const packageDirectory = win32.dirname(executable);
   const packageName = win32.basename(packageDirectory);
@@ -75,7 +78,7 @@ function findTrustedPowerShell() {
       || win32.basename(win32.dirname(packageDirectory)).toLowerCase() !== 'windowsapps'
       || !win32.resolve(executable).toLowerCase().startsWith(windowsAppsRoot.toLowerCase())
       || !/^Microsoft\.PowerShell_[\d.]+_(?:x86|x64|arm64|neutral)__8wekyb3d8bbwe$/i.test(packageName))
-    throw new Error('A trusted PowerShell 7 runtime is unavailable.');
+    throw failure('A trusted PowerShell 7 runtime is unavailable.', true);
   return executable;
 }
 
@@ -86,7 +89,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
   const run = async options => {
     if (process.platform !== 'win32') throw unsupported();
     const request = validateOptions(options);
-    if (request.signal?.aborted) throw new Error('Copilot image planning was cancelled.');
+    if (request.signal?.aborted) throw failure('Copilot image planning was cancelled.', true);
     const root = tempRoot ?? tmpdir();
     const requestId = randomUUID().replaceAll('-', '');
     const directoryName = `bricklab-copilot-${requestId}`;
@@ -95,7 +98,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
     const probePath = join(root, `bricklab-copilot-probe-${requestId}`);
     let probeCreated = false;
     try { await Promise.all([access(HOST_SCRIPT), access(request.executable), access(request.cwd)]); }
-    catch { throw new Error('Windows Copilot process containment is unavailable.'); }
+    catch { throw failure('Windows Copilot process containment is unavailable.', true); }
     try {
       await access(root);
       await writeFile(probePath, '', { flag: 'wx', mode: 0o600 });
@@ -105,9 +108,9 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
     } catch {
       if (probeCreated) {
         try { await rm(probePath, { force: true }); }
-        catch { throw new Error('Temporary storage cleanup could not be confirmed.'); }
+        catch { throw failure('Temporary storage cleanup could not be confirmed.'); }
       }
-      throw new Error('Private temporary storage is unavailable.');
+      throw failure('Private temporary storage is unavailable.', true);
     }
 
     const env = {
@@ -120,7 +123,8 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
 
     const powerShell = findTrustedPowerShell();
     try { await access(powerShell); }
-    catch { throw new Error('A trusted PowerShell 7 runtime is unavailable.'); }
+    catch { throw failure('A trusted PowerShell 7 runtime is unavailable.', true); }
+    if (request.signal?.aborted) throw failure('Copilot image planning was cancelled.', true);
     let child;
     try {
       child = spawn(powerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', HOST_SCRIPT], {
@@ -131,7 +135,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
         stdio: ['pipe', 'pipe', 'pipe'],
       });
     } catch {
-      throw new Error('Windows Copilot process containment is unavailable.');
+      throw failure('Windows Copilot process containment is unavailable.', true);
     }
 
     return await new Promise((resolvePromise, reject) => {
@@ -141,6 +145,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
       let settled = false;
       let cancelSent = false;
       let cancelSignalError = false;
+      let inputFailed = false;
 
       const cancel = () => {
         if (cancelSent) return;
@@ -165,46 +170,50 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
         else overflow = true;
       });
       child.stderr.on('data', () => {});
-      child.stdin.on('error', () => {});
-      child.on('error', () => finish(new Error('Windows Copilot process containment is unavailable.')));
+      child.stdin.on('error', () => { inputFailed = true; cancel(); });
+      child.on('error', () => finish(failure('Windows Copilot process containment is unavailable.', !child.pid)));
       child.on('close', async () => {
         try { await rm(cancelSignalPath, { force: true }); }
-        catch { finish(new Error('Cancellation signal cleanup could not be confirmed.')); return; }
+        catch { finish(failure('Cancellation signal cleanup could not be confirmed.')); return; }
         if (overflow) {
-          finish(new Error('Copilot process cleanup could not be confirmed.'));
+          finish(failure('Copilot process cleanup could not be confirmed.'));
           return;
         }
         let result;
         try { result = decodeResult(output); }
-        catch (error) { finish(error); return; }
+        catch { finish(failure('Copilot process cleanup could not be confirmed.')); return; }
         if (result.cleanupConfirmed !== true) {
-          finish(new Error('Copilot process cleanup could not be confirmed.'));
+          finish(failure('Copilot process cleanup could not be confirmed.'));
           return;
         }
         if (result.status === 'cancelled') {
-          finish(new Error('Copilot image planning was cancelled; attachment cleanup is confirmed.'));
+          finish(failure('Copilot image planning was cancelled; attachment cleanup is confirmed.', true));
           return;
         }
-        if (request.signal?.aborted || cancelSignalError) {
-          finish(new Error('Copilot cancellation could not be confirmed; attachment cleanup is confirmed.'));
+        if (request.signal?.aborted || cancelSignalError || inputFailed) {
+          finish(failure('Copilot cancellation could not be confirmed; attachment cleanup is confirmed.', true));
           return;
         }
         if (result.status === 'timeout') {
-          finish(new Error('Copilot image planning timed out; attachment cleanup is confirmed.'));
+          finish(failure('Copilot image planning timed out; attachment cleanup is confirmed.', true));
           return;
         }
         if (result.status === 'output-limit') {
-          finish(new Error('Copilot response exceeded its output limit; attachment cleanup is confirmed.'));
+          finish(failure('Copilot response exceeded its output limit; attachment cleanup is confirmed.', true));
           return;
         }
         if (result.ok !== true || result.privateAclVerified !== true
             || !Number.isInteger(result.exitCode)
             || typeof result.stdoutBase64 !== 'string' || typeof result.stderrBase64 !== 'string') {
-          finish(new Error('Windows Copilot process containment failed closed.'));
+          finish(failure('Windows Copilot process containment failed closed.', true));
           return;
         }
         const stdout = Buffer.from(result.stdoutBase64, 'base64').toString('utf8');
         const stderr = Buffer.from(result.stderrBase64, 'base64').toString('utf8');
+        if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > request.maxOutputBytes) {
+          finish(failure('Copilot response exceeded its output limit; attachment cleanup is confirmed.', true));
+          return;
+        }
         finish(null, {
           exitCode: result.exitCode,
           stdout,
@@ -229,7 +238,8 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
         }) + '\n');
         child.stdin.end();
       } catch {
-        finish(new Error('Windows Copilot process containment is unavailable.'));
+        inputFailed = true;
+        cancel();
       }
       if (request.signal?.aborted) cancel();
     });

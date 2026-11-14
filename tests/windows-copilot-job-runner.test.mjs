@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import { spawnSync } from 'node:child_process';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -47,7 +48,40 @@ async function assertProcessExited(pid) {
 
 test('Windows job runner fails closed on unsupported platforms', { skip: !windowsOnly }, async () => {
   const runner = createWindowsCopilotJobRunner();
-  await assert.rejects(runner.run({}), /verified Windows process containment/);
+  await assert.rejects(runner.run({}), error =>
+    /verified Windows process containment/.test(error.message) && error.cleanupConfirmed === true);
+});
+
+test('Windows host never modifies or removes an existing attachment directory', { skip: windowsOnly }, async t => {
+  const tempRoot = await mkdtemp(join(tmpdir(), 'bricklab-existing-job-test-'));
+  t.after(() => rm(tempRoot, { recursive: true, force: true }));
+  const directoryName = `bricklab-copilot-${'a'.repeat(32)}`;
+  const existing = join(tempRoot, directoryName);
+  await mkdir(existing);
+  await writeFile(join(existing, 'marker.txt'), 'preserve synthetic fixture');
+  const runtime = join(process.env.LOCALAPPDATA, 'Microsoft', 'WindowsApps',
+    'Microsoft.PowerShell_8wekyb3d8bbwe', 'pwsh.exe');
+  const hostScript = new URL('../scripts/windows-copilot-job-host.ps1', import.meta.url);
+  const { fileURLToPath } = await import('node:url');
+  const result = spawnSync(runtime, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', fileURLToPath(hostScript)], {
+    encoding: 'utf8', timeout: 30_000, windowsHide: true,
+    env: { ...process.env, TEMP: tempRoot, TMP: tempRoot },
+    input: JSON.stringify({
+      executable: process.execPath, args: ['-e', 'process.exit(51)', '--'], cwd: process.cwd(),
+      timeoutMs: 1000, maxOutputBytes: 4096, imageMimeType: image.mimeType,
+      imageBase64: image.data, directoryName,
+      cancelSignalName: `bricklab-copilot-cancel-${'a'.repeat(32)}.signal`,
+    }) + '\n',
+  });
+  assert.ifError(result.error);
+  const line = result.stdout.split(/\r?\n/).find(value => value.startsWith('BRICKLAB_JOB_RESULT:'));
+  assert.ok(line, 'Host must report a structured result');
+  const response = JSON.parse(Buffer.from(line.slice('BRICKLAB_JOB_RESULT:'.length), 'base64').toString('utf8'));
+  assert.equal(response.ok, false);
+  assert.equal(response.failureStage, 'create-directory');
+  assert.equal(response.cleanupConfirmed, true);
+  assert.deepEqual(await readdir(existing), ['marker.txt'], 'No attachment may be created in an existing path');
+  assert.equal(await readFile(join(existing, 'marker.txt'), 'utf8'), 'preserve synthetic fixture');
 });
 
 test('Windows job contains detached descendants after their leader exits and verifies private storage',
