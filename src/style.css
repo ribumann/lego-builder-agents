@@ -159,6 +159,29 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 textarea { resize: vertical; border: 1px solid #d7e0e5; border-radius: 8px; padding: 11px 12px; color: var(--ink); background: #fbfcfd; flex: 1; min-width: 0; height: 52px; max-height: 160px; min-height: 52px; line-height: 1.5; font-size: 12px; }
 .brief-input .button { min-height: 50px; }
 #brief-help { font-size: 9px; color: var(--muted); margin: 7px 0 0; }
+.image-input { margin-top: 12px; font-size: 13px; line-height: 1.5; }
+.image-input summary { cursor: pointer; font-weight: 800; }
+.image-input p { margin: 8px 0; overflow-wrap: anywhere; }
+.image-input label { display: flex; align-items: flex-start; gap: 7px; }
+.image-input label input { flex: none; margin-top: 4px; }
+.image-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+#voice-pending-text { white-space: pre-wrap; overflow-wrap: anywhere; }
+.voice-panel { margin-top: 13px; padding: 14px; border: 1px solid #dfe6e9; border-radius: 10px; background: #f7f9fa; }
+.voice-panel h3 { margin: 0 0 7px; font-size: 12px; }
+.voice-panel > p { margin: 6px 0; color: #506574; font-size: 10px; line-height: 1.65; }
+.voice-panel > #voice-disclosure { color: #405563; }
+.voice-controls { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 5px; }
+.voice-controls .button, .voice-panel .button { min-height: 38px; padding: 9px 12px; font-size: 10px; }
+.voice-status { min-height: 1.6em; font-weight: 800; }
+.voice-panel > label { display: block; margin-top: 10px; font-size: 10px; font-weight: 850; }
+#voice-transcript { display: block; width: 100%; height: 82px; min-height: 64px; max-height: 220px; margin-top: 5px; background: #fff; font-size: 12px; }
+.voice-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
+.voice-meta p { margin: 5px 0 0; color: #596c7a; font-size: 9px; line-height: 1.5; }
+#voice-count { flex: 0 0 auto; text-align: right; }
+.voice-panel .voice-warning { color: #754d13; font-weight: 800; }
+.voice-pending { margin-top: 8px; padding: 10px; border: 1px solid #e8d39b; border-radius: 7px; background: #fff8e6; }
+.voice-pending p { margin: 0 0 8px; color: #5f4b24; font-size: 10px; line-height: 1.6; }
+.voice-apply { margin-top: 9px; background: #fff; font-weight: 800; }
 #language-note { font-size: 10px; line-height: 1.5; color: var(--muted); margin: 7px 0 0; }
 .transport { padding: 20px 21px 13px; border-left: 1px solid var(--line); }
 .build-progress { display: flex; justify-content: space-between; align-items: center; }
@@ -287,6 +310,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .brief-input { align-items: stretch; gap: 9px; }
   .brief-input .button { font-size: 11px; padding: 10px; }
   .brief-input .button svg { display: none; }
+  .voice-controls .button { flex: 1 1 140px; }
   .brief-form { padding: 17px; }
   .learning-strip { align-items: flex-start; flex-wrap: wrap; }
   .file-actions { margin-left: 36px; }
@@ -351,6 +375,11 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .brief-input .button { width: 100%; font-size: 13px; min-height: 43px; }
   .brief-input .button svg { display: block; }
   #brief-help { font-size: 10px; line-height: 1.6; }
+  .voice-panel { padding: 12px; }
+  .voice-controls { display: grid; grid-template-columns: 1fr; }
+  .voice-controls .button, .voice-panel .button { width: 100%; min-height: 42px; font-size: 11px; }
+  .voice-meta { flex-direction: column; gap: 2px; }
+  #voice-count { text-align: left; }
   .transport { border: 0; border-top: 1px solid var(--line); padding: 18px 15px; }
   .playback-controls { gap: 9px; }
   .run-button { font-size: 12px; min-height: 42px; }

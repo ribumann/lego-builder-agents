@@ -14,6 +14,7 @@ import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
 import { createAzureBudgetGate } from './azure-budget.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
+import { MAX_IMAGE_BYTES, validatePlanningImage } from './planning-image.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const production = process.argv.includes('--production');
@@ -40,9 +41,11 @@ if (hosted && process.env.BRICKLAB_AZURE_AI === '1')
   throw new Error('Hosted Azure planning is blocked pending a verified public edge with abuse and quota protections. Leave BRICKLAB_AZURE_AI off for public static/offline serving.');
 if (hosted && process.env.BRICKLAB_COMPATIBLE_AI === '1')
   throw new Error('Compatible AI cannot be enabled in public hosted mode.');
+const compatibleVisionEnabled = process.env.BRICKLAB_COMPATIBLE_VISION === '1';
 const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COMPATIBLE_AI === '1'
   ? { enabled: true, endpoint: process.env.BRICKLAB_COMPATIBLE_ENDPOINT,
-    model: process.env.BRICKLAB_COMPATIBLE_MODEL, apiKey: process.env.BRICKLAB_COMPATIBLE_API_KEY }
+    model: process.env.BRICKLAB_COMPATIBLE_MODEL, apiKey: process.env.BRICKLAB_COMPATIBLE_API_KEY,
+    vision: compatibleVisionEnabled }
   : {});
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
 const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
@@ -94,6 +97,8 @@ const appPassword = codespaces ? randomBytes(24).toString('hex') : null;
 const appAuthorization = codespaces ? `Basic ${Buffer.from(`bricklab:${appPassword}`).toString('base64')}` : null;
 const runFile = promisify(execFile);
 const limit = Math.max(1, Math.min(100, Number(process.env.BRICKLAB_DAILY_CALLS) || 12));
+const MAX_TEXT_BODY_BYTES = 4096;
+const MAX_REQUEST_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 16_384;
 const sessionKey = randomBytes(24).toString('hex');
 let day = new Date().toISOString().slice(0, 10);
 let calls = 0;
@@ -110,6 +115,46 @@ const sameSecret = (value, expected) => typeof value === 'string'
   && Buffer.byteLength(value) === Buffer.byteLength(expected)
   && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 const sameToken = token => sameSecret(token, sessionKey);
+const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+async function readPlanningBody(req) {
+  const declared = req.headers['content-length'];
+  if (declared !== undefined && Number(declared) > MAX_REQUEST_BODY_BYTES) {
+    req.resume();
+    throw new Error('Request too large.');
+  }
+  const chunks = [];
+  let bytes = 0;
+  for await (const chunk of req) {
+    bytes += chunk.byteLength;
+    if (bytes > MAX_REQUEST_BODY_BYTES) {
+      req.resume();
+      throw new Error('Request too large.');
+    }
+    chunks.push(chunk);
+  }
+  const raw = Buffer.concat(chunks, bytes);
+  // Keep the ordinary text-only route at its historical small limit without
+  // parsing large non-image bodies. The image field is validated after parse.
+  if (bytes > MAX_TEXT_BODY_BYTES && !/"image"\s*:/.test(raw.toString('latin1')))
+    throw new Error('Request too large.');
+  let text;
+  try { text = new TextDecoder('utf-8', { fatal: true }).decode(raw); }
+  catch { throw new SyntaxError('Request body is not valid UTF-8.'); }
+  const body = JSON.parse(text);
+  if (!isRecord(body)) throw new SyntaxError('Request body must be a JSON object.');
+  if (bytes > MAX_TEXT_BODY_BYTES && !Object.hasOwn(body, 'image'))
+    throw new Error('Request too large.');
+  return body;
+}
+
+function safePlanningError(error) {
+  let message = error instanceof Error ? error.message : 'Planning failed.';
+  message = message.replace(/data:image\/[a-z0-9.+-]+;base64,[A-Za-z0-9+/=]+/gi, '[image omitted]')
+    .replace(/[A-Za-z0-9+/]{128,}={0,2}/g, '[payload omitted]')
+    .replace(/[\u0000-\u001f\u007f]/g, ' ').trim().slice(0, 512);
+  return message || 'Planning failed.';
+}
 
 async function verifyPrivatePort() {
   try {
@@ -240,6 +285,8 @@ function askCopilot(world, brief, signal, hollowInterior) {
         if (settled) return;
         plannerFailure = { state: 'missing-cli', message: 'Copilot CLI could not start. Run npm install -g @github/copilot and copilot login in the server terminal, or use local mode.' };
         finish(new Error(plannerFailure.message));
+        closed = true;
+        cleanup();
       });
       child.on('close', code => {
         closed = true;
@@ -311,22 +358,49 @@ const server = http.createServer(async (req, res) => {
     if (!origin || !allowedOrigins.has(origin)
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
+    if (busy) {
+      req.resume();
+      return send(res, 429, { error: 'The coordinator is already planning. Wait for that request to finish.' });
+    }
+    let body;
+    try { body = await readPlanningBody(req); }
+    catch (error) {
+      if (error instanceof SyntaxError) return send(res, 400, { error: 'Request body must be valid JSON.' });
+      if (error instanceof Error && error.message === 'Request too large.')
+        return send(res, 413, { error: 'Request too large.' });
+      return send(res, 400, { error: 'Could not read the planning request.' });
+    }
+    const imageRequested = Object.hasOwn(body, 'image') || body.imageConsent === true;
+    if (hosted && imageRequested)
+      return send(res, 403, { error: 'Image planning is unavailable in hosted mode.' });
+    if (azureAI && imageRequested)
+      return send(res, 400, { error: 'Image input is not supported by Azure planning.' });
+    let image;
+    try { image = validatePlanningImage(body.image, body.imageConsent); }
+    catch (error) { return send(res, 400, { error: safePlanningError(error) }); }
+    if (compatibleAI && image && !compatibleVisionEnabled)
+      return send(res, 403, { error: 'Compatible AI image input requires the separate BRICKLAB_COMPATIBLE_VISION=1 opt-in.' });
+    const { world, brief, hollowInterior = false } = body;
+    if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
+        || typeof hollowInterior !== 'boolean')
+      return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
     if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
       return send(res, 403, { error: azureAI ? azurePlannerStatus.message
         : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
         : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
+    if (copilotAI && image)
+      return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
     const today = new Date().toISOString().slice(0, 10);
     if (today !== day) { day = today; calls = 0; }
     if (busy) return send(res, 429, { error: 'The coordinator is already planning. Wait for that request to finish.' });
     if (copilotAI && calls >= limit) return send(res, 429, { error: `Session daily limit of ${limit} Copilot calls reached. Offline templates and configured Local AI are separate options.` });
     busy = true;
-    let raw = '';
     const controller = new AbortController();
     const interrupted = new Promise(resolvePromise => controller.signal.addEventListener('abort', resolvePromise, { once: true }));
     const disconnect = () => {
       if (!res.writableEnded) controller.abort(new Error('Planning request was cancelled by the client.'));
     };
-    if (!localAI) res.once('close', disconnect);
+    res.once('close', disconnect);
     let deadline;
     let heartbeat;
     let streaming = false;
@@ -339,18 +413,12 @@ const server = http.createServer(async (req, res) => {
       else send(res, code, body);
     };
     try {
-      for await (const chunk of req) {
-        raw += chunk;
-        if (Buffer.byteLength(raw) > 4096) { send(res, 413, { error: 'Request too large.' }); return; }
-      }
-      const { world, brief, hollowInterior = false } = JSON.parse(raw) ?? {};
-      if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
-          || typeof hollowInterior !== 'boolean')
-        return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
-      if (!localAI && (res.destroyed || controller.signal.aborted)) return;
+      if (res.destroyed || controller.signal.aborted) return;
       if (copilotAI) calls++;
       let spec;
-      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior)), 'Local AI');
+      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior), {
+        image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
+      }), 'Local AI');
       else {
         deadline = setTimeout(() => controller.abort(Object.assign(
           new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
@@ -404,7 +472,8 @@ const server = http.createServer(async (req, res) => {
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else if (compatibleAI) {
           const work = (async () => {
-            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior), signal: controller.signal });
+            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior),
+              image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
             controller.signal.throwIfAborted();
             if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
             return validateCustomSpec(parsed);
@@ -428,7 +497,8 @@ const server = http.createServer(async (req, res) => {
         : controller.signal.reason?.name === 'TimeoutError' ? 504 : azureAI && error?.statusCode === 429 ? 429
         : azureAI && error?.statusCode === 503 ? 503 : 502,
       { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
-        : error instanceof Error ? error.message : 'Planning failed.' });
+        : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
+          : safePlanningError(error) });
     } finally {
       clearTimeout(deadline);
       clearTimeout(heartbeat);
@@ -445,7 +515,7 @@ const server = http.createServer(async (req, res) => {
     let target = resolve(dist, `.${pathname}`);
     if (target !== dist && !target.startsWith(dist + sep)) { res.writeHead(403).end(); return; }
     if (!extname(pathname)) target = resolve(dist, 'index.html');
-    const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
+    const mime = { '.html': 'text/html', '.js': 'text/javascript', '.mjs': 'text/javascript', '.wasm': 'application/wasm', '.css': 'text/css', '.svg': 'image/svg+xml', '.json': 'application/json' };
     const data = await readFile(target);
     res.writeHead(200, { 'Content-Type': mime[extname(target)] || 'application/octet-stream' });
     res.end(data);

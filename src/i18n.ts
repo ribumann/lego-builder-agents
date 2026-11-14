@@ -503,6 +503,7 @@ const catalog: Record<string, Translations> = {
   'JURASSIC / BUILD SITE A': ['JURA / BAUPLATZ A', 'JURASSIQUE / CHANTIER A', 'GIURASSICO / CANTIERE A', 'JURÁSICO / OBRA A', 'JURÁSSICO / CANTEIRO A'],
   'ORBITAL / BUILD SITE B': ['ORBITAL / BAUPLATZ B', 'ORBITAL / CHANTIER B', 'ORBITALE / CANTIERE B', 'ORBITAL / OBRA B', 'ORBITAL / CANTEIRO B'],
   'Planning reached the 300-second limit. No new build was started.': ['Die Planung hat das Limit von 300 Sekunden erreicht. Es wurde kein neuer Bau gestartet.', 'La planification a atteint la limite de 300 secondes. Aucune construction n’a été lancée.', 'La pianificazione ha raggiunto il limite di 300 secondi. Nessuna costruzione è stata avviata.', 'La planificación alcanzó el límite de 300 segundos. No se inició ninguna construcción.', 'O planejamento atingiu o limite de 300 segundos. Nenhuma construção foi iniciada.'],
+  'Planning reached the 90-second limit. No new build was started.': ['Die Planung hat das Limit von 90 Sekunden erreicht. Es wurde kein neuer Bau gestartet.', 'La planification a atteint la limite de 90 secondes. Aucune construction n’a été lancée.', 'La pianificazione ha raggiunto il limite di 90 secondi. Nessuna costruzione è stata avviata.', 'La planificación alcanzó el límite de 90 segundos. No se inició ninguna construcción.', 'O planejamento atingiu o limite de 90 segundos. Nenhuma construção foi iniciada.'],
   'Planning aborted. No new build was started.': ['Planung abgebrochen. Es wurde kein neuer Bau gestartet.', 'Planification annulée. Aucune construction n’a été lancée.', 'Pianificazione interrotta. Nessuna costruzione è stata avviata.', 'Planificación cancelada. No se inició ninguna construcción.', 'Planejamento cancelado. Nenhuma construção foi iniciada.'],
   'Give the team a brief of 1–1,000 characters.': ['Gib dem Team einen Auftrag mit 1–1.000 Zeichen.', 'Donnez à l’équipe une consigne de 1 à 1 000 caractères.', 'Fornisci una richiesta di 1–1.000 caratteri.', 'Escribe instrucciones de 1 a 1.000 caracteres.', 'Escreva instruções de 1 a 1.000 caracteres.'],
   'There is no scene to add to. Choose Replace scene to start one.': ['Es gibt noch keine Szene. Wähle „Szene ersetzen“, um eine zu beginnen.', 'Aucune scène existante. Choisissez « Remplacer la scène » pour commencer.', 'Non esiste ancora una scena. Scegli «Sostituisci la scena» per iniziare.', 'No hay ninguna escena. Elige «Reemplazar escena» para empezar.', 'Ainda não há cena. Escolha «Substituir cena» para começar.'],
@@ -596,8 +597,9 @@ export function translate(text: string): string {
   return catalog[text]?.[languages.indexOf(language) - 1] ?? text;
 }
 
-export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', brief: string): string {
+export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', brief: string): string {
   const index = languages.indexOf(language);
+  const maximum = provider === 'Local AI' ? 90 : 300;
   const estimate = provider === 'Copilot' ? copilotPlanningEstimate(brief) : '';
   const match = /^For ([\d,]+) requested bricks, a small Copilot study suggests about (\d+)–(\d+) seconds\.$/.exec(estimate);
   const count = match ? new Intl.NumberFormat(language).format(Number(match[1].replaceAll(',', ''))) : '';
@@ -624,12 +626,12 @@ export function planningDescription(provider: 'Azure Foundry' | 'Copilot' | 'Com
     `Estimativa desconhecida; ${provider} não foi medido no estudo do Copilot.`,
   ][index];
   return [
-    `One ${provider} request is running. ${reference} Times vary; this is not a deadline. Maximum wait: 300 seconds.`,
-    `Eine ${provider}-Anfrage läuft. ${reference} Zeiten variieren; dies ist keine Frist. Maximale Wartezeit: 300 Sekunden.`,
-    `Une requête ${provider} est en cours. ${reference} Les durées varient ; ce n’est pas une échéance. Attente maximale : 300 secondes.`,
-    `Una richiesta ${provider} è in corso. ${reference} I tempi variano; non è una scadenza. Attesa massima: 300 secondi.`,
-    `Hay una solicitud de ${provider} en curso. ${reference} Los tiempos varían; no es un plazo. Espera máxima: 300 segundos.`,
-    `Uma solicitação do ${provider} está em andamento. ${reference} Os tempos variam; não é um prazo. Espera máxima: 300 segundos.`,
+    `One ${provider} request is running. ${reference} Times vary; this is not a deadline. Maximum wait: ${maximum} seconds.`,
+    `Eine ${provider}-Anfrage läuft. ${reference} Zeiten variieren; dies ist keine Frist. Maximale Wartezeit: ${maximum} Sekunden.`,
+    `Une requête ${provider} est en cours. ${reference} Les durées varient ; ce n’est pas une échéance. Attente maximale : ${maximum} secondes.`,
+    `Una richiesta ${provider} è in corso. ${reference} I tempi variano; non è una scadenza. Attesa massima: ${maximum} secondi.`,
+    `Hay una solicitud de ${provider} en curso. ${reference} Los tiempos varían; no es un plazo. Espera máxima: ${maximum} segundos.`,
+    `Uma solicitação do ${provider} está em andamento. ${reference} Os tempos variam; não é um prazo. Espera máxima: ${maximum} segundos.`,
   ][index];
 }
 
@@ -981,7 +983,7 @@ const originalText = new WeakMap<Text, { source: string; rendered: string }>();
 const originalAttributes = new WeakMap<Element, Map<string, { source: string; rendered: string }>>();
 
 export function translateInterface(root: HTMLElement): void {
-  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status, #insight-state, #insight-agents';
+  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status, #insight-state, #insight-agents, #image-input, .voice-panel';
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;

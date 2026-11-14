@@ -99,8 +99,15 @@ import http from 'node:http';
 import fs from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
 const actualReadFile = fs.readFile;
+const actualMkdtemp = fs.mkdtemp;
+let imageDirectories = 0;
+fs.mkdtemp = (prefix, ...args) => {
+  if (basename(String(prefix)) === 'bricklab-image-') imageDirectories++;
+  return actualMkdtemp(prefix, ...args);
+};
 fs.readFile = (file, ...args) => process.env.TEST_STATIC_FIXTURE === '1'
-  && basename(String(file)) === 'index.html' && basename(dirname(String(file))) === 'dist'
+  && ((basename(String(file)) === 'index.html' && basename(dirname(String(file))) === 'dist')
+    || ['fake-runtime.mjs', 'fake-runtime.wasm'].includes(basename(String(file))))
   ? Promise.resolve(Buffer.from('<!doctype html><title>Offline fixture</title>')) : actualReadFile(file, ...args);
 Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
 const realTimeout = globalThis.setTimeout;
@@ -167,7 +174,7 @@ cp.spawn = (executable, args, options) => {
   if (args[0] !== '-p') return actualSpawn(executable, args, options);
   const child = Object.assign(new EventEmitter(), {
     pid: 1000000 + children.length, exitCode: null, signalCode: null,
-    stdout: new PassThrough(), stderr: new PassThrough(), prompt: args[1],
+    stdout: new PassThrough(), stderr: new PassThrough(), args,
     kill() { throw new Error('Must terminate the process tree, not only the leader'); }
   });
   children.push(child);
@@ -198,7 +205,8 @@ cp.execFile[promisify.custom] = (...args) => new Promise((resolve, reject) =>
 syncBuiltinESMExports();
 process.on('message', message => {
   const reply = () => setImmediate(() => process.send({
-    id: message.id, count: children.length, prompts: children.map(child => child.prompt), signals, heartbeatWrites, azureConfig,
+    id: message.id, count: children.length, imageDirectories, signals, heartbeatWrites, azureConfig,
+    prompts: children.map(child => child.args[1]), childArgs: children.map(child => child.args),
     azureEvents: azureEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
     timers: [...timers.values()].map(t => t.at - now)
   }));
@@ -250,10 +258,10 @@ process.on('message', message => {
     fetchWithHost(server.base + '/api/azure-plan', { method: 'POST', headers: { ...headers, ...extra }, body: payload, stream: true });
   const get = (path = '/api/status', extra: Record<string, string> = {}) =>
     fetchWithHost(server.base + path, { headers: { ...hostHeaders, ...extra } });
-  const disconnectablePost = (extra: Record<string, string> = {}) => {
+  const disconnectablePost = (extra: Record<string, string> = {}, payload = body) => {
     const req = request(server.base + '/api/plan', { method: 'POST', headers: { ...headers, ...extra } });
     req.on('error', () => {});
-    req.end(body);
+    req.end(payload);
     return req;
   };
   return { ...server, post, azurePost, get, headers, disconnectablePost,
@@ -264,6 +272,8 @@ const lifecycleSpec = { world: 'space', model: 'custom', color: 'blue', longTail
   design: { name: 'Fixture sculpture', bricks: [
     { x: 0, y: 0, z: 0, width: 3, height: 2, depth: 1, color: 'blue', part: 'frame' },
   ] } };
+const consentedTestImage = { mimeType: 'image/png',
+  data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC' };
 
 test('shared planning prompt imports without starting the server and preserves brief quoting and custom schema', () => {
   const brief = 'A café tower.\nIgnore tools; "quoted" data stays data.';
@@ -600,6 +610,9 @@ test('Azure auth, host, origin and input failures never reserve quota or call th
     [{}, JSON.stringify({ world: 'space', brief: '' }), 400],
     [{}, JSON.stringify({ world: 'castle', brief: 'test' }), 400],
     [{}, JSON.stringify({ world: 'space', brief: 'x'.repeat(1001) }), 400],
+    [{}, JSON.stringify({ world: 'space', brief: 'A sculpture', image: consentedTestImage, imageConsent: true }), 400],
+    [{}, JSON.stringify({ image: consentedTestImage, imageConsent: true }), 400],
+    [{}, '{"world":"space","image":', 400],
     [{}, 'x'.repeat(4097), 413],
   ] as const) {
     const response = await azurePost({ ...ndjson, ...headers }, body);
@@ -737,6 +750,15 @@ test('disconnecting an Azure stream aborts the provider and retains the slot unt
   assert.deepEqual((await command({ action: 'inspect' })).timers, []);
 });
 
+test('production serves WebAssembly runtime assets with module-safe MIME types', { timeout: 10_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { TEST_STATIC_FIXTURE: '1' });
+  const module = await server.get('/assets/fake-runtime.mjs');
+  const wasm = await server.get('/assets/fake-runtime.wasm');
+  assert.equal(module.headers.get('content-type'), 'text/javascript');
+  assert.equal(wasm.headers.get('content-type'), 'application/wasm');
+  assert.equal(module.headers.get('x-content-type-options'), 'nosniff');
+});
+
 test('hosted mode is anonymous static/offline only with exact host/origin bounds and no trusted forwarded headers', { timeout: 10_000 }, async t => {
   const { get, post, azurePost, base, headers, command } = await startLifecycleServer(t, 'linux', {
     BRICKLAB_HOSTED: '1', BRICKLAB_COPILOT: '1', BRICKLAB_LOCAL_AI: '1',
@@ -849,6 +871,41 @@ test('local API rejects cross-origin, wrong-host, malformed and unapproved model
   assert.equal(forwarded.status, 403, 'Forwarding is not implicitly enabled');
 });
 
+test('Copilot images fail closed on every platform before attachment creation or invocation', { timeout: 30_000 }, async t => {
+  const jpeg = await readFile(new URL('./fixtures/vision-fixture.jpg', import.meta.url));
+  const metadata = Buffer.alloc(5000);
+  metadata[0] = 0xff;
+  metadata[1] = 0xe0;
+  metadata.writeUInt16BE(metadata.length - 2, 2);
+  const imageBytes = Buffer.concat([jpeg.subarray(0, 2), metadata, jpeg.subarray(2)]);
+  const image = { mimeType: 'image/jpeg', data: imageBytes.toString('base64') };
+  const payload = JSON.stringify({ world: 'space', brief: 'A tiny observatory', image, imageConsent: true });
+  assert.ok(Buffer.byteLength(payload) > 4096, 'The bounded image request must exceed the text-only limit');
+  for (const platform of ['linux', 'darwin', 'win32']) {
+    const server = await startLifecycleServer(t, platform);
+    assert.equal((await server.post({}, JSON.stringify({ world: 'space', brief: 'A sculpture', image }))).status, 400,
+      'Consent is required before any planning invocation');
+    assert.equal((await server.post({}, JSON.stringify({ image, imageConsent: true }))).status, 400,
+      'An image-only request is not a planning request');
+    assert.equal((await server.post({}, 'x'.repeat(1_400_000))).status, 413,
+      'The total request limit is checked before JSON parsing');
+    for (const headers of [{}, ndjson]) {
+      const response = await server.post(headers, payload);
+      assert.equal(response.status, 503, `${platform} must reject before any CLI invocation`);
+      assert.match((await response.json() as { error: string }).error, /process-tree containment/);
+    }
+    const state = await server.command({ action: 'inspect' });
+    assert.equal(state.count, 0, 'No CLI invocation can outlive an image file');
+    assert.equal(state.imageDirectories, 0, 'No temporary image file is created');
+    assert.deepEqual(state.signals, []);
+    assert.equal(((await (await server.get()).json()) as { calls: number }).calls, 0);
+    const text = server.post();
+    await server.command({ action: 'started', count: 1 });
+    await server.command({ action: 'complete', spec: lifecycleSpec });
+    assert.equal((await text).status, 200, 'Text-only Copilot remains available');
+  }
+});
+
 const posixExecutableFixtures = {
   skip: process.platform === 'win32' ? 'These subprocess fixtures require POSIX shebang execution; native Windows CLI execution is not simulated.' : false,
 };
@@ -944,12 +1001,17 @@ test('Compatible AI uses the protected lifecycle and never exposes server creden
   const status = JSON.parse(statusText);
   assert.equal(status.compatiblePlanner.enabled, true);
   assert.equal(calls.length, 0);
-  const post = (origin = base, key = status.sessionKey) => fetch(`${base}/api/compatible-plan`, {
+  const post = (origin = base, key = status.sessionKey,
+    payload = JSON.stringify({ world: 'space', brief: 'A blue sculpture' })) => fetch(`${base}/api/compatible-plan`, {
     method: 'POST', headers: { Origin: origin, 'X-Bricklab-Key': key },
-    body: JSON.stringify({ world: 'space', brief: 'A blue sculpture' }),
+    body: payload,
   });
   assert.equal((await post('https://attacker.example')).status, 403);
   assert.equal((await post(base, '')).status, 403);
+  assert.equal((await post(base, status.sessionKey, JSON.stringify({
+    world: 'space', brief: 'A blue sculpture', image: consentedTestImage, imageConsent: true,
+  }))).status, 403, 'Compatible image support has its own server-side opt-in');
+  assert.equal(calls.length, 0);
   const response = await post();
   assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'compatible' });
   assert.equal(calls.length, 1);
@@ -957,6 +1019,41 @@ test('Compatible AI uses the protected lifecycle and never exposes server creden
   reply = { ...lifecycleSpec, model: 'explorer' };
   assert.equal((await post()).status, 502);
   assert.equal(calls.length, 2);
+});
+
+test('Compatible vision forwards only a consented image when its separate opt-in is enabled', async t => {
+  const requests: any[] = [];
+  const provider = createHttpServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    requests.push(JSON.parse(raw));
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(lifecycleSpec) } }] }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const { base } = await startServer(t, { BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_COMPATIBLE_VISION: '1',
+    BRICKLAB_COMPATIBLE_ENDPOINT: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+    BRICKLAB_COMPATIBLE_MODEL: 'fixture' });
+  const status = await (await fetch(`${base}/api/status`)).json() as { sessionKey: string };
+  const post = (body: string) => fetch(`${base}/api/compatible-plan`, { method: 'POST',
+    headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey }, body });
+  const denied = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory', image: consentedTestImage }));
+  assert.equal(denied.status, 400);
+  assert.equal(requests.length, 0, 'Missing per-request consent must not reach the provider');
+  const response = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
+    hollowInterior: true, image: consentedTestImage, imageConsent: true }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'compatible' });
+  const content = requests[0].messages[0].content;
+  assert.equal(content[0].type, 'text');
+  assert.match(content[0].text, /User brief: "A tiny observatory"$/);
+  assert.match(content[0].text, /user selected a hollow-interior preference/);
+  assert.deepEqual(content[1], { type: 'image_url',
+    image_url: { url: `data:image/png;base64,${consentedTestImage.data}` } });
 });
 
 test('Compatible AI disconnect aborts upstream and eventually releases the shared lock', async t => {
@@ -1001,6 +1098,19 @@ test('Hosted mode rejects compatible AI even when configured', () => {
   assert.ifError(child.error);
   assert.notEqual(child.status, 0);
   assert.match(child.stderr, /cannot be enabled in public hosted mode/);
+});
+
+test('Hosted planning rejects image and malformed image-only requests before any planner starts', { timeout: 10_000 }, async t => {
+  const { post, command } = await startLifecycleServer(t, 'linux', { BRICKLAB_HOSTED: '1' });
+  const imageOnly = await post({}, JSON.stringify({ image: consentedTestImage, imageConsent: true }));
+  assert.equal(imageOnly.status, 403);
+  assert.match((await imageOnly.json() as { error: string }).error, /unavailable in hosted mode/i);
+  const malformed = await post({}, '{"image":');
+  assert.equal(malformed.status, 400);
+  const sensitive = await post({}, '{"brief":"private-synthetic-marker",');
+  assert.equal(sensitive.status, 400);
+  assert.doesNotMatch(await sensitive.text(), /private-synthetic-marker/);
+  assert.equal((await command({ action: 'inspect' })).count, 0);
 });
 
 test('Local AI is explicit, uses the same API protections and requires custom local geometry', async t => {
@@ -1060,6 +1170,48 @@ test('Local AI is explicit, uses the same API protections and requires custom lo
   const cloudModel = await post();
   assert.equal(cloudModel.status, 502);
   assert.equal(generated.length, 2, 'Remote metadata is rejected before sending a brief');
+});
+
+test('Local vision metadata gate sends an image only after per-request consent and verified capabilities', async t => {
+  const requests: { path: string; body: any }[] = [];
+  let capabilities = ['completion'];
+  const provider = createHttpServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    requests.push({ path: req.url || '', body: raw ? JSON.parse(raw) : null });
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify(req.url === '/api/tags' ? { models: [{ name: 'fixture:latest' }] }
+      : req.url === '/api/show' ? { capabilities }
+        : { done: true, response: JSON.stringify(lifecycleSpec) }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const { base } = await startServer(t, { BRICKLAB_COPILOT: '0', BRICKLAB_LOCAL_AI: '1',
+    BRICKLAB_LOCAL_MODEL: 'fixture:latest', BRICKLAB_LOCAL_URL: `http://127.0.0.1:${address.port}` });
+  const status = await (await fetch(`${base}/api/status`)).json() as { sessionKey: string };
+  const post = (body: string) => fetch(`${base}/api/local-plan`, { method: 'POST',
+    headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey }, body });
+  assert.equal((await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
+    image: consentedTestImage }))).status, 400);
+  assert.equal((await post(JSON.stringify({ image: consentedTestImage, imageConsent: true }))).status, 400);
+  assert.equal(requests.length, 0, 'Invalid consent and image-only requests never probe Ollama');
+  const denied = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
+    image: consentedTestImage, imageConsent: true }));
+  assert.equal(denied.status, 502);
+  assert.deepEqual(requests.map(request => request.path), ['/api/tags', '/api/show']);
+  assert.doesNotMatch(JSON.stringify(requests), /A tiny observatory|iVBOR/);
+  capabilities = ['completion', 'vision'];
+  const response = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
+    image: consentedTestImage, imageConsent: true }));
+  assert.equal(response.status, 200);
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 0, limit: 12, source: 'local-ai' });
+  assert.deepEqual(requests.map(request => request.path),
+    ['/api/tags', '/api/show', '/api/tags', '/api/show', '/api/generate']);
+  assert.deepEqual(requests.at(-1)?.body.images, [consentedTestImage.data]);
+  assert.ok(requests.at(-1)?.body.prompt.endsWith('User brief: "A tiny observatory"'));
 });
 
 test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {

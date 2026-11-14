@@ -6,6 +6,40 @@ async function chooseOfflineTemplates(page: Page) {
   await page.getByRole('button', { name: 'Use offline templates' }).click();
 }
 
+test('keyboard navigation retains visible focus and starts offline work without planner requests', async ({ page }) => {
+  let plans = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'off', message: 'Off' },
+  } }));
+  page.on('request', request => {
+    if (/\/api\/(?:plan|local-plan|compatible-plan|azure-plan)$/.test(new URL(request.url()).pathname)) plans++;
+  });
+  const tabTo = async (id: string) => {
+    for (let i = 0; i < 100; i++) {
+      if (await page.evaluate(target => document.activeElement?.id === target, id)) return;
+      await page.keyboard.press('Tab');
+    }
+    throw new Error(`Could not reach ${id} with Tab`);
+  };
+  await page.goto('/');
+  await tabTo('guide');
+  await expect(page.locator('#guide')).toBeFocused();
+  expect(await page.locator('#guide').evaluate(element => getComputedStyle(element).outlineStyle)).not.toBe('none');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#info-dialog')).toBeVisible();
+  await page.keyboard.press('Escape');
+  await expect(page.locator('#guide')).toBeFocused();
+  await tabTo('settings');
+  await page.keyboard.press('Enter');
+  await tabTo('choose-local');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#mode-label')).toContainText('Offline');
+  await tabTo('demo');
+  await page.keyboard.press('Enter');
+  await expect(page.locator('#stage-status')).toContainText('Teamwork');
+  expect(plans).toBe(0);
+});
+
 test('Jurassic build supports pause, step, repair, replay, download and restore', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));

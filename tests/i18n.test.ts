@@ -13,6 +13,12 @@ test('planning estimates stay provider-specific in every supported language', ()
     assert.doesNotMatch(azure, /55–175/);
     assert.match(azure, /Azure Foundry/);
     assert.match(azure, /300/);
+    const local = planningDescription('Local AI', 'A 500-brick lighthouse');
+    assert.match(local, /90/);
+    assert.doesNotMatch(local, /300|55–175|20–183/);
+    if (language !== 'en')
+      assert.notEqual(translate('Planning reached the 90-second limit. No new build was started.'),
+        'Planning reached the 90-second limit. No new build was started.');
     assert.match(elapsedText(100), /100/);
   }
   setLanguage('en');

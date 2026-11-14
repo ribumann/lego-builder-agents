@@ -1,4 +1,5 @@
 import { Agent, request } from 'node:http';
+import { validatePlanningImage } from './planning-image.mjs';
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 128_000;
@@ -18,6 +19,8 @@ const localError = message => new Error(`${message} ${trustNotice}`);
  * is capped at 1 MiB and the entire operation shares one <=90 second deadline.
  * Ollama generation is non-streaming JSON, capped at 12000 predicted tokens,
  * with keep_alive:0. No automatic pulls, retries, tools, or fallback providers.
+ * A consented image adds a /api/show preflight requiring model vision capability;
+ * the brief and image are sent only after metadata and vision checks succeed.
  */
 export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:11434', timeoutMs = MAX_TIMEOUT_MS }) {
   if (typeof enabled !== 'boolean')
@@ -53,15 +56,23 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
         message: `${message} Service availability and authentication are unverified. ${trustNotice}` };
     },
 
-    async plan(prompt) {
+    async plan(prompt, options = {}) {
       if (!enabled) throw localError('Local AI is off. Set BRICKLAB_LOCAL_AI=1 to opt in.');
       if (!configuredModel) throw localError('Set BRICKLAB_LOCAL_MODEL to an installed local Ollama model.');
       if (typeof prompt !== 'string') throw localError('Local AI prompt must be a string.');
+      if (!options || typeof options !== 'object' || Array.isArray(options)
+          || Object.keys(options).some(key => !['image', 'imageConsent', 'signal'].includes(key))
+          || (options.signal !== undefined && !(options.signal instanceof AbortSignal)))
+        throw localError('Local AI planning options are invalid.');
+      const image = validatePlanningImage(options.image, options.imageConsent);
+      if (options.signal?.aborted) throw localError('Local AI planning was cancelled.');
       if (busy) throw localError('A local AI request is already in progress. Wait for it to finish.');
       if (cloudModel(configuredModel))
         throw localError('Cloud-tagged models are not allowed for local AI.');
       busy = true;
       const controller = new AbortController();
+      const cancel = () => controller.abort();
+      options.signal?.addEventListener('abort', cancel, { once: true });
       // Native HTTP with our own agent: never use fetch's global dispatcher or
       // http.globalAgent, and never opt into proxyEnv/environment proxy routing.
       // Disable keep-alive and destroy the agent when this explicit plan ends.
@@ -135,9 +146,16 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
               || cloudModel(item.name))
             fail('Local model metadata is remote or untrusted. No prompt was sent.');
         }
+        if (image) {
+          const details = await requestJSON('/api/show', { model: configuredModel });
+          if (!details || details.error !== undefined || !Array.isArray(details.capabilities)
+              || !details.capabilities.every(value => typeof value === 'string')
+              || !details.capabilities.includes('vision'))
+            fail('The configured local model does not report image vision capability. No prompt or image was sent.');
+        }
         const result = await requestJSON('/api/generate', {
           model: configuredModel, prompt, stream: false, format: 'json',
-          options: { num_predict: 12000 }, keep_alive: 0,
+          options: { num_predict: 12000 }, keep_alive: 0, ...(image ? { images: [image.data] } : {}),
         });
         if (!result || Array.isArray(result) || result.error !== undefined
             || result.done !== true || typeof result.response !== 'string')
@@ -146,11 +164,13 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
           fail('Local Ollama final response exceeded the 128000-byte size limit.');
         return result.response;
       } catch {
+        if (options.signal?.aborted) throw localError('Local AI planning was cancelled.');
         if (timedOut) throw localError('Local Ollama request timed out. Check the trusted host service or choose a smaller installed model; no retry was attempted.');
         if (failure) throw failure;
         throw localError('Could not complete the local Ollama request. Start `ollama serve` on the server host and check its configuration; redirects are not allowed.');
       } finally {
         clearTimeout(timer);
+        options.signal?.removeEventListener('abort', cancel);
         controller.abort();
         agent.destroy();
         busy = false;
