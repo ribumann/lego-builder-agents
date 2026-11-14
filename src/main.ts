@@ -587,7 +587,8 @@ function answer(question: string, agent?: AgentId) {
     check: 'I inspect the completed build against its plan, connectivity and budget. If bricks are missing, I identify them so their owners can repair the build.',
   };
   let response = responses[id];
-  if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
+  if (/who.*what/.test(q)) response = 'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.';
+  else if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
@@ -596,7 +597,7 @@ function answer(question: string, agent?: AgentId) {
   answerSource = { id, response };
   $('#crew-answer').textContent = `${AGENTS[id].name}: ${translate(response)}`;
 }
-$('#ask-roles').addEventListener('click', () => answer('', 'build'));
+$('#ask-roles').addEventListener('click', () => answer('Who does what?'));
 $('#ask-wait').addEventListener('click', () => answer('', 'detail'));
 $('#question-form').addEventListener('submit', event => {
   event.preventDefault();

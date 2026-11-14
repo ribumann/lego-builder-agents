@@ -101,6 +101,9 @@ test('translated guide briefs and crew question buttons work in every language',
     ['pt', 'estegossauro verde de cauda longa', 'Os pés aguardam as pernas'],
   ]) {
     await page.locator('#language').selectOption(language);
+    await page.locator('#ask-roles').click();
+    for (const agent of ['BuildBot', 'PlanBot', 'FrameBot', 'DetailBot', 'CheckBot'])
+      await expect(page.locator('#crew-answer')).toContainText(agent);
     await page.locator('#ask-wait').click();
     await expect(page.locator('#crew-answer')).toContainText(answer);
     await page.locator('#brief').fill(prompt);
