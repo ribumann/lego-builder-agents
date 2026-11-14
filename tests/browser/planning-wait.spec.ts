@@ -136,3 +136,32 @@ test('a configured local Azure planner is an explicit separate choice', async ({
   await expect(page.getByRole('alert')).toContainText('Fixture unavailable');
   expect(calls).toBe(1);
 });
+
+for (const [description, status, contentType, body, message] of [
+  ['exhausted', 429, 'application/json', JSON.stringify({ error: 'Daily inference budget exhausted.' }), 'Daily inference budget exhausted.'],
+  ['unavailable', 200, 'application/x-ndjson', '{"type":"waiting"}\n{"type":"error","error":"Inference budget verification unavailable."}\n', 'Inference budget verification unavailable.'],
+] as const) {
+  test(`hosted ${description} budget error leaves the current scene unchanged`, async ({ page }) => {
+    let calls = 0;
+    await page.route('**/api/status', route => route.fulfill({ json: {
+      hosted: true, sessionKey: 'fixture', copilot: false,
+      azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+    } }));
+    await page.route('**/api/azure-plan', route => {
+      calls++;
+      return route.fulfill({ status, contentType, body });
+    });
+    await page.goto('/');
+    await page.getByRole('button', { name: 'Change mode' }).click();
+    await page.getByRole('button', { name: 'Use offline templates' }).click();
+    await page.getByRole('button', { name: 'Make a plan' }).click();
+    await page.getByRole('button', { name: 'Build one step' }).click();
+    const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+    await page.getByRole('button', { name: 'Change mode' }).click();
+    await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
+    await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+    await expect(page.getByRole('alert')).toHaveText(message);
+    expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+    expect(calls).toBe(1);
+  });
+}

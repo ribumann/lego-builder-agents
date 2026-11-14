@@ -23,6 +23,12 @@ the usage gate below. `BRICKLAB_HOSTED=1` serves the anonymous lab separately:
 it disables every planner, including Azure, pending verified public edge
 protections. Never copy a personal Copilot credential into a public host.
 
+The local gate below counts requests; it does **not** enforce the requested
+$50-per-day inference spending cap. Public planning must remain disabled until
+the hosted monetary budget is enforced durably using verified pricing and
+conservative atomic reservations. That inference cap does not cover other Azure
+costs such as hosting and networking.
+
 `azure-usage.mjs` provides an independent daily request reservation gate. Set up
 a private Blob container and **pre-provision** `daily-usage.json` with
 `{"day":"2000-01-01","count":0}`; give the host identity Storage Blob Data
