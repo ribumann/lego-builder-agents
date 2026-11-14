@@ -134,3 +134,41 @@ test('Copilot provider failures are visible and never become a fake AI build', a
   await expect(page.locator('#stage-status')).toContainText('Ready for your imagination');
   await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
 });
+
+test('fixture Copilot custom design accepts an unrelated brief and survives reload', async ({ page }) => {
+  const sent: string[] = [];
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: false, sessionKey: 'fixture', planner: { state: 'needs-auth', message: '<login> required; retry after login' },
+  } }));
+  await page.route('**/api/plan', async route => {
+    sent.push(route.request().postDataJSON().brief);
+    await route.fulfill({ json: { spec: {
+      world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+      design: { name: 'Lighthouse fixture', bricks: [
+        { x: 0, y: 0, z: 0, width: 3, height: 1, depth: 3, color: 'blue', part: 'frame' },
+        { x: 1, y: 1, z: 1, width: 1, height: 4, depth: 1, color: 'white', part: 'frame' },
+        { x: 1, y: 5, z: 1, width: 1, height: 1, depth: 1, color: 'orange', part: 'detail' },
+      ] },
+    } } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#brief-help')).toContainText('templates only');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await expect(page.locator('#planner-status')).toHaveText('<login> required; retry after login');
+  await expect(page.locator('#planner-status login')).toHaveCount(0);
+  expect(sent).toHaveLength(0);
+  await page.getByRole('button', { name: 'Use Copilot planning' }).click();
+  await page.getByLabel('What shall we build?').fill('A lighthouse on a rocky coast');
+  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await expect(page.locator('#scene-caption')).toContainText('Lighthouse fixture');
+  expect(sent).toEqual(['A lighthouse on a rocky coast']);
+  await page.getByRole('button', { name: 'Start building' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
+  await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
+  await page.getByRole('button', { name: 'Hide one brick' }).click();
+  await page.getByRole('button', { name: 'Ask team to repair' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
+  await page.reload();
+  await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
+  await expect(page.getByLabel('What shall we build?')).toHaveValue('A lighthouse on a rocky coast');
+});

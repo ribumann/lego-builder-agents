@@ -1,7 +1,9 @@
+import { validateCustomSpec } from './custom-design.mjs';
+
 export type World = 'jurassic' | 'space';
 export type AgentId = 'build' | 'frame' | 'detail';
 export type Color = 'green' | 'orange' | 'blue' | 'purple' | 'red' | 'white';
-export type Model = 'stegosaurus' | 'brachiosaurus' | 'explorer' | 'cargo';
+export type Model = 'stegosaurus' | 'brachiosaurus' | 'explorer' | 'cargo' | 'custom';
 export type Status = 'ready' | 'planned' | 'building' | 'paused' | 'complete' | 'damaged';
 export interface Spec {
   world: World;
@@ -10,6 +12,12 @@ export interface Spec {
   longTail: boolean;
   wideWings: boolean;
   budget: number;
+  design?: { name: string; bricks: CustomBrick[] };
+}
+export interface CustomBrick {
+  x: number; y: number; z: number;
+  width: number; height: number; depth: number;
+  color: Color; part: 'frame' | 'detail';
 }
 export interface Brick {
   id: string;
@@ -19,6 +27,9 @@ export interface Brick {
   color: string;
   part: string;
   agent: 'frame' | 'detail';
+  width?: number;
+  height?: number;
+  depth?: number;
 }
 export interface BuildTask {
   id: string;
@@ -129,6 +140,11 @@ export function parseBrief(world: World, prompt: string): { spec: Spec; assumpti
 export function validateSpec(value: unknown, world: World): Spec {
   if (!value || typeof value !== 'object') throw new Error('The model returned no build specification.');
   const s = value as Record<string, unknown>;
+  if (s.model === 'custom') {
+    const spec = validateCustomSpec(s);
+    if (spec.world !== world) throw new Error('The model chose a different world.');
+    return spec;
+  }
   if (s.world !== world || !models.includes(s.model as Model) || !colorNames.includes(s.color as Color)
       || typeof s.longTail !== 'boolean' || typeof s.wideWings !== 'boolean'
       || !Number.isInteger(s.budget) || Number(s.budget) < 1 || Number(s.budget) > 1000)
@@ -140,6 +156,22 @@ export function validateSpec(value: unknown, world: World): Spec {
 }
 
 export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan['source'] = 'local'): Plan {
+  if (spec.model === 'custom') {
+    const canonical = validateCustomSpec(spec);
+    const groups = new Map<'frame' | 'detail', Brick[]>();
+    for (const b of canonical.design!.bricks) {
+      const brick: Brick = { ...b, id: key(b.x, b.y, b.z), agent: b.part, color: COLORS[b.color] };
+      if (!groups.has(b.part)) groups.set(b.part, []);
+      groups.get(b.part)!.push(brick);
+    }
+    const tasks: BuildTask[] = [];
+    for (const agent of ['frame', 'detail'] as const) {
+      const bricks = groups.get(agent);
+      if (bricks) tasks.push({ id: `${agent}:${agent}`, label: agent === 'frame' ? 'Structure' : 'Finishing details',
+        agent, depends: agent === 'detail' && groups.has('frame') ? ['frame:frame'] : [], bricks: sortBricks(bricks) });
+    }
+    return { spec: canonical, tasks, assumptions, source };
+  }
   const voxels = new Map<string, Brick>();
   const main = COLORS[spec.color];
   const add = (x: number, y: number, z: number, part: string, agent: Brick['agent'], color = main) => {
@@ -280,7 +312,9 @@ export class Team {
   }
   damage() {
     if (this.status !== 'complete') return;
-    const brick = allBricks(this.plan).find(b => b.part === (this.plan.spec.world === 'space' ? 'cockpit' : 'eyes'));
+    const brick = this.plan.spec.model === 'custom'
+      ? allBricks(this.plan).find(b => b.agent === 'detail') ?? allBricks(this.plan)[0]
+      : allBricks(this.plan).find(b => b.part === (this.plan.spec.world === 'space' ? 'cockpit' : 'eyes'));
     if (!brick) return;
     this.bricks.delete(brick.id);
     this.status = 'damaged';
@@ -312,15 +346,22 @@ export function inspect(plan: Plan, bricks: Brick[]): Check[] {
   const missing = expected.filter(b => !present.has(b.id));
   const seen = new Set<string>();
   const pending = bricks.length ? [bricks[0]] : [];
-  const map = new Map(bricks.map(b => [b.id, b]));
+  const map = new Map<string, Brick>();
+  for (const b of bricks)
+    for (let x = b.x; x < b.x + (b.width ?? 1); x++)
+      for (let y = b.y; y < b.y + (b.height ?? 1); y++)
+        for (let z = b.z; z < b.z + (b.depth ?? 1); z++) map.set(key(x, y, z), b);
   while (pending.length) {
     const b = pending.pop()!;
     if (seen.has(b.id)) continue;
     seen.add(b.id);
-    for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
-      const n = map.get(key(b.x + dx, b.y + dy, b.z + dz));
-      if (n && !seen.has(n.id)) pending.push(n);
-    }
+    for (let x = b.x; x < b.x + (b.width ?? 1); x++)
+      for (let y = b.y; y < b.y + (b.height ?? 1); y++)
+        for (let z = b.z; z < b.z + (b.depth ?? 1); z++)
+          for (const [dx, dy, dz] of [[1,0,0],[-1,0,0],[0,1,0],[0,-1,0],[0,0,1],[0,0,-1]]) {
+            const n = map.get(key(x + dx, y + dy, z + dz));
+            if (n && !seen.has(n.id)) pending.push(n);
+          }
   }
   const symmetric = bricks.every(b => present.has(key(b.x, b.y, -b.z)));
   return [
@@ -328,8 +369,8 @@ export function inspect(plan: Plan, bricks: Brick[]): Check[] {
       detail: missing.length ? `${missing.length} planned brick${missing.length > 1 ? 's' : ''} missing.` : `${expected.length} planned bricks placed.` },
     { label: 'Connected model', pass: bricks.length > 0 && seen.size === bricks.length,
       detail: `${seen.size}/${bricks.length} bricks face-connected. Connectivity check, not a physical clutch or stability simulation.` },
-    { label: 'Balanced sides', pass: bricks.length > 0 && symmetric,
-      detail: symmetric ? 'Left and right brick positions mirror each other.' : 'The two sides do not match yet.' },
+    ...(plan.spec.model === 'custom' ? [] : [{ label: 'Balanced sides', pass: bricks.length > 0 && symmetric,
+      detail: symmetric ? 'Left and right brick positions mirror each other.' : 'The two sides do not match yet.' }]),
     { label: 'Within budget', pass: bricks.length <= plan.spec.budget,
       detail: `${bricks.length} of ${plan.spec.budget} allowed bricks. No model cost is implied.` },
   ];

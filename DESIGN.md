@@ -13,7 +13,7 @@ Desktop: 260px mission / flexible 3D stage / 302px team. Brief and transport sha
 Yellow approves a planning action or marks a pressed view tool. Blue controls playback. Plain task rows carry ownership, status and dependency text; team speech is a timestamped turn log, not chat bubbles. Agent colors: gold coordinator, blue structure, rose detail. Never use color alone for status.
 
 ## Geometry and motion
-Original stylized brick boxes with cylindrical studs. Face-connected, mirrored models are meaningful test artifacts, not physical LEGO instructions. On placement a brick descends into its cell. Reduced-motion mode removes that placement transition and camera damping. Robots indicate three team roles; their motion is illustrative, while the task board is authoritative.
+Original stylized rectangular brick boxes with one cylindrical stud per top grid cell. Face-connected models are meaningful test artifacts, not physical LEGO instructions; template designs also check mirrored sides, but original designs need not be symmetric. On placement a brick descends into position. Reduced-motion mode removes that placement transition and camera damping. Robots indicate three team roles; their motion is illustrative, while the task board is authoritative.
 
 ## Content truth
 Always distinguish local rule-based agents, hybrid Copilot planning and imported three-model workflow decisions. Explanations describe observable program decisions, not hidden model thoughts. No fabricated token costs, model results, official affiliation or physical safety claims.

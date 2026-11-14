@@ -9,7 +9,7 @@ web
 Children aged 11-15 learning about AI agents, with a teacher or parent facilitating. Age range and workshop intent come from the reference post supplied by the user.
 
 ## Product Purpose
-Demonstrate autonomous coordination by building LEGO-style dinosaurs in a Jurassic setting and spacecraft in space.
+Demonstrate autonomous coordination by building original brick models, including dinosaur and spacecraft templates, in a Jurassic or space setting.
 
 ## Positioning
 A visible coordinator delegates to two specialist builders; learners can inspect their shared task board, change the brief, and observe verification and repair.
@@ -20,6 +20,7 @@ Local browser application with a local Node server. No Azure service is required
 ## Capabilities and Constraints
 - Default execution is a transparent, deterministic, rule-based agent simulation, not an LLM.
 - Optional GitHub Copilot CLI planning uses the user's authenticated subscription, with explicit opt-in and a bounded request count. Actual model charges are unknown.
+- Copilot may propose original static designs with mixed brick dimensions within bounded workspace, count and volume limits. Local planning remains template-based.
 - No gated local models, downloaded brand assets, or paid cloud infrastructure.
 - Original brick geometry, not official LEGO assets or affiliation.
 - Local persistence and downloadable builds; no accounts or public sharing.

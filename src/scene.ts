@@ -20,11 +20,12 @@ export class Workbench {
   private resize: ResizeObserver;
   private exploded = false;
   private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
-  private world: World = 'jurassic';
   private agentTargets = new Map<string, THREE.Vector3>();
   private onSelect: (brick: Brick) => void;
   private bricks = new Map<string, Brick>();
   private down = { x: 0, y: 0 };
+  private cameraTarget = new THREE.Vector3(-1, 3, 0);
+  private cameraDistance = 39;
   constructor(host: HTMLElement, onSelect: (brick: Brick) => void) {
     this.onSelect = onSelect;
     this.renderer = new THREE.WebGLRenderer({ antialias: true, alpha: false });
@@ -41,7 +42,7 @@ export class Workbench {
     this.controls.target.set(0, 3, 0);
     this.controls.enableDamping = !this.reduced;
     this.controls.minDistance = 16;
-    this.controls.maxDistance = 65;
+    this.controls.maxDistance = 150;
     this.controls.maxPolarAngle = Math.PI / 2.08;
     this.controls.enablePan = false;
     const ambient = new THREE.HemisphereLight('#fff9e2', '#6c998f', 2.8);
@@ -84,24 +85,29 @@ export class Workbench {
   private brickMesh(brick: Brick, ghost = false) {
     const group = new THREE.Group();
     const body = new THREE.Mesh(this.cube, this.material(brick.color, ghost));
+    const width = brick.width ?? 1, height = brick.height ?? 1, depth = brick.depth ?? 1;
+    const bodyHeight = 0.65 + (height - 1) * UNIT_Y;
+    body.scale.set((width - 0.06) / 0.94, bodyHeight / 0.65, (depth - 0.06) / 0.94);
     body.castShadow = !ghost;
     body.receiveShadow = !ghost;
-    const stud = new THREE.Mesh(this.stud, this.material(brick.color, ghost));
-    stud.position.y = 0.37;
-    stud.castShadow = !ghost;
-    group.add(body, stud);
-    group.position.set(brick.x, brick.y * UNIT_Y + 0.38, brick.z);
+    group.add(body);
+    for (let x = 0; x < width; x++) for (let z = 0; z < depth; z++) {
+      const stud = new THREE.Mesh(this.stud, this.material(brick.color, ghost));
+      stud.position.set(x - (width - 1) / 2, bodyHeight / 2 + 0.045, z - (depth - 1) / 2);
+      stud.castShadow = !ghost;
+      group.add(stud);
+    }
+    group.position.set(brick.x + (width - 1) / 2, brick.y * UNIT_Y + 0.38 + (height - 1) * UNIT_Y / 2, brick.z + (depth - 1) / 2);
     group.userData = { id: brick.id, base: group.position.clone(), born: performance.now() };
     return group;
   }
   setWorld(world: World) {
-    this.world = world;
     this.clearGroup(this.scenery, true);
     this.clearGroup(this.robots, true);
     const space = world === 'space';
     const bg = space ? '#152b48' : '#cce6df';
     this.scene.background = new THREE.Color(bg);
-    this.scene.fog = new THREE.Fog(bg, 55, 115);
+    this.scene.fog = new THREE.Fog(bg, 120, 220);
     const ground = new THREE.Mesh(new THREE.CylinderGeometry(17, 18, 0.8, 64),
       this.material(space ? '#536c89' : '#77b798'));
     ground.position.y = -0.5;
@@ -184,6 +190,17 @@ export class Workbench {
   setBlueprint(bricks: Brick[]) {
     this.clearGroup(this.blueprint);
     for (const brick of bricks) this.blueprint.add(this.brickMesh(brick, true));
+    if (bricks.some(b => b.width !== undefined)) {
+      const minX = Math.min(...bricks.map(b => b.x)), maxX = Math.max(...bricks.map(b => b.x + (b.width ?? 1) - 1));
+      const minY = Math.min(...bricks.map(b => b.y)) * UNIT_Y, maxY = Math.max(...bricks.map(b => b.y + (b.height ?? 1))) * UNIT_Y;
+      const minZ = Math.min(...bricks.map(b => b.z)), maxZ = Math.max(...bricks.map(b => b.z + (b.depth ?? 1) - 1));
+      this.cameraTarget.set((minX + maxX) / 2, (minY + maxY) / 2, (minZ + maxZ) / 2);
+      this.cameraDistance = Math.max(25, Math.hypot(maxX - minX + 1, maxY - minY, maxZ - minZ + 1) * 1.8);
+    } else {
+      this.cameraTarget.set(-1, 3, 0);
+      this.cameraDistance = 39;
+    }
+    this.resetCamera();
   }
   showBlueprint(show: boolean) { this.blueprint.visible = show; }
   sync(bricks: Brick[]) {
@@ -204,8 +221,8 @@ export class Workbench {
   }
   explode(value: boolean) { this.exploded = value; }
   resetCamera() {
-    this.camera.position.set(this.world === 'space' ? 23 : 21, 17, 27);
-    this.controls.target.set(-1, 3, 0);
+    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(0.55, 0.35, 0.7).normalize().multiplyScalar(this.cameraDistance));
+    this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }
   private animate = () => {
