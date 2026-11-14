@@ -7,11 +7,12 @@
     "dev": "node server.mjs",
     "build": "tsc --noEmit && vite build",
     "start": "node server.mjs --production",
-    "test": "node --import tsx --test tests/*.test.ts",
+    "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "playwright test",
     "check": "npm test && npm run build"
   },
   "dependencies": {
+    "@azure/identity": "^4.14.1",
     "three": "^0.180.0"
   },
   "devDependencies": {
