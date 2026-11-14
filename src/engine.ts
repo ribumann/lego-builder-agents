@@ -1,9 +1,10 @@
 import { expandCustomBricks, validateCustomSpec } from './custom-design.mjs';
+import { COLORS, COLOR_NAMES, type Color } from './brick-colors.mjs';
 
 export type World = 'jurassic' | 'space';
 export type AgentId = 'build' | 'plan' | 'frame' | 'detail' | 'check';
 export type ModelAgentId = 'build' | 'frame' | 'detail';
-export type Color = 'green' | 'orange' | 'blue' | 'purple' | 'red' | 'white';
+export type { Color } from './brick-colors.mjs';
 export type Model = 'stegosaurus' | 'brachiosaurus' | 'explorer' | 'cargo' | 'custom';
 export type Status = 'ready' | 'planned' | 'building' | 'paused' | 'complete' | 'damaged';
 export interface Spec {
@@ -79,10 +80,7 @@ export interface Snapshot {
   source: Plan['source'];
   taskOrder: string[];
 }
-export const COLORS: Record<Color, string> = {
-  green: '#57a95d', orange: '#f6a137', blue: '#4d91d4',
-  purple: '#a184d4', red: '#e66553', white: '#e7edf0',
-};
+export { COLORS };
 export const EXAMPLES: Record<World, string[]> = {
   jurassic: [
     'Build a green stegosaurus with orange plates and a long tail.',
@@ -103,7 +101,7 @@ export const AGENTS = {
   check: { name: 'CheckBot', role: 'Inspector & repair lead', short: 'C', color: '#39836d' },
 } as const;
 const models: Model[] = ['stegosaurus', 'brachiosaurus', 'explorer', 'cargo'];
-const colorNames = Object.keys(COLORS) as Color[];
+const colorNames = COLOR_NAMES;
 const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
 // Recognize the vocabulary shown in the translated guide, without changing the saved brief.
@@ -122,6 +120,11 @@ function offlineVocabulary(prompt: string): string {
     [/(?:weiß(?:e|er|es|en)?|blanc(?:he)?|bianc[oa]|blanc[oa]|branc[oa])/u, 'white'],
     [/(?:rot(?:e|er|es|en)?|rouge|ross[oa]|roj[oa]|vermelh[oa])/u, 'red'],
     [/(?:orange(?:farben(?:e|er|es|en)?)?|arancione|naranja|laranja)/u, 'orange'],
+    [/(?:schwarz(?:e|er|es|en)?|noir(?:e)?|ner[oa]|negr[oa]|pret[oa])/u, 'black'],
+    [/(?:gelb(?:e|er|es|en)?|jaune|giall[oa]|amarill[oa]|amarel[oa])/u, 'yellow'],
+    [/(?:grau(?:e|er|es|en)?|gray|grey|gris(?:e)?|grigi[oa]|cinza)/u, 'gray'],
+    [/(?:braun(?:e|er|es|en)?|marron(?:e)?|marrón|marrom|brun(?:e)?|castanh[oa])/u, 'brown'],
+    [/(?:pink(?:e|er|es|en)?|rose|ros[ae]|ros[ao])/u, 'pink'],
     [/(?:lang(?:e|er|en|em)?\s+schwanz|longue?\s+queue|coda\s+lunga|cola\s+larga|cauda\s+longa)/u, 'long tail'],
     [/(?:breit(?:e|en|er|es)?\s+flügeln?|larges?\s+ailes|ailes\s+larges|ali\s+larghe|alas\s+anchas|asas\s+largas)/u, 'wide wings'],
   ];
@@ -160,8 +163,8 @@ export function parseBrief(world: World, prompt: string): { spec: Spec; assumpti
   const budgetMatch = text.match(/(?:under|within|max(?:imum)?|budget(?: of)?)\s*(\d+)\s*(?:bricks)?/);
   const budget = budgetMatch ? Number(budgetMatch[1]) : 700;
   if (budget < 1 || budget > 1000) throw new Error('Choose a brick budget between 1 and 1,000.');
-  if (/\b(yellow|pink|black|brown|cyan)\b/.test(text))
-    assumptions.push('Body palette: green, orange, blue, purple, red, or white. Other requested colors are not supported.');
+  if (/\bcyan\b/.test(text))
+    assumptions.push('Body palette: green, orange, blue, purple, red, white, black, yellow, gray, brown, or pink. Other requested colors are not supported.');
   return {
     spec: { world, model, color, longTail: /long.tail/.test(text), wideWings: /wide|broad/.test(text), budget },
     assumptions,

@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { AGENTS, Team, EXAMPLES, allBricks, createPlan, loadAIMission, parseBrief, restoreSnapshot, validateSpec, type World } from '../src/engine';
+import { AGENTS, COLORS, Team, EXAMPLES, allBricks, createPlan, loadAIMission, parseBrief, restoreSnapshot, validateSpec, type World } from '../src/engine';
 import { worldExample } from '../src/world-examples';
 
 function finish(team: Team) {
@@ -73,6 +73,35 @@ test('translated guide examples select the advertised offline templates', () => 
   }
   assert.throws(() => parseBrief('jurassic', 'Raumschiff'), /Switch to Space/);
   assert.throws(() => parseBrief('space', 'stégosaure'), /Switch to Jurassic/);
+});
+test('expanded colors parse and render in both offline scenes, including translated names', () => {
+  const colors = ['black', 'yellow', 'gray', 'brown', 'pink'] as const;
+  for (const color of colors) {
+    for (const [world, subject] of [['jurassic', 'stegosaurus'], ['space', 'explorer']] as const) {
+      const { spec, assumptions } = parseBrief(world, `${color} ${subject}`);
+      assert.equal(spec.color, color);
+      assert.equal(assumptions.some(item => item.includes('not supported')), false);
+      const bricks = allBricks(createPlan(spec));
+      assert.ok(bricks.length > 0);
+      assert.ok(bricks.some(brick => brick.color === COLORS[color]));
+      const team = new Team(createPlan(spec));
+      finish(team);
+      const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot(`${color} ${subject}`))));
+      assert.deepEqual(restored.team.plan.spec, spec);
+      assert.ok([...restored.team.bricks.values()].some(brick => brick.color === COLORS[color]));
+    }
+  }
+  const translated = [
+    ['schwarzer', 'gelber', 'grauer', 'brauner', 'pinker'],
+    ['noir', 'jaune', 'gris', 'marron', 'rose'],
+    ['nero', 'giallo', 'grigio', 'marrone', 'rosa'],
+    ['negro', 'amarillo', 'gris', 'marrón', 'rosa'],
+    ['preto', 'amarelo', 'cinza', 'marrom', 'rosa'],
+  ];
+  for (const aliases of translated)
+    for (const [index, color] of colors.entries())
+      assert.equal(parseBrief('jurassic', `${aliases[index]} stegosaurus`).spec.color, color);
+  assert.equal(parseBrief('space', 'grey explorer').spec.color, 'gray');
 });
 test('vague brief exposes assumptions; supported inputs actually change geometry', () => {
   const vague = parseBrief('jurassic', 'Build a dinosaur.');

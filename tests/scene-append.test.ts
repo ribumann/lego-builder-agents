@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
-  Team, allBricks, createPlan, validateSpec, type Brick, type Plan, type Spec,
+  COLORS, Team, allBricks, createPlan, validateSpec, type Brick, type Plan, type Spec,
 } from '../src/engine';
 import { worldExample } from '../src/world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from '../src/scene-append';
@@ -99,9 +99,10 @@ test('compact mixed-size repeated geometry stays appendable and survives save an
   previous.step(12);
   assert.ok(previous.bricks.size > 0);
   const added = customPlan('Marker', 'local', [{
-    name: 'Marker', bricks: [{ x: 0, y: 0, z: 8, width: 1, height: 1, depth: 1, color: 'white', part: 'frame' }],
+    name: 'Marker', bricks: [{ x: 0, y: 0, z: 8, width: 1, height: 1, depth: 1, color: 'black', part: 'frame' }],
   }]);
   const result = appendScene(previous, added);
+  assert.ok(allBricks(result.team.plan).some(brick => brick.color === COLORS.black));
   const objects = result.team.plan.spec.design!.objects!;
   assert.equal(objects.reduce((count, object) => count + object.bricks.length, 0), 5);
   assert.deepEqual(result.offset, { x: 0, z: 0 });
@@ -113,6 +114,7 @@ test('compact mixed-size repeated geometry stays appendable and survives save an
   };
   const original = new Map(allBricks(previous.plan).map(brick => [brick.id, appearance(brick)]));
   const restored = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(result.team, 'Rows'))));
+  assert.ok(allBricks(restored.team.plan).some(brick => brick.color === COLORS.black));
   for (const brick of allBricks(restored.team.plan).filter(item => item.object === 'Four rows'))
     assert.deepEqual(appearance(brick), original.get(brick.id));
   assert.deepEqual([...restored.team.bricks.keys()].sort(), [...previous.bricks.keys()].sort());
