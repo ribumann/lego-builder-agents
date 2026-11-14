@@ -63,6 +63,11 @@ test('translated guide examples select the advertised offline templates', () => 
     const ship = parseBrief('space', cargo).spec;
     assert.deepEqual([ship.model, ship.color], ['cargo', 'white']);
   }
+  for (const name of ['arancione', 'naranja', 'laranja', 'orangefarbenes']) {
+    assert.equal(parseBrief('jurassic', `${name} stegosaurus`).spec.color, 'orange');
+  }
+  assert.throws(() => parseBrief('jurassic', 'Raumschiff'), /Switch to Space/);
+  assert.throws(() => parseBrief('space', 'stégosaure'), /Switch to Jurassic/);
 });
 test('vague brief exposes assumptions; supported inputs actually change geometry', () => {
   const vague = parseBrief('jurassic', 'Build a dinosaur.');

@@ -123,3 +123,19 @@ test('known server status is localized without changing external messages', asyn
   await page.locator('#close-dialog').click();
   await expect(page.locator('#language')).toHaveValue('fr');
 });
+
+test('translated guide describes template limitations and model consent', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.goto('/');
+  await page.locator('#language').selectOption('fr');
+  await page.locator('#guide').click();
+  await expect(page.locator('#dialog-body')).toContainText('La planification Copilot est le choix par défaut');
+  await expect(page.locator('#dialog-body')).toContainText('Les autres demandes peuvent ne pas modifier ces modèles');
+  await expect(page.locator('#dialog-body')).toContainText('budget 500 bricks');
+  await page.locator('#close-dialog').click();
+  await page.locator('#settings').click();
+  await expect(page.locator('#dialog-body')).toContainText('Le coût en dollars est inconnu');
+  await expect(page.locator('#dialog-body')).toContainText('La boucle locale seule ne prouve pas');
+});
