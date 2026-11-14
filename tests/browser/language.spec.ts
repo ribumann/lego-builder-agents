@@ -71,6 +71,8 @@ test('translated build state and inspection update without altering the brief', 
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#stage-status')).toContainText('Plan bereit');
   await expect(page.locator('#checks')).toContainText('Auftrag erfüllt');
+  await expect(page.locator('#scene-caption')).toContainText('Bauplan bereit');
+  await expect(page.locator('#checks')).toContainText('über Flächen verbunden');
   await page.locator('#tab-tasks').click();
   await expect(page.locator('#task-list')).toContainText('Wartet auf:');
   await expect(page.locator('#task-list')).toContainText('Fahrwerk');

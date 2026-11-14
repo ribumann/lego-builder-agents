@@ -114,7 +114,7 @@ function offlineVocabulary(prompt: string): string {
     [/brachiosaur(?:ier|e|o)?|braquiosaurio|braquiossauro/u, 'brachiosaurus'],
     [/stegosaur(?:ier|e|o)?|stégosaure|estegosaurio|estegossauro/u, 'stegosaurus'],
     [/(?:fracht(?:schiff)?|cargo|carga|cargaison)/u, 'cargo'],
-    [/(?:erkundungs(?:schiff|schiffe)|explorateur|exploratrice|explorador|exploradora|esploratore|esploratrice)/u, 'explorer'],
+    [/(?:erkunder|erkundungs(?:schiff|schiffe)|explorateur|exploratrice|explorador|exploradora|esploratore|esploratrice)/u, 'explorer'],
     [/(?:raumschiff|vaisseau|astronave|nave\s+espacial)/u, 'spaceship'],
     [/(?:grün(?:e|er|es|en)?|vert(?:e)?|verde)/u, 'green'],
     [/(?:violett(?:e|er|es|en)?|lila|violet(?:te)?|viola|morado|morada|roxo|roxa)/u, 'purple'],
@@ -123,7 +123,7 @@ function offlineVocabulary(prompt: string): string {
     [/(?:rot(?:e|er|es|en)?|rouge|ross[oa]|roj[oa]|vermelh[oa])/u, 'red'],
     [/(?:orange(?:farben(?:e|er|es|en)?)?|arancione|naranja|laranja)/u, 'orange'],
     [/(?:lang(?:e|er|en|em)?\s+schwanz|longue?\s+queue|coda\s+lunga|cola\s+larga|cauda\s+longa)/u, 'long tail'],
-    [/(?:breite?\s+flügel|larges?\s+ailes|ailes\s+larges|ali\s+larghe|alas\s+anchas|asas\s+largas)/u, 'wide wings'],
+    [/(?:breit(?:e|en|er|es)?\s+flügeln?|larges?\s+ailes|ailes\s+larges|ali\s+larghe|alas\s+anchas|asas\s+largas)/u, 'wide wings'],
   ];
   for (const [pattern, canonical] of words) {
     const bounded = new RegExp(`(?<!\\p{L})(?:${pattern.source})(?!\\p{L})`, 'u');

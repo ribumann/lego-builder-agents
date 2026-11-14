@@ -10,6 +10,11 @@ const catalog: Record<string, Translations> = {
   'Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.': ['Kompatible KI ist ein separat auf dem Server konfigurierter Anbieter. Eine ausdrückliche Planungsanfrage sendet deinen Auftrag an diesen Dienst und kann Kosten verursachen. Keine persönlichen Daten eingeben. Beim Laden oder Auswählen wird nichts gesendet.', 'L’IA compatible est un fournisseur configuré séparément sur le serveur. Une demande explicite envoie votre consigne au service configuré et peut entraîner des frais. Ne saisissez pas de données personnelles. Rien n’est envoyé au chargement ou à la sélection du mode.', 'L’IA compatibile è un fornitore configurato separatamente sul server. Una richiesta esplicita invia la richiesta al servizio configurato e può comportare costi. Non inserire dati personali. Nulla viene inviato al caricamento o alla scelta della modalità.', 'La IA compatible es un proveedor configurado por separado en el servidor. Una solicitud explícita envía tus instrucciones al servicio configurado y puede generar costes. No introduzcas datos personales. No se envía nada al cargar o elegir el modo.', 'A IA compatível é um fornecedor configurado separadamente no servidor. Uma solicitação explícita envia suas instruções ao serviço configurado e pode gerar custos. Não insira dados pessoais. Nada é enviado ao carregar ou escolher o modo.'],
   'Plan with Compatible AI sends this brief to the configured service and may incur charges. No request until you press it. Do not enter personal information.': ['Die Planung mit kompatibler KI sendet den Auftrag an den konfigurierten Dienst und kann Kosten verursachen. Erst beim Drücken wird gesendet. Keine persönlichen Daten eingeben.', 'La planification avec l’IA compatible envoie la consigne au service configuré et peut entraîner des frais. Aucun envoi avant votre clic. Ne saisissez pas de données personnelles.', 'La pianificazione con IA compatibile invia la richiesta al servizio configurato e può comportare costi. Nessun invio prima del clic. Non inserire dati personali.', 'Planificar con IA compatible envía las instrucciones al servicio configurado y puede generar costes. Nada se envía hasta pulsar. No introduzcas datos personales.', 'Planejar com IA compatível envia as instruções ao serviço configurado e pode gerar custos. Nada é enviado até clicar. Não insira dados pessoais.'],
   'Compatible AI is off.': ['Kompatible KI ist ausgeschaltet.', 'L’IA compatible est désactivée.', 'L’IA compatibile è disattivata.', 'La IA compatible está desactivada.', 'A IA compatível está desativada.'],
+  'Local AI is off. Set BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL to opt in.': ['Lokale KI ist ausgeschaltet. Setze BRICKLAB_LOCAL_AI=1 und BRICKLAB_LOCAL_MODEL zur Aktivierung.', 'L’IA locale est désactivée. Définissez BRICKLAB_LOCAL_AI=1 et BRICKLAB_LOCAL_MODEL pour l’activer.', 'L’IA locale è disattivata. Imposta BRICKLAB_LOCAL_AI=1 e BRICKLAB_LOCAL_MODEL per attivarla.', 'La IA local está desactivada. Define BRICKLAB_LOCAL_AI=1 y BRICKLAB_LOCAL_MODEL para activarla.', 'A IA local está desativada. Defina BRICKLAB_LOCAL_AI=1 e BRICKLAB_LOCAL_MODEL para ativá-la.'],
+  'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.': ['Lokale KI ist ausgeschaltet. Konfiguriere Ollama auf dem BrickLab-Server und starte mit BRICKLAB_LOCAL_AI=1 und gesetztem BRICKLAB_LOCAL_MODEL neu.', 'L’IA locale est désactivée. Configurez Ollama sur le serveur BrickLab, puis redémarrez avec BRICKLAB_LOCAL_AI=1 et BRICKLAB_LOCAL_MODEL.', 'L’IA locale è disattivata. Configura Ollama sul server BrickLab e riavvia con BRICKLAB_LOCAL_AI=1 e BRICKLAB_LOCAL_MODEL impostato.', 'La IA local está desactivada. Configura Ollama en el servidor BrickLab y reinicia con BRICKLAB_LOCAL_AI=1 y BRICKLAB_LOCAL_MODEL definido.', 'A IA local está desativada. Configure Ollama no servidor BrickLab e reinicie com BRICKLAB_LOCAL_AI=1 e BRICKLAB_LOCAL_MODEL definido.'],
+  'Set BRICKLAB_LOCAL_MODEL to an installed local Ollama model.': ['Setze BRICKLAB_LOCAL_MODEL auf ein installiertes lokales Ollama-Modell.', 'Définissez BRICKLAB_LOCAL_MODEL sur un modèle Ollama local installé.', 'Imposta BRICKLAB_LOCAL_MODEL su un modello Ollama locale installato.', 'Define BRICKLAB_LOCAL_MODEL como un modelo Ollama local instalado.', 'Defina BRICKLAB_LOCAL_MODEL para um modelo Ollama local instalado.'],
+  'Local AI is configured. Only an explicit plan request checks model metadata and generates a response.': ['Lokale KI ist konfiguriert. Nur eine ausdrückliche Planungsanfrage prüft Modellmetadaten und erzeugt eine Antwort.', 'L’IA locale est configurée. Seule une demande explicite vérifie les métadonnées et génère une réponse.', 'L’IA locale è configurata. Solo una richiesta esplicita verifica i metadati e genera una risposta.', 'La IA local está configurada. Solo una solicitud explícita comprueba metadatos y genera una respuesta.', 'A IA local está configurada. Somente uma solicitação explícita verifica metadados e gera uma resposta.'],
+  'Service availability and authentication are unverified. Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.': ['Verfügbarkeit und Anmeldung des Dienstes sind ungeprüft. Starte den vertrauenswürdigen Ollama-Dienst mit OLLAMA_NO_CLOUD=1. Modellmetadaten beweisen nicht, dass der Dienst offline ist oder keinen Proxy verwendet.', 'La disponibilité et l’authentification du service ne sont pas vérifiées. Démarrez le service Ollama fiable avec OLLAMA_NO_CLOUD=1. Les métadonnées ne prouvent pas que le service est hors ligne ou sans proxy.', 'Disponibilità e autenticazione del servizio non sono verificate. Avvia il servizio Ollama affidabile con OLLAMA_NO_CLOUD=1. I metadati non provano che il servizio sia offline o senza proxy.', 'La disponibilidad y autenticación del servicio no están verificadas. Inicia el servicio Ollama fiable con OLLAMA_NO_CLOUD=1. Los metadatos no prueban que el servicio esté sin conexión o sin proxy.', 'Disponibilidade e autenticação do serviço não foram verificadas. Inicie o serviço Ollama confiável com OLLAMA_NO_CLOUD=1. Os metadados não comprovam que o serviço esteja offline ou sem proxy.'],
   'Copilot CLI is disabled in hosted mode.': ['Copilot CLI ist im gehosteten Modus deaktiviert.', 'Copilot CLI est désactivé en mode hébergé.', 'Copilot CLI è disattivato in modalità ospitata.', 'Copilot CLI está desactivado en modo alojado.', 'Copilot CLI está desativado no modo hospedado.'],
   'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.': ['Die gehostete Azure-Planung bleibt bis zur Prüfung des öffentlichen Schutzes gesperrt. Nur statischer und Offline-Betrieb ist verfügbar.', 'La planification Azure hébergée reste bloquée jusqu’à la vérification des protections publiques. Seul le mode statique ou hors ligne est disponible.', 'La pianificazione Azure ospitata resta bloccata fino alla verifica delle protezioni pubbliche. È disponibile solo la modalità statica o offline.', 'La planificación Azure alojada sigue bloqueada hasta verificar las protecciones públicas. Solo está disponible el modo estático o sin conexión.', 'O planejamento Azure hospedado permanece bloqueado até verificar as proteções públicas. Apenas o modo estático ou offline está disponível.'],
   'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.': ['Azure-Planung ist ausgeschaltet. Zur Aktivierung sind Serverkonfiguration und BRICKLAB_AZURE_AI=1 erforderlich.', 'La planification Azure est désactivée. La configuration du serveur et BRICKLAB_AZURE_AI=1 sont nécessaires pour l’activer.', 'La pianificazione Azure è disattivata. Per attivarla servono la configurazione del server e BRICKLAB_AZURE_AI=1.', 'La planificación Azure está desactivada. Para activarla se requieren configuración del servidor y BRICKLAB_AZURE_AI=1.', 'O planejamento Azure está desativado. Para ativá-lo são necessários configuração do servidor e BRICKLAB_AZURE_AI=1.'],
@@ -144,6 +149,19 @@ const catalog: Record<string, Translations> = {
   'Waits for:': ['Wartet auf:', 'Attend :', 'Attende:', 'Espera a:', 'Aguarda:'],
   'Shared board updated': ['Gemeinsame Tafel aktualisiert', 'Tableau partagé actualisé', 'Bacheca condivisa aggiornata', 'Tablero compartido actualizado', 'Quadro compartilhado atualizado'],
   'Dependencies ready': ['Voraussetzungen erfüllt', 'Prérequis satisfaits', 'Prerequisiti pronti', 'Requisitos cumplidos', 'Pré-requisitos prontos'],
+  'playback': ['Wiedergabe', 'lecture', 'riproduzione', 'reproducción', 'reprodução'],
+  'placed by': ['gesetzt von', 'placé par', 'posato da', 'colocado por', 'colocado por'],
+  'grid': ['Raster', 'grille', 'griglia', 'cuadrícula', 'grade'],
+  'cells': ['Zellen', 'cellules', 'celle', 'celdas', 'células'],
+  '3D is unavailable:': ['3D ist nicht verfügbar:', 'La 3D est indisponible :', '3D non disponibile:', '3D no disponible:', '3D indisponível:'],
+  'You can still build using the task board and text inspection below.': ['Du kannst weiterhin mit der Aufgabentafel und der Textprüfung unten bauen.', 'Vous pouvez toujours construire avec le tableau des tâches et l’inspection textuelle ci-dessous.', 'Puoi comunque costruire usando la bacheca e l’ispezione testuale qui sotto.', 'Puedes seguir construyendo con el tablero y la inspección de texto de abajo.', 'Você ainda pode construir usando o quadro de tarefas e a inspeção textual abaixo.'],
+  'Both builders observe the shared board each turn.': ['Beide Bauer prüfen in jeder Runde die gemeinsame Tafel.', 'Les deux constructeurs consultent le tableau partagé à chaque tour.', 'Entrambi i costruttori osservano la bacheca condivisa a ogni turno.', 'Ambos constructores observan el tablero compartido en cada turno.', 'Ambos os construtores observam o quadro compartilhado a cada turno.'],
+  'Your idea, their teamwork.': ['Deine Idee, ihre Teamarbeit.', 'Votre idée, leur travail d’équipe.', 'La tua idea, il loro lavoro di squadra.', 'Tu idea, su trabajo en equipo.', 'Sua ideia, o trabalho em equipe deles.'],
+  'Blueprint ready': ['Bauplan bereit', 'Plan prêt', 'Progetto pronto', 'Plano listo', 'Projeto pronto'],
+  'delegated tasks': ['zugewiesene Aufgaben', 'tâches déléguées', 'attività assegnate', 'tareas asignadas', 'tarefas delegadas'],
+  'Replay:': ['Wiedergabe:', 'Lecture :', 'Riproduzione:', 'Reproducción:', 'Reprodução:'],
+  'placed bricks. Your saved build is unchanged.': ['gesetzte Steine. Dein gespeicherter Bau bleibt unverändert.', 'briques placées. Votre construction enregistrée reste inchangée.', 'mattoncini posati. La costruzione salvata resta invariata.', 'bloques colocados. Tu construcción guardada no cambia.', 'blocos colocados. Sua construção salva não muda.'],
+  'Scrub through the actual order bricks were placed.': ['Sieh die tatsächliche Reihenfolge der gesetzten Steine an.', 'Parcourez l’ordre réel de placement des briques.', 'Scorri l’ordine effettivo di posa dei mattoncini.', 'Recorre el orden real en que se colocaron los bloques.', 'Percorra a ordem real em que os blocos foram colocados.'],
   'No species specified: I chose a stegosaurus. Try naming a brachiosaurus.': ['Keine Art angegeben: Ich habe einen Stegosaurus gewählt. Probiere einen Brachiosaurus.', 'Aucune espèce précisée : j’ai choisi un stégosaure. Essayez un brachiosaure.', 'Nessuna specie indicata: ho scelto uno stegosauro. Prova un brachiosauro.', 'Sin especie indicada: elegí un estegosaurio. Prueba un braquiosaurio.', 'Sem espécie indicada: escolhi um estegossauro. Experimente um braquiossauro.'],
   'No ship type specified: I chose an explorer.': ['Kein Schiffstyp angegeben: Ich habe einen Erkunder gewählt.', 'Aucun type de vaisseau précisé : j’ai choisi un explorateur.', 'Nessun tipo di nave indicato: ho scelto un esploratore.', 'Sin tipo de nave indicado: elegí una exploradora.', 'Sem tipo de nave indicado: escolhi uma exploradora.'],
   'Offline template mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.': ['Offline-Vorlagen verstehen einen kleinen Wortschatz, keine beliebige Sprache. Art, Körperfarbe, langer Schwanz, breite Flügel und Budget werden unterstützt.', 'Les modèles hors ligne comprennent un vocabulaire limité, pas le langage libre. Espèce, couleur, longue queue, ailes larges et budget sont pris en charge.', 'I modelli offline comprendono un vocabolario limitato, non il linguaggio libero. Sono supportati specie, colore, coda lunga, ali larghe e budget.', 'Las plantillas sin conexión entienden vocabulario limitado, no lenguaje libre. Admiten especie, color, cola larga, alas anchas y presupuesto.', 'Os modelos offline entendem vocabulário limitado, não linguagem livre. Aceitam espécie, cor, cauda longa, asas largas e orçamento.'],
@@ -178,6 +196,7 @@ const catalog: Record<string, Translations> = {
   'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.': ['Offline-Vorlagen rufen kein Modell auf. Lokale KI nutzt Server-Rechenleistung. Copilot startet einen CLI-Aufruf; die CLI kann intern wiederholen. Azure Foundry kann Kosten für den Betreiber verursachen. Einen Dollarpreis können wir hier nicht messen.', 'Les modèles hors ligne n’appellent aucun modèle. L’IA locale utilise le serveur. Copilot lance une commande CLI, qui peut réessayer en interne. Azure Foundry peut entraîner des frais pour l’hébergeur. Nous ne pouvons pas mesurer le prix ici.', 'I modelli offline non chiamano modelli linguistici. L’IA locale usa il server. Copilot avvia una chiamata CLI, che può riprovare internamente. Azure Foundry può generare costi per il gestore. Non possiamo misurare il prezzo qui.', 'Las plantillas sin conexión no llaman a modelos. La IA local usa el servidor. Copilot inicia una invocación CLI, que puede reintentar internamente. Azure Foundry puede generar costes para el propietario. No podemos medir el precio aquí.', 'Os modelos offline não chamam modelos. A IA local usa o servidor. O Copilot inicia uma invocação CLI, que pode repetir internamente. O Azure Foundry pode gerar custos para o responsável. Não podemos medir o preço aqui.'],
   'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.': ['Wir vergleichen das tatsächliche Steineraster mit dem Plan. Der zuständige Spezialist öffnet die Aufgabe erneut und ersetzt den fehlenden Stein. Das ist ein Beobachten-Handeln-Prüfen-Zyklus.', 'Nous comparons la grille réelle au plan. Le spécialiste responsable rouvre sa tâche et remplace la brique manquante. C’est une boucle observer–agir–vérifier.', 'Confrontiamo la griglia reale con il piano. Lo specialista responsabile riapre l’attività e sostituisce il mattoncino mancante. È un ciclo osserva–agisci–verifica.', 'Comparamos la cuadrícula real con el plan. El especialista responsable reabre la tarea y repone el bloque faltante. Es un ciclo observar–actuar–comprobar.', 'Comparamos a grade real com o plano. O especialista responsável reabre a tarefa e repõe o bloco ausente. É um ciclo observar–agir–verificar.'],
   'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!': ['Ein gemeinsamer Plan zeigt jedem Spezialisten seine Aufgabe und die nötigen Vorarbeiten. Ohne Abhängigkeiten könnte ein Agent Augen vor dem Kopf hinzufügen!', 'Un plan partagé indique à chaque spécialiste quoi faire et quelles pièces doivent exister d’abord. Sans dépendances, un agent pourrait poser les yeux avant la tête !', 'Un piano condiviso indica a ogni specialista cosa fare e quali parti servono prima. Senza dipendenze un agente potrebbe aggiungere gli occhi prima della testa!', 'Un plan compartido indica a cada especialista qué hacer y qué piezas deben existir antes. ¡Sin dependencias un agente podría añadir ojos antes de la cabeza!', 'Um plano compartilhado indica a cada especialista o que fazer e quais peças devem existir antes. Sem dependências, um agente poderia adicionar olhos antes da cabeça!'],
+  'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.': ['Probiere Körperfarbe, Art oder Schiffstyp und ein Merkmal: etwa „violetter Brachiosaurus“ oder „blauer Erkunder mit breiten Flügeln“. Erstelle dann einen neuen Plan. Nicht angegebene Entscheidungen werden als Annahmen gezeigt.', 'Essayez une couleur, une espèce ou un type de vaisseau et une caractéristique : par exemple « brachiosaure violet » ou « explorateur bleu aux ailes larges ». Créez ensuite un plan. Les choix non précisés sont affichés comme hypothèses.', 'Prova un colore, una specie o un tipo di nave e una caratteristica: ad esempio «brachiosauro viola» o «esploratrice blu con ali larghe». Poi crea un piano. Le scelte non specificate sono indicate come ipotesi.', 'Prueba un color, una especie o un tipo de nave y una característica: por ejemplo «braquiosaurio morado» o «exploradora azul con alas anchas». Después crea un plan. Las opciones no especificadas aparecen como supuestos.', 'Experimente uma cor, espécie ou tipo de nave e uma característica: por exemplo «braquiossauro roxo» ou «exploradora azul com asas largas». Depois crie um plano. Escolhas não especificadas aparecem como suposições.'],
   'In local mode all five agents follow rules, not language models. A selected cloud or local model can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.': ['Im lokalen Modus folgen alle fünf Agenten Regeln, keinen Sprachmodellen. Ein ausgewähltes Cloud- oder lokales Modell kann den Auftrag interpretieren; alle fünf Agenten arbeiten weiterhin lokal. Unsere Nachrichten erklären Programmentscheidungen, keine verborgenen Modellgedanken.', 'En mode local, les cinq agents suivent des règles, pas des modèles de langage. Un modèle cloud ou local peut interpréter la consigne ; les cinq agents travaillent toujours localement. Nos messages expliquent les décisions du programme, pas les pensées cachées du modèle.', 'In modalità locale tutti e cinque gli agenti seguono regole, non modelli linguistici. Un modello cloud o locale può interpretare la richiesta; gli agenti lavorano comunque localmente. I messaggi spiegano decisioni del programma, non pensieri nascosti del modello.', 'En modo local los cinco agentes siguen reglas, no modelos de lenguaje. Un modelo local o en la nube puede interpretar las instrucciones; los agentes siguen trabajando localmente. Los mensajes explican decisiones del programa, no pensamientos ocultos del modelo.', 'No modo local os cinco agentes seguem regras, não modelos de linguagem. Um modelo local ou em nuvem pode interpretar as instruções; os agentes continuam trabalhando localmente. As mensagens explicam decisões do programa, não pensamentos ocultos do modelo.'],
   'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.': ['Ich bin eine lokale Lernhilfe, kein offenes Chatmodell. Frage auf Englisch nach Aufgaben, Abhängigkeiten, Auftrag, Reparatur, KI-Modus oder Kosten.', 'Je suis un guide pédagogique local, pas un modèle de conversation ouvert. Posez en anglais des questions sur les rôles, dépendances, consigne, réparation, mode IA ou coût.', 'Sono una guida didattica locale, non un modello di chat aperto. Chiedi in inglese di ruoli, dipendenze, richiesta, riparazione, modalità IA o costi.', 'Soy una guía didáctica local, no un modelo de chat abierto. Pregunta en inglés por tareas, dependencias, instrucciones, reparación, modo IA o costes.', 'Sou um guia didático local, não um modelo de chat aberto. Pergunte em inglês sobre tarefas, dependências, instruções, reparo, modo IA ou custos.'],
   'Build controls': ['Bausteuerung', 'Commandes de construction', 'Controlli di costruzione', 'Controles de construcción', 'Controles de construção'],
@@ -314,6 +333,11 @@ export function setLanguage(next: Language) { language = next; }
 export function getLanguage() { return language; }
 export function translate(text: string): string {
   if (language === 'en') return text;
+  const suffix = ' Service availability and authentication are unverified. Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
+  if (text.endsWith(suffix)) {
+    const prefix = text.slice(0, -suffix.length);
+    if (catalog[prefix]) return `${translate(prefix)} ${translate(suffix.trim())}`;
+  }
   const index = languages.indexOf(language);
   const ask = /^Ask (BuildBot|PlanBot|FrameBot|DetailBot|CheckBot) about its job$/.exec(text);
   if (ask) return ['', `Frage ${ask[1]} nach seiner Aufgabe`, `Interroger ${ask[1]} sur son rôle`,
@@ -369,10 +393,18 @@ export function elapsedText(seconds: number): string {
   ][languages.indexOf(language)];
 }
 
-export function translateActivity(message: string): string {
+export function translateActivity(message: string, localTemplate = false): string {
   const index = languages.indexOf(language);
   if (!index) return message;
-  let match = /^This design needs (\d+) bricks, above your (\d+)-brick budget\. Increase the budget or simplify the brief\.$/.exec(message);
+  if (message.startsWith('AI mission decision:')) return message;
+  const taskName = (name: string) => localTemplate ? name.split(', ').map(translate).join(', ') : name;
+  let match = /^Added to the scene at grid offset \((-?\d+), (-?\d+)\)\. Existing bricks remain in place\.$/.exec(message);
+  if (match) return [message, `Zur Szene bei Rasterversatz (${match[1]}, ${match[2]}) hinzugefügt. Bestehende Steine bleiben an ihrem Platz.`,
+    `Ajouté à la scène au décalage (${match[1]}, ${match[2]}). Les briques existantes restent en place.`,
+    `Aggiunto alla scena con scostamento (${match[1]}, ${match[2]}). I mattoncini esistenti restano al loro posto.`,
+    `Añadido a la escena con desplazamiento (${match[1]}, ${match[2]}). Los bloques existentes permanecen en su lugar.`,
+    `Adicionado à cena com deslocamento (${match[1]}, ${match[2]}). Os blocos existentes permanecem no lugar.`][index];
+  match = /^This design needs (\d+) bricks, above your (\d+)-brick budget\. Increase the budget or simplify the brief\.$/.exec(message);
   if (match) return [message, `Dieser Entwurf benötigt ${match[1]} Steine und überschreitet dein Budget von ${match[2]}. Erhöhe das Budget oder vereinfache den Auftrag.`,
     `Cette création nécessite ${match[1]} briques et dépasse votre budget de ${match[2]}. Augmentez le budget ou simplifiez la consigne.`,
     `Questo progetto richiede ${match[1]} mattoncini e supera il budget di ${match[2]}. Aumenta il budget o semplifica la richiesta.`,
@@ -432,46 +464,67 @@ export function translateActivity(message: string): string {
     `CheckBot ha trovato ${match[1]} mattoncini mancanti. Li restituisco alle attività originali; PlanBot ricontrollerà le dipendenze.`,
     `CheckBot encontró ${match[1]} bloques faltantes. Los devuelvo a sus tareas originales; PlanBot volverá a revisar las dependencias.`,
     `CheckBot encontrou ${match[1]} blocos ausentes. Devolvo-os às tarefas originais; PlanBot verificará novamente as dependências.`][index];
+  match = /^I received (\d+) missing planned bricks? for (.+)\. Reclaiming my original task\.$/.exec(message);
+  if (match) return [message, `Ich erhielt ${match[1]} fehlende geplante Steine für ${taskName(match[2])}. Ich übernehme meine ursprüngliche Aufgabe erneut.`,
+    `J’ai reçu ${match[1]} briques prévues manquantes pour ${taskName(match[2])}. Je reprends ma tâche initiale.`,
+    `Ho ricevuto ${match[1]} mattoncini previsti mancanti per ${taskName(match[2])}. Riprendo la mia attività originale.`,
+    `Recibí ${match[1]} bloques previstos faltantes para ${taskName(match[2])}. Retomo mi tarea original.`,
+    `Recebi ${match[1]} blocos previstos ausentes para ${taskName(match[2])}. Retomo minha tarefa original.`][index];
+  match = /^(\d+)\/(\d+) checks passed\. The finished model passed inspection\. BuildBot, all planned work is accepted\.$/.exec(message);
+  if (match) return [message, `${match[1]}/${match[2]} Prüfungen bestanden. Das fertige Modell hat die Prüfung bestanden. BuildBot, alle geplanten Arbeiten sind abgenommen.`,
+    `${match[1]}/${match[2]} vérifications réussies. Le modèle terminé a passé l’inspection. BuildBot, tout le travail prévu est accepté.`,
+    `${match[1]}/${match[2]} verifiche superate. Il modello finito ha superato l’ispezione. BuildBot, tutto il lavoro previsto è accettato.`,
+    `${match[1]}/${match[2]} comprobaciones superadas. El modelo terminado pasó la inspección. BuildBot, se acepta todo el trabajo previsto.`,
+    `${match[1]}/${match[2]} verificações aprovadas. O modelo concluído passou na inspeção. BuildBot, todo o trabalho previsto foi aceito.`][index];
+  match = /^(\d+)\/(\d+) checks passed\. Needs attention: (.+)\. BuildBot, use my report to coordinate the next action\.$/.exec(message);
+  if (match) {
+    const checks = match[3].split(', ').map(translate).join(', ');
+    return [message, `${match[1]}/${match[2]} Prüfungen bestanden. Aufmerksamkeit nötig: ${checks}. BuildBot, koordiniere die nächste Aktion anhand meines Berichts.`,
+      `${match[1]}/${match[2]} vérifications réussies. À examiner : ${checks}. BuildBot, utilise mon rapport pour coordonner la suite.`,
+      `${match[1]}/${match[2]} verifiche superate. Da esaminare: ${checks}. BuildBot, usa il mio rapporto per coordinare la prossima azione.`,
+      `${match[1]}/${match[2]} comprobaciones superadas. Requiere atención: ${checks}. BuildBot, usa mi informe para coordinar la siguiente acción.`,
+      `${match[1]}/${match[2]} verificações aprovadas. Requer atenção: ${checks}. BuildBot, use meu relatório para coordenar a próxima ação.`][index];
+  }
   match = /^I routed "(.+)" to (FrameBot|DetailBot); PlanBot, verify its prerequisites before placement\.$/.exec(message);
-  if (match) return [
+  if (match) { match[1] = taskName(match[1]); return [
     message, `Ich habe „${match[1]}“ an ${match[2]} übergeben; PlanBot, prüfe zuerst die Voraussetzungen.`,
     `J’ai confié « ${match[1]} » à ${match[2]} ; PlanBot, vérifie d’abord les prérequis.`,
     `Ho assegnato «${match[1]}» a ${match[2]}; PlanBot, verifica prima i prerequisiti.`,
     `Asigné «${match[1]}» a ${match[2]}; PlanBot, verifica primero los requisitos.`,
     `Encaminhei «${match[1]}» para ${match[2]}; PlanBot, verifique primeiro os pré-requisitos.`,
-  ][index];
+  ][index]; }
   match = /^(All dependencies for|No dependencies block) "(.+)" are satisfied\. (FrameBot|DetailBot) may proceed\.$/.exec(message);
-  if (match) return [
+  if (match) { match[2] = taskName(match[2]); return [
     message, `Die Voraussetzungen für „${match[2]}“ sind erfüllt. ${match[3]} kann beginnen.`,
     `Les prérequis de « ${match[2]} » sont satisfaits. ${match[3]} peut commencer.`,
     `I prerequisiti di «${match[2]}» sono soddisfatti. ${match[3]} può iniziare.`,
     `Se cumplen los requisitos de «${match[2]}». ${match[3]} puede comenzar.`,
     `Os pré-requisitos de «${match[2]}» foram atendidos. ${match[3]} pode começar.`,
-  ][index];
+  ][index]; }
   match = /^I accepted the "(.+)" handoff \((\d+) bricks\)\.$/.exec(message);
-  if (match) return [
+  if (match) { match[1] = taskName(match[1]); return [
     message, `Ich habe die Übergabe „${match[1]}“ angenommen (${match[2]} Steine).`,
     `J’ai accepté le transfert « ${match[1]} » (${match[2]} briques).`,
     `Ho accettato il passaggio «${match[1]}» (${match[2]} mattoncini).`,
     `Acepté el relevo «${match[1]}» (${match[2]} bloques).`,
     `Aceitei a transferência «${match[1]}» (${match[2]} blocos).`,
-  ][index];
+  ][index]; }
   match = /^Finished (.+)\. Shared board updated; ready work returns to BuildBot\.$/.exec(message);
-  if (match) return [
+  if (match) { match[1] = taskName(match[1]); return [
     message, `${match[1]} fertig. Die Tafel ist aktualisiert; bereite Aufgaben gehen an BuildBot.`,
     `${match[1]} terminé. Tableau mis à jour ; les tâches prêtes reviennent à BuildBot.`,
     `${match[1]} completato. Bacheca aggiornata; le attività pronte tornano a BuildBot.`,
     `${match[1]} terminado. Tablero actualizado; las tareas listas vuelven a BuildBot.`,
     `${match[1]} concluído. Quadro atualizado; tarefas prontas voltam para BuildBot.`,
-  ][index];
+  ][index]; }
   match = /^Reached the halfway mark on (.+): (\d+)\/(\d+) bricks placed\.$/.exec(message);
-  if (match) return [
+  if (match) { match[1] = taskName(match[1]); return [
     message, `Halbzeit bei ${match[1]}: ${match[2]}/${match[3]} Steine gesetzt.`,
     `Mi-parcours pour ${match[1]} : ${match[2]}/${match[3]} briques placées.`,
     `Metà di ${match[1]}: ${match[2]}/${match[3]} mattoncini posati.`,
     `Mitad de ${match[1]}: ${match[2]}/${match[3]} bloques colocados.`,
     `Metade de ${match[1]}: ${match[2]}/${match[3]} blocos colocados.`,
-  ][index];
+  ][index]; }
   match = /^(\d+) planned bricks? missing\.$/.exec(message);
   if (match) return [message, `${match[1]} geplante Steine fehlen.`, `${match[1]} briques prévues manquent.`,
     `Mancano ${match[1]} mattoncini previsti.`, `Faltan ${match[1]} bloques previstos.`, `Faltam ${match[1]} blocos previstos.`][index];
@@ -491,6 +544,33 @@ export function translateActivity(message: string): string {
     `${match[1]} de ${match[2]} bloques permitidos. No indica el coste del modelo.`,
     `${match[1]} de ${match[2]} blocos permitidos. Não indica custo do modelo.`][index];
   return translate(message);
+}
+
+export function translateCheckDetail(message: string, objectNames?: string[]): string {
+  const index = languages.indexOf(language);
+  if (!index) return message;
+  if (objectNames?.length && message.endsWith('. Not a physical stability simulation.')) {
+    const body = message.slice(0, -'. Not a physical stability simulation.'.length);
+    const suffix = ['', 'über Flächen verbunden', 'connectées par leurs faces', 'collegati per faccia',
+      'conectados por caras', 'conectados pelas faces'][index];
+    let remaining = body;
+    const parts: string[] = [];
+    for (const [position, name] of objectNames.entries()) {
+      const prefix = `${position ? '; ' : ''}${name}: `;
+      if (!remaining.startsWith(prefix)) return message;
+      remaining = remaining.slice(prefix.length);
+      const match = /^(\d+\/\d+) face-connected/.exec(remaining);
+      if (!match) return message;
+      parts.push(`${name}: ${match[1]} ${suffix}`);
+      remaining = remaining.slice(match[0].length);
+    }
+    if (remaining) return message;
+    const detail = parts.join('; ');
+    return [message, `${detail}. Keine Simulation physischer Stabilität.`, `${detail}. Ce n’est pas une simulation de stabilité physique.`,
+      `${detail}. Non è una simulazione di stabilità fisica.`, `${detail}. No es una simulación de estabilidad física.`,
+      `${detail}. Não é uma simulação de estabilidade física.`][index];
+  }
+  return translateActivity(message);
 }
 
 const originalText = new WeakMap<Text, { source: string; rendered: string }>();

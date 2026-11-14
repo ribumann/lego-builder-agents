@@ -4,7 +4,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
-import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateInterface, type Language } from './i18n';
+import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, type Language } from './i18n';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -131,6 +131,7 @@ app.innerHTML = `
 
 let noticeSource = '';
 let answerSource: { id: AgentId; response: string } | undefined;
+let sceneErrorDetail = '';
 try {
   const savedLanguage = localStorage.getItem('bricklab-language');
   if (languages.some(language => language === savedLanguage)) setLanguage(savedLanguage as Language);
@@ -142,6 +143,7 @@ const applyLanguage = () => {
   translateInterface(app);
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
+  if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${sceneErrorDetail}. ${translate('You can still build using the task board and text inspection below.')}`;
   const statuses = [['#planner-status', plannerMessage], ['#local-planner-status', localPlanner.message],
     ['#azure-planner-status', azurePlanner.message]] as const;
   for (const [selector, message] of statuses) {
@@ -212,12 +214,14 @@ try {
   scene = new Workbench($('#canvas-host'), (brick: Brick) => {
     const info = $('#brick-info');
     info.hidden = false;
-    info.textContent = `${brick.object ? `${brick.object} · ` : ''}${brick.part} · placed by ${AGENTS[brick.agent].name} · grid (${brick.x}, ${brick.y}, ${brick.z}) · ${brick.width ?? 1} × ${brick.height ?? 1} × ${brick.depth ?? 1} cells`;
+    const part = team?.plan.spec.model === 'custom' ? brick.part : translate(brick.part);
+    info.textContent = `${brick.object ? `${brick.object} · ` : ''}${part} · ${translate('placed by')} ${AGENTS[brick.agent].name} · ${translate('grid')} (${brick.x}, ${brick.y}, ${brick.z}) · ${brick.width ?? 1} × ${brick.height ?? 1} × ${brick.depth ?? 1} ${translate('cells')}`;
     setTimeout(() => { info.hidden = true; }, 5000);
   });
 } catch (error) {
   $('#scene-error').hidden = false;
-  $('#scene-error').textContent = `3D is unavailable: ${error instanceof Error ? error.message : 'WebGL is not supported'}. You can still build using the task board and text inspection below.`;
+  sceneErrorDetail = error instanceof Error ? error.message : 'WebGL is not supported';
+  $('#scene-error').textContent = `${translate('3D is unavailable:')} ${sceneErrorDetail}. ${translate('You can still build using the task board and text inspection below.')}`;
 }
 
 function save() {
@@ -270,7 +274,7 @@ function render() {
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
   $('#transport-note').textContent = planning ? 'One bounded planning request. No template fallback; the crew executes locally.'
-    : running ? `${speed}× playback · Both builders observe the shared board each turn.`
+    : running ? `${speed}× ${translate('playback')} · ${translate('Both builders observe the shared board each turn.')}`
     : status === 'complete' ? 'Try the repair challenge below, or change your brief.'
     : status === 'damaged' ? 'The inspector noticed a problem. Ask the team to repair it.'
     : team ? 'Review the task board, then start building.' : 'Make a plan, then give your crew the go-ahead.';
@@ -280,7 +284,7 @@ function render() {
   }
   if (team && !count) {
     const name = team.plan.spec.design?.name ?? `${team.plan.spec.color} ${team.plan.spec.model}`;
-    $('#scene-caption').innerHTML = `<strong>${esc(name)}. Your idea, their teamwork.</strong><span>Blueprint ready · ${total} bricks · ${team.plan.tasks.length} delegated tasks</span>`;
+    $('#scene-caption').innerHTML = `<strong>${esc(name)}. ${esc(translate('Your idea, their teamwork.'))}</strong><span>${esc(translate('Blueprint ready'))} · ${total} ${esc(translate('bricks'))} · ${team.plan.tasks.length} ${esc(translate('delegated tasks'))}</span>`;
   }
   const phase = !team ? 'brief' : status === 'planned' ? 'plan' : ['complete','damaged'].includes(status!) ? 'learn' : 'build';
   document.querySelectorAll<HTMLElement>('.mission-step').forEach(el => el.classList.toggle('current', el.dataset.phase === phase));
@@ -303,7 +307,7 @@ function render() {
       { agent: 'detail' as const, kind: 'observe', message: 'I assemble supports and finishing touches after their foundations are ready. We share one task board.', tick: 0 },
       { agent: 'check' as const, kind: 'observe', message: 'I inspect the finished model and check for missing bricks.', tick: 0 },
     ];
-    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(translate(e.kind))} · ${esc(translate('turn'))} ${e.tick}</span></div><p>${esc(translateActivity(e.message))}</p></article>`).join('');
+    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(translate(e.kind))} · ${esc(translate('turn'))} ${e.tick}</span></div><p>${esc(translateActivity(e.message, !!team && team.plan.spec.model !== 'custom'))}</p></article>`).join('');
   }
   $('#task-list').innerHTML = team ? team.plan.tasks.map(task => {
     const done = team!.taskDone(task);
@@ -313,13 +317,14 @@ function render() {
     return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(taskName(task.label))}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `${esc(translate('Waits for:'))} ${task.depends.map(id => esc(taskName(team!.plan.tasks.find(t => t.id === id)?.label ?? id))).join(', ')}` : esc(translate(done ? 'Shared board updated' : 'Dependencies ready'))}</small></div></article>`;
   }).join('') : '<p class="empty-note">Make a plan to see the delegated jobs and their dependencies here.</p>';
   const checks = team?.checks ?? [];
-  $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(translate(c.label))}</strong><small>${esc(translateActivity(c.detail))}</small></div></div>`).join('')
+  $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(translate(c.label))}</strong><small>${esc(translateCheckDetail(c.detail, team?.plan.spec.design?.objects?.map(object => object.name)))}</small></div></div>`).join('')
     : '<p class="empty-note">CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.</p>';
   $('#inspection-result').textContent = team ? `${checks.filter(c => c.pass).length}/${checks.length} ${translate('checks')}` : 'Waiting for a build';
   const replay = $<HTMLInputElement>('#replay');
   replay.disabled = status !== 'complete' && status !== 'damaged';
   replay.max = String(Math.max(1, count));
   if (!replaying) replay.value = String(count || 1);
+  if (replaying && team) $('#replay-label').textContent = `${translate('Replay:')} ${replay.value} / ${count} ${translate('placed bricks. Your saved build is unchanged.')}`;
   if (status === 'complete' && !replaying) $('#replay-label').textContent = 'Scrub through the actual order bricks were placed.';
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
 }
@@ -563,7 +568,7 @@ $('#replay').addEventListener('input', () => {
   const count = Number($<HTMLInputElement>('#replay').value);
   scene?.sync([...team.bricks.values()].slice(0, count));
   scene?.showBlueprint(false);
-  $('#replay-label').textContent = `Replay: ${count} / ${team.bricks.size} placed bricks. Your saved build is unchanged.`;
+  render();
 });
 $('#live-view').addEventListener('click', () => { replaying = false; scene?.showBlueprint(showGhost); render(); });
 for (const tab of ['live', 'tasks']) $(`#tab-${tab}`).addEventListener('click', () => {

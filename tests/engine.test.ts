@@ -66,6 +66,11 @@ test('translated guide examples select the advertised offline templates', () => 
   for (const name of ['arancione', 'naranja', 'laranja', 'orangefarbenes']) {
     assert.equal(parseBrief('jurassic', `${name} stegosaurus`).spec.color, 'orange');
   }
+  for (const prompt of ['blauer Erkunder mit breiten Flügeln', 'explorateur bleu aux ailes larges',
+    'esploratrice blu con ali larghe', 'exploradora azul con alas anchas', 'exploradora azul com asas largas']) {
+    const ship = parseBrief('space', prompt).spec;
+    assert.deepEqual([ship.model, ship.color, ship.wideWings], ['explorer', 'blue', true]);
+  }
   assert.throws(() => parseBrief('jurassic', 'Raumschiff'), /Switch to Space/);
   assert.throws(() => parseBrief('space', 'stégosaure'), /Switch to Jurassic/);
 });
