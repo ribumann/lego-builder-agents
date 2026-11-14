@@ -283,7 +283,7 @@ function render() {
     $('#scene-caption').innerHTML = `<strong>${esc(translate('A big idea starts with a small brief.'))}</strong><span>${esc(translate('The translucent bricks are a preview, not an agent-built result.'))}</span>`;
   }
   if (team && !count) {
-    const name = team.plan.spec.design?.name ?? `${team.plan.spec.color} ${team.plan.spec.model}`;
+    const name = team.plan.spec.design?.name ?? `${translate(team.plan.spec.color)} ${translate(team.plan.spec.model)}`;
     $('#scene-caption').innerHTML = `<strong>${esc(name)}. ${esc(translate('Your idea, their teamwork.'))}</strong><span>${esc(translate('Blueprint ready'))} · ${total} ${esc(translate('bricks'))} · ${team.plan.tasks.length} ${esc(translate('delegated tasks'))}</span>`;
   }
   const phase = !team ? 'brief' : status === 'planned' ? 'plan' : ['complete','damaged'].includes(status!) ? 'learn' : 'build';

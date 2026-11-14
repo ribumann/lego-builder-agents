@@ -126,6 +126,35 @@ test('known server status is localized without changing external messages', asyn
   await expect(page.locator('#language')).toHaveValue('fr');
 });
 
+test('common planning errors are localized in every language without replacing the scene', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.route('**/api/plan', route => route.fulfill({ status: 429, json: {
+    error: 'The coordinator is already planning. Wait for that request to finish.',
+  } }));
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#brief').fill('green stegosaurus');
+  await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  expect(saved).not.toBeNull();
+  await page.locator('#settings').click();
+  await page.locator('#choose-copilot').click();
+  for (const [language, expected] of [
+    ['en', 'already planning'], ['de', 'plant bereits'], ['fr', 'planifie déjà'],
+    ['it', 'sta già pianificando'], ['es', 'ya está planificando'], ['pt', 'já está planejando'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#brief').fill('Original brief');
+    await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+    await expect(page.locator('#notice')).toContainText(expected);
+    await expect(page.locator('#brief')).toHaveValue('Original brief');
+    expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+  }
+});
+
 test('translated guide describes template limitations and model consent', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
