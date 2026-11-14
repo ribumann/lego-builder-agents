@@ -29,6 +29,8 @@ test('extended insights are optional, read-only and show actual construction and
   await expect(panel.locator('dd').nth(0)).toHaveText(brief);
   await expect(panel.locator('img')).toHaveCount(0);
   await expect(panel.locator('dd').nth(2)).toHaveText('0 / 5');
+  await expect(panel.locator('dt').nth(3)).toHaveText('Not currently placed');
+  await expect(panel.locator('dd').nth(3)).toHaveText('5');
   await expect(panel.locator('[data-insight-agent="detail"]')).toContainText('Waiting for prerequisites');
   await page.locator('#step').click();
   await expect(panel.locator('dd').nth(2)).toHaveText('1 / 5');
@@ -38,6 +40,7 @@ test('extended insights are optional, read-only and show actual construction and
   await expect(panel.locator('dd').nth(2)).toHaveText('5 / 5');
   await expect(panel.locator('[data-insight-agent="check"]')).toContainText('passed inspection');
   await page.locator('#damage').click();
+  await expect(panel.locator('dt').nth(3)).toHaveText('Not currently placed');
   await expect(panel.locator('dd').nth(3)).toHaveText('2');
   await page.locator('#repair').click();
   await expect(panel.locator('dd').nth(3)).toHaveText('0');
@@ -48,18 +51,19 @@ test('extended insights are optional, read-only and show actual construction and
   await page.setViewportSize({ width: 390, height: 844 });
   const ownedCopy = ':scope > p, .insight-context > section > p:not(:has(code)), dt, tbody th > p';
   const englishCopy = await panel.locator(ownedCopy).allTextContents();
-  for (const [language, heading, memory, latest] of [
-    ['en', 'Extended agent insights', 'Shared memory', 'Latest recorded action'],
-    ['de', 'Erweiterte Agenteneinblicke', 'Gemeinsamer Speicher', 'Letzte protokollierte Aktion'],
-    ['fr', 'Comprendre les agents en détail', 'Mémoire partagée', 'Dernière action enregistrée'],
-    ['it', 'Approfondimenti sugli agenti', 'Memoria condivisa', 'Ultima azione registrata'],
-    ['es', 'Información avanzada sobre agentes', 'Memoria compartida', 'Última acción registrada'],
-    ['pt', 'Conheça os agentes em detalhe', 'Memória compartilhada', 'Última ação registrada'],
+  for (const [language, heading, memory, latest, missing] of [
+    ['en', 'Extended agent insights', 'Shared memory', 'Latest recorded action', 'Not currently placed'],
+    ['de', 'Erweiterte Agenteneinblicke', 'Gemeinsamer Speicher', 'Letzte protokollierte Aktion', 'Derzeit nicht gesetzt'],
+    ['fr', 'Comprendre les agents en détail', 'Mémoire partagée', 'Dernière action enregistrée', 'Actuellement non placées'],
+    ['it', 'Approfondimenti sugli agenti', 'Memoria condivisa', 'Ultima azione registrata', 'Attualmente non posati'],
+    ['es', 'Información avanzada sobre agentes', 'Memoria compartida', 'Última acción registrada', 'No colocados actualmente'],
+    ['pt', 'Conheça os agentes em detalhe', 'Memória compartilhada', 'Última ação registrada', 'Não colocados no momento'],
   ]) {
     await page.locator('#language').selectOption(language);
     await expect(summary).toHaveText(heading);
     await expect(panel.getByRole('heading', { name: memory })).toBeVisible();
     await expect(panel.getByRole('columnheader', { name: latest })).toBeVisible();
+    await expect(panel.locator('dt').nth(3)).toHaveText(missing);
     await expect(panel.locator('dd').nth(0)).toHaveText(brief);
     if (language !== 'en')
       for (const text of await panel.locator(ownedCopy).allTextContents()) expect(englishCopy).not.toContain(text);

@@ -472,7 +472,7 @@ function renderInsights() {
     ['Current brief', activeBrief],
     ['Planning source', translate(sourceNames[view.source])],
     ['Placed / planned bricks', `${view.placed} / ${view.planned}`],
-    ['Not yet placed', String(view.missing)],
+    ['Not currently placed', String(view.missing)],
     ['Completed / total tasks', `${view.completedTasks} / ${view.totalTasks}`],
     ['Dependency links', String(view.dependencies)],
   ].map(([label, value]) => `<dt>${text(label)}</dt><dd>${esc(value)}</dd>`).join('');

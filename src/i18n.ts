@@ -19,7 +19,7 @@ const catalog: Record<string, Translations> = {
   'Imported model decisions': ['Importierte Modellentscheidungen', 'Décisions de modèle importées', 'Decisioni del modello importate', 'Decisiones de modelo importadas', 'Decisões de modelo importadas'],
   'Local rule-based agents': ['Lokale regelbasierte Agenten', 'Agents locaux à règles', 'Agenti locali basati su regole', 'Agentes locales basados en reglas', 'Agentes locais baseados em regras'],
   'Placed / planned bricks': ['Gesetzte / geplante Steine', 'Briques placées / prévues', 'Mattoncini posati / previsti', 'Bloques colocados / planeados', 'Blocos colocados / planejados'],
-  'Not yet placed': ['Noch nicht gesetzt', 'Pas encore placées', 'Non ancora posati', 'Aún no colocados', 'Ainda não colocados'],
+  'Not currently placed': ['Derzeit nicht gesetzt', 'Actuellement non placées', 'Attualmente non posati', 'No colocados actualmente', 'Não colocados no momento'],
   'Completed / total tasks': ['Erledigte / gesamte Aufgaben', 'Tâches terminées / totales', 'Attività completate / totali', 'Tareas completadas / totales', 'Tarefas concluídas / totais'],
   'Dependency links': ['Abhängigkeitsverknüpfungen', 'Liens de dépendance', 'Legami di dipendenza', 'Enlaces de dependencia', 'Vínculos de dependência'],
   'Coordinates ready work and reports completion.': ['Verteilt bereite Arbeit und meldet den Abschluss.', 'Coordonne le travail prêt et signale son achèvement.', 'Coordina il lavoro pronto e ne segnala il completamento.', 'Coordina el trabajo listo e informa de su finalización.', 'Coordena o trabalho pronto e informa a conclusão.'],
