@@ -24,6 +24,8 @@ test('known activity templates preserve user-defined task names', () => {
   assert.match(translateActivity('I accepted the "body" handoff (5 bricks).', true), /corps/);
   assert.match(translateActivity('I received 2 missing planned bricks for body, eyes. Reclaiming my original task.', true), /corps, yeux/);
   assert.equal(translateActivity('AI mission decision: Lighthouse 🚀'), 'AI mission decision: Lighthouse 🚀');
+  assert.match(translateActivity('Appended Maison 🚀, Tour at offset -4,10.'), /Maison 🚀, Tour/);
+  assert.match(translateActivity('Loaded AI mission attributed to Model 🚀. Imported files are not proof that a model ran.'), /Model 🚀/);
   const details = translateCheckDetail('Lighthouse 🚀: 5/5 face-connected; Hill: 2/2 face-connected. Not a physical stability simulation.', ['Lighthouse 🚀', 'Hill']);
   assert.match(details, /Lighthouse 🚀: 5\/5/);
   assert.match(details, /connectées par leurs faces/);
@@ -52,10 +54,14 @@ test('damage, repair and inspection activity is localized in every non-English l
 
 test('known Local AI status translates while preserving unknown provider text', () => {
   const status = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL to opt in. Service availability and authentication are unverified. Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
+  const off = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 to opt in.';
+  const notice = 'Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
   for (const language of languages.slice(1)) {
     setLanguage(language);
     assert.notEqual(translate(status), status);
     assert.match(translate(status), /OLLAMA_NO_CLOUD=1/);
+    assert.equal(translate(`${off} ${notice}`), `${translate(off)} ${translate(notice)}`);
+    assert.equal(translate(`Provider says 🚀 ${notice}`), `Provider says 🚀 ${notice}`);
     assert.equal(translate('Provider says 🚀'), 'Provider says 🚀');
   }
   setLanguage('en');
