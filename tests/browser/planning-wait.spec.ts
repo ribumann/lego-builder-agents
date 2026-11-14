@@ -102,6 +102,34 @@ test('a streamed planning result uses the same single request', async ({ page })
   expect(calls).toBe(1);
 });
 
+test('compatible AI is explicit, localized and preserves attribution', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', copilot: false, planner: { state: 'off', message: 'Off' },
+    compatiblePlanner: { enabled: true, state: 'configured',
+      message: 'Compatible AI is configured. Availability and authentication are unverified; only explicit planning sends a prompt.' },
+  } }));
+  await page.route('**/api/compatible-plan', route => {
+    calls++;
+    expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon' });
+    const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+      design: { name: 'Beacon', bricks: [{ x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' }] } };
+    return route.fulfill({ contentType: 'application/x-ndjson', body: `${JSON.stringify({ type: 'result', spec })}\n` });
+  });
+  await page.goto('/');
+  await page.locator('#language').selectOption('fr');
+  await page.locator('#settings').click();
+  await expect(page.locator('#compatible-planner-status')).toContainText('ne sont pas vérifiées');
+  await page.locator('#choose-compatible').click();
+  expect(calls).toBe(0);
+  await page.locator('#brief').fill('A blue beacon');
+  await expect(page.locator('#brief-help')).toContainText('service configuré');
+  await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  await expect(page.locator('#stage-status')).toContainText('Plan prêt');
+  expect(calls).toBe(1);
+  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).source)).toBe('compatible');
+});
+
 test('hosted Azure planning is separate, explicit, and preserves attribution', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {

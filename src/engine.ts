@@ -45,7 +45,7 @@ export interface Plan {
   spec: Spec;
   tasks: BuildTask[];
   assumptions: string[];
-  source: 'local' | 'copilot' | 'local-ai' | 'github-models' | 'azure';
+  source: 'local' | 'copilot' | 'local-ai' | 'github-models' | 'azure' | 'compatible';
 }
 export interface AgentDecision {
   agent: ModelAgentId;
@@ -106,10 +106,34 @@ const models: Model[] = ['stegosaurus', 'brachiosaurus', 'explorer', 'cargo'];
 const colorNames = Object.keys(COLORS) as Color[];
 const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
+// Recognize the vocabulary shown in the translated guide, without changing the saved brief.
+function offlineVocabulary(prompt: string): string {
+  const text = prompt.toLowerCase();
+  const additions: string[] = [];
+  const words: [RegExp, string][] = [
+    [/brachiosaur(?:ier|e|o)?|braquiosaurio|braquiossauro/u, 'brachiosaurus'],
+    [/stegosaur(?:ier|e|o)?|stégosaure|estegosaurio|estegossauro/u, 'stegosaurus'],
+    [/(?:fracht(?:schiff)?|cargo|carga|cargaison)/u, 'cargo'],
+    [/(?:explorateur|exploratrice|explorador|exploradora|esploratore|esploratrice)/u, 'explorer'],
+    [/(?:grün(?:e|er|es|en)?|vert(?:e)?|verde)/u, 'green'],
+    [/(?:violett(?:e|er|es|en)?|lila|violet(?:te)?|viola|morado|morada|roxo|roxa)/u, 'purple'],
+    [/(?:blau(?:e|er|es|en)?|bleu(?:e)?|blu|azul)/u, 'blue'],
+    [/(?:weiß(?:e|er|es|en)?|blanc(?:he)?|bianc[oa]|blanc[oa]|branc[oa])/u, 'white'],
+    [/(?:rot(?:e|er|es|en)?|rouge|ross[oa]|roj[oa]|vermelh[oa])/u, 'red'],
+    [/(?:lang(?:e|er|en|em)?\s+schwanz|longue?\s+queue|coda\s+lunga|cola\s+larga|cauda\s+longa)/u, 'long tail'],
+    [/(?:breite?\s+flügel|larges?\s+ailes|ailes\s+larges|ali\s+larghe|alas\s+anchas|asas\s+largas)/u, 'wide wings'],
+  ];
+  for (const [pattern, canonical] of words) {
+    const bounded = new RegExp(`(?<!\\p{L})(?:${pattern.source})(?!\\p{L})`, 'u');
+    if (bounded.test(text)) additions.push(canonical);
+  }
+  return `${text} ${additions.join(' ')}`;
+}
+
 export function parseBrief(world: World, prompt: string): { spec: Spec; assumptions: string[] } {
   if (!prompt.trim()) throw new Error('Give the team a brief first. Try one of the example ideas.');
   if (prompt.length > 1000) throw new Error('Keep your brief under 1,000 characters.');
-  const text = prompt.toLowerCase();
+  const text = offlineVocabulary(prompt);
   if (world === 'jurassic' && /\b(spaceship|spacecraft|shuttle)\b/.test(text))
     throw new Error('This is the dinosaur mission. Switch to Space dock to build a spaceship.');
   if (world === 'space' && /\b(dinosaur|stegosaurus|brachiosaurus)\b/.test(text))
@@ -527,7 +551,7 @@ export function restoreSnapshot(value: unknown): { team: Team; prompt: string } 
     throw new Error('Saved build format is invalid or from a different version.');
   const spec = validateSpec(s.spec, s.world);
   const source = s.source === undefined ? 'local' : s.source;
-  if (source !== 'local' && source !== 'copilot' && source !== 'local-ai' && source !== 'github-models' && source !== 'azure')
+  if (source !== 'local' && source !== 'copilot' && source !== 'local-ai' && source !== 'github-models' && source !== 'azure' && source !== 'compatible')
     throw new Error('Saved build has an invalid source.');
   const plan = createPlan(spec, [], source);
   if (s.taskOrder !== undefined) {

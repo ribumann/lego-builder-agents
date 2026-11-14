@@ -29,7 +29,7 @@ for (const viewport of [{ width: 1440, height: 900 }, { width: 375, height: 812 
     await page.reload();
     await expect(page.locator('#language')).toHaveValue('de');
     await expect(page.locator('label[for="brief"]')).toHaveText('Was bauen wir?');
-    await expect(page.locator('#language-note')).toContainText('nur englische Schlüsselwörter');
+    await expect(page.locator('#language-note')).toContainText('frage auf Englisch');
     await page.evaluate(() => window.scrollTo(0, 0));
     await page.screenshot({ path: testInfo.outputPath('language.png') });
   });
@@ -77,4 +77,30 @@ test('translated build state and inspection update without altering the brief', 
   await page.locator('#language').selectOption('fr');
   await expect(page.locator('#checks')).toContainText('Consigne respectée');
   await expect(page.locator('#brief')).toHaveValue(prompt);
+});
+
+test('translated guide briefs and crew question buttons work in every language', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  for (const [language, prompt, answer] of [
+    ['en', 'green stegosaurus with long tail', 'Feet wait for legs'],
+    ['de', 'grünen Stegosaurus mit langem Schwanz', 'Füße warten auf Beine'],
+    ['fr', 'stégosaure vert à longue queue', 'Les pieds attendent les jambes'],
+    ['it', 'stegosauro verde con coda lunga', 'I piedi aspettano le gambe'],
+    ['es', 'estegosaurio verde de cola larga', 'Los pies esperan las piernas'],
+    ['pt', 'estegossauro verde de cauda longa', 'Os pés aguardam as pernas'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#ask-wait').click();
+    await expect(page.locator('#crew-answer')).toContainText(answer);
+    await page.locator('#brief').fill(prompt);
+    await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+    const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!));
+    expect(saved.spec).toMatchObject({ model: 'stegosaurus', color: 'green', longTail: true });
+    expect(await page.locator('#brief').inputValue()).toBe(prompt);
+  }
 });

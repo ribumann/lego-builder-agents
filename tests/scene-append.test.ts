@@ -255,13 +255,13 @@ test('combines multiple append sources without replacing root or earlier provena
   assert.deepEqual(restored.provenance.contributions.map(item => item.source), ['github-models', 'copilot', 'local']);
 });
 
-test('Azure source is accepted as both root and appended provenance through reload', () => {
+test('Azure and compatible sources preserve root and appended provenance through reload', () => {
   const plan = (source: Plan['source']) => customPlan('Support', source, [{
     name: 'Support', bricks: [
       { x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' },
     ],
   }]);
-  for (const [root, added] of [['azure', 'copilot'], ['local', 'azure']] as const) {
+  for (const [root, added] of [['azure', 'copilot'], ['local', 'azure'], ['compatible', 'local'], ['local', 'compatible']] as const) {
     const result = appendScene(new Team(plan(root)), plan(added));
     const restored = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(result.team, 'Azure'))));
     assert.equal(restored.team.plan.source, root);

@@ -47,6 +47,23 @@ test('specialists act concurrently, but no detail violates its dependency', () =
   }
   assert.ok(concurrent, 'Specialists should share at least one turn');
 });
+test('translated guide examples select the advertised offline templates', () => {
+  const examples = [
+    ['violetten Brachiosaurus', 'grünen Stegosaurus mit langem Schwanz', 'weißes Frachtschiff'],
+    ['brachiosaure violet', 'stégosaure vert à longue queue', 'cargo blanc'],
+    ['brachiosauro viola', 'stegosauro verde con coda lunga', 'nave cargo bianca'],
+    ['braquiosaurio morado', 'estegosaurio verde de cola larga', 'nave de carga blanca'],
+    ['braquiossauro roxo', 'estegossauro verde de cauda longa', 'nave de carga branca'],
+  ];
+  for (const [brachio, stego, cargo] of examples) {
+    const first = parseBrief('jurassic', brachio).spec;
+    assert.deepEqual([first.model, first.color], ['brachiosaurus', 'purple']);
+    const dinosaur = parseBrief('jurassic', stego).spec;
+    assert.deepEqual([dinosaur.model, dinosaur.color, dinosaur.longTail], ['stegosaurus', 'green', true]);
+    const ship = parseBrief('space', cargo).spec;
+    assert.deepEqual([ship.model, ship.color], ['cargo', 'white']);
+  }
+});
 test('vague brief exposes assumptions; supported inputs actually change geometry', () => {
   const vague = parseBrief('jurassic', 'Build a dinosaur.');
   assert.equal(vague.assumptions.length, 2);

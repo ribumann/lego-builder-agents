@@ -5,9 +5,10 @@ A LEGO-style game with **cloud-first, open-ended planning** and visible **agenti
 The interface offers English, German, French, Italian, Spanish and Portuguese,
 with the selection saved on this device. Translation is partial: detailed
 guidance, some agent messages and technical errors remain in English. Offline
-templates and the rule-based crew question guide currently recognize English
-keywords only. Briefs and model-generated content remain in their original
-language.
+templates recognize the translated guide examples and a limited English
+vocabulary; the rule-based crew offers translated question buttons, while
+free-form questions recognize English keywords only. Briefs and model-generated
+content remain in their original language.
 
 Inspired by the user-supplied National Future Day post: three agents build a Minecraft castle from children's ideas. This original implementation translates its lesson into two brick-building worlds, not a reproduction of Minecraft or official LEGO software.
 
@@ -30,6 +31,25 @@ For a production build:
 npm run build
 npm start
 ```
+
+### Optional OpenAI-compatible provider (private server only)
+
+Set `BRICKLAB_COMPATIBLE_AI=1`, `BRICKLAB_COMPATIBLE_ENDPOINT` to the full
+chat-completions URL, and `BRICKLAB_COMPATIBLE_MODEL` to its model identifier.
+Set `BRICKLAB_COMPATIBLE_API_KEY` on the server if the service requires a bearer
+token; do not put credentials in the browser or a shared deployment. Restart
+the server, choose **Change mode -> Use Compatible AI**, then explicitly submit
+a brief. This sends the brief to the configured provider and may incur charges.
+No request is made on load or mode selection. Availability and authentication
+are not checked until submission; no fallback or retry is performed.
+
+The endpoint must use HTTPS, except HTTP is allowed for literal `127.0.0.1`
+or `[::1]`. Credentials, queries, and fragments in URLs are rejected. The
+service must support chat completions with `max_tokens` and JSON-object
+`response_format`; providers requiring only `max_completion_tokens` are not
+supported. A request can be cancelled and is bounded to 300 seconds. This
+option is prohibited in anonymous hosted mode and has no built-in spending
+budget. Use only a trusted private server and provider.
 
 ## Facilitate a BrickLab lab
 

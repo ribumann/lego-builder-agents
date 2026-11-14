@@ -44,7 +44,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
   const child = spawn(process.execPath, [...nodeArgs, 'server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
       BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '',
-      BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
+      BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   t.after(async () => {
@@ -898,6 +898,88 @@ setInterval(() => {}, 1000);
   await until(() => stopped(leader!));
   await until(() => stopped(descendant));
   await until(async () => (await probe()).status === 400);
+});
+
+test('Compatible AI uses the protected lifecycle and never exposes server credentials', async t => {
+  const calls: string[] = [];
+  let reply: unknown = lifecycleSpec;
+  const provider = createHttpServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    calls.push(raw);
+    assert.equal(req.headers.authorization, 'Bearer fixture-secret');
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(reply) } }] }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const { base } = await startServer(t, { BRICKLAB_COMPATIBLE_AI: '1',
+    BRICKLAB_COMPATIBLE_ENDPOINT: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+    BRICKLAB_COMPATIBLE_MODEL: 'fixture', BRICKLAB_COMPATIBLE_API_KEY: 'fixture-secret' });
+  const statusText = await (await fetch(`${base}/api/status`)).text();
+  assert.doesNotMatch(statusText, /fixture-secret|chat\/completions/);
+  const status = JSON.parse(statusText);
+  assert.equal(status.compatiblePlanner.enabled, true);
+  assert.equal(calls.length, 0);
+  const post = (origin = base, key = status.sessionKey) => fetch(`${base}/api/compatible-plan`, {
+    method: 'POST', headers: { Origin: origin, 'X-Bricklab-Key': key },
+    body: JSON.stringify({ world: 'space', brief: 'A blue sculpture' }),
+  });
+  assert.equal((await post('https://attacker.example')).status, 403);
+  assert.equal((await post(base, '')).status, 403);
+  const response = await post();
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'compatible' });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /A blue sculpture/);
+  reply = { ...lifecycleSpec, model: 'explorer' };
+  assert.equal((await post()).status, 502);
+  assert.equal(calls.length, 2);
+});
+
+test('Compatible AI disconnect aborts upstream and eventually releases the shared lock', async t => {
+  let started!: () => void;
+  const received = new Promise<void>(resolve => { started = resolve; });
+  let closed!: () => void;
+  const disconnected = new Promise<void>(resolve => { closed = resolve; });
+  const provider = createHttpServer((req, res) => {
+    req.resume();
+    req.on('end', started);
+    res.on('close', closed);
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const { base } = await startServer(t, { BRICKLAB_COMPATIBLE_AI: '1',
+    BRICKLAB_COMPATIBLE_ENDPOINT: `http://127.0.0.1:${address.port}/v1/chat/completions`,
+    BRICKLAB_COMPATIBLE_MODEL: 'fixture' });
+  const status = await (await fetch(`${base}/api/status`)).json() as { sessionKey: string };
+  const headers = { Origin: base, 'X-Bricklab-Key': status.sessionKey };
+  const controller = new AbortController();
+  const request = fetch(`${base}/api/compatible-plan`, { method: 'POST', headers,
+    body: JSON.stringify({ world: 'space', brief: 'A sculpture' }), signal: controller.signal }).catch(() => undefined);
+  await received;
+  assert.equal((await fetch(`${base}/api/plan`, { method: 'POST', headers, body: '{}' })).status, 429);
+  controller.abort();
+  await request;
+  await disconnected;
+  const deadline = Date.now() + 7000;
+  while ((await fetch(`${base}/api/compatible-plan`, { method: 'POST', headers, body: '{}' })).status !== 400) {
+    assert.ok(Date.now() < deadline, 'Planning lock must be released');
+    await new Promise(resolve => setTimeout(resolve, 10));
+  }
+});
+
+test('Hosted mode rejects compatible AI even when configured', () => {
+  const child = spawnSync(process.execPath, ['server.mjs', '--production'], { encoding: 'utf8',
+    env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_HOSTED: '1',
+      BRICKLAB_CODESPACES: '0', BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_AZURE_AI: '0' } });
+  assert.notEqual(child.status, 0);
+  assert.match(child.stderr, /cannot be enabled in public hosted mode/);
 });
 
 test('Local AI is explicit, uses the same API protections and requires custom local geometry', async t => {

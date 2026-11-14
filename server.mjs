@@ -13,6 +13,7 @@ import { createLocalPlanner } from './local-planner.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
 import { createAzureBudgetGate } from './azure-budget.mjs';
+import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const production = process.argv.includes('--production');
@@ -37,6 +38,12 @@ if (hosted && (!production || process.env.BRICKLAB_CODESPACES === '1'
   throw new Error('BRICKLAB_HOSTED=1 requires production, a valid PORT and no Codespace mode. Hosted mode serves public static/offline content only.');
 if (hosted && process.env.BRICKLAB_AZURE_AI === '1')
   throw new Error('Hosted Azure planning is blocked pending a verified public edge with abuse and quota protections. Leave BRICKLAB_AZURE_AI off for public static/offline serving.');
+if (hosted && process.env.BRICKLAB_COMPATIBLE_AI === '1')
+  throw new Error('Compatible AI cannot be enabled in public hosted mode.');
+const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COMPATIBLE_AI === '1'
+  ? { enabled: true, endpoint: process.env.BRICKLAB_COMPATIBLE_ENDPOINT,
+    model: process.env.BRICKLAB_COMPATIBLE_MODEL, apiKey: process.env.BRICKLAB_COMPATIBLE_API_KEY }
+  : {});
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
 const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
@@ -293,19 +300,20 @@ const server = http.createServer(async (req, res) => {
       const planner = await plannerStatus();
       return send(res, 200, { copilot: liveEnabled && !['missing-cli', 'unavailable'].includes(planner.state),
         calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
-        azurePlanner: azurePlannerStatus, hosted });
+        azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted });
     }
     const localAI = url.pathname === '/api/local-plan';
     const azureAI = url.pathname === '/api/azure-plan';
-    const copilotAI = !localAI && !azureAI;
+    const compatibleAI = url.pathname === '/api/compatible-plan';
+    const copilotAI = !localAI && !azureAI && !compatibleAI;
     if (req.method !== 'POST' || (copilotAI && url.pathname !== '/api/plan')) return send(res, 404, { error: 'Unknown API route.' });
     const origin = req.headers.origin;
     if (!origin || !allowedOrigins.has(origin)
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
-    if (azureAI ? !azureEnabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
+    if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
       return send(res, 403, { error: azureAI ? azurePlannerStatus.message
-        : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
+        : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
         : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
     const today = new Date().toISOString().slice(0, 10);
     if (today !== day) { day = today; calls = 0; }
@@ -344,7 +352,7 @@ const server = http.createServer(async (req, res) => {
       if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief)), 'Local AI');
       else {
         deadline = setTimeout(() => controller.abort(Object.assign(
-          new Error(`${azureAI ? 'Azure planning' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
+          new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
           { name: 'TimeoutError' })), 300_000);
         streaming = (req.headers.accept || '').split(',').some(entry => {
           const [type, ...parameters] = entry.split(';');
@@ -393,6 +401,15 @@ const server = http.createServer(async (req, res) => {
           // Hold the shared lock until the adapter actually settles, even if it ignores abort.
           finished = work.then(() => {}, () => {});
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+        } else if (compatibleAI) {
+          const work = (async () => {
+            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief), signal: controller.signal });
+            controller.signal.throwIfAborted();
+            if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
+            return validateCustomSpec(parsed);
+          })();
+          finished = work.then(() => {}, () => {});
+          spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else {
           const invocation = askCopilot(world, brief, controller.signal);
           finished = invocation.finished;
@@ -400,9 +417,9 @@ const server = http.createServer(async (req, res) => {
         }
       }
       if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-      respond(200, { spec, ...(azureAI && azureMonetaryBudget ? {}
+      respond(200, { spec, ...((azureAI && azureMonetaryBudget) || compatibleAI ? {}
         : { calls: azureAI ? azureReservation.used : calls, limit: azureAI ? azureReservation.limit : limit }),
-      source: azureAI ? 'azure' : localAI ? 'local-ai' : 'copilot' });
+      source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
     } catch (error) {
       // Output-limit errors still wait for termination; cancellation/timeout never delays the HTTP result.
       if (!controller.signal.aborted) await Promise.race([finished, interrupted]);

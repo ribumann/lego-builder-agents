@@ -86,7 +86,8 @@ app.innerHTML = `
         <div class="team-content" id="team-content"><div id="event-list" role="log" aria-label="Agent actions and explanations"></div><div id="task-list" hidden></div></div>
         <div class="team-question">
           <form id="question-form"><label for="question">Ask your crew</label><div class="question-input"><input id="question" maxlength="240" placeholder="Why do you need a plan?" autocomplete="off"/><button class="send-question" aria-label="Ask crew">${icon('arrow')}</button></div></form>
-          <div id="crew-answer" role="status">Try: “Who does what?” or “Why wait?”</div>
+          <div class="crew-prompts"><button type="button" class="text-button" id="ask-roles">Who does what?</button> <button type="button" class="text-button" id="ask-wait">Why wait?</button></div>
+          <div id="crew-answer" role="status">Choose a question above or ask in English.</div>
         </div>
       </aside>
     </div>
@@ -96,7 +97,7 @@ app.innerHTML = `
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
-        <p id="language-note">Offline templates and crew questions recognize English keywords only. Some detailed guidance, technical errors and agent messages remain in English; your brief and model output are not translated.</p>
+        <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Some guidance, technical errors and agent messages remain in English; your brief and model output are not translated.</p>
       </form>
       <div class="transport">
         <div class="build-progress"><strong id="brick-count">0 <span>bricks placed</span></strong><span id="progress-value">0%</span></div>
@@ -129,6 +130,7 @@ app.innerHTML = `
 `;
 
 let noticeSource = '';
+let answerSource: { id: AgentId; response: string } | undefined;
 try {
   const savedLanguage = localStorage.getItem('bricklab-language');
   if (languages.some(language => language === savedLanguage)) setLanguage(savedLanguage as Language);
@@ -139,6 +141,7 @@ const applyLanguage = () => {
   languageSelect.value = getLanguage();
   translateInterface(app);
   if (noticeSource) $('#notice').textContent = translate(noticeSource);
+  if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
 };
 languageSelect.addEventListener('change', () => {
   const selected = languageSelect.value;
@@ -174,7 +177,7 @@ let lastEventCount = -1;
 let eventRevision = 0;
 let showGhost = true;
 let exploded = false;
-let mode: 'local' | 'copilot' | 'local-ai' | 'azure' = 'copilot';
+let mode: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'copilot';
 let modeChosen = false;
 let hosted = false;
 let apiKey = '';
@@ -183,6 +186,7 @@ let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
 let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
 let azurePlanner = { enabled: false, state: 'off', message: 'Azure planning is unavailable on this server.' };
+let compatiblePlanner = { enabled: false, state: 'off', message: 'Compatible AI is off.' };
 let planning = false;
 let planningController: AbortController | null = null;
 let replaying = false;
@@ -314,7 +318,7 @@ function render() {
   if (!replaying) scene?.sync(team ? [...team.bricks.values()] : []);
 }
 
-function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot', planningBrief: string) {
+function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', planningBrief: string) {
   const modal = $<HTMLDialogElement>('#planning-dialog');
   const started = Date.now();
   let nextReminder = 100;
@@ -412,20 +416,21 @@ async function makePlan(demo = false) {
     if (!brief.value.trim() || brief.value.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
     let spec;
-    let source: 'local' | 'copilot' | 'local-ai' | 'azure' = 'local';
+    let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
     if (mode !== 'local') {
       const localAI = mode === 'local-ai';
       const azure = mode === 'azure';
-      if (azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
+      const compatible = mode === 'compatible';
+      if (compatible ? !compatiblePlanner.enabled || compatiblePlanner.state !== 'configured' : azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
-        throw new Error(azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
+        throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       planning = true; render();
       const controller = new AbortController();
       planningController = controller;
-      if (!localAI) wait = startPlanningWait(controller, azure ? 'Azure Foundry' : 'Copilot', brief.value);
-      const response = await fetch(azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
+      if (!localAI) wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot', brief.value);
+      const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
         body: JSON.stringify({ world, brief: brief.value }), signal: controller.signal });
       const data = await planningResponse(response);
@@ -436,8 +441,8 @@ async function makePlan(demo = false) {
       }
       spec = validateSpec(data.spec, world);
       if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
-      source = azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
-      assumptions.push(`${azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
+      source = compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
+      assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
     } else {
       const parsed = parseBrief(world, brief.value);
       spec = parsed.spec;
@@ -577,8 +582,11 @@ function answer(question: string, agent?: AgentId) {
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
   else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. A selected cloud or local model can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
   else if (!agent && !/who|what|job|help|team|wait|frame|detail|build|structure|planbot|checkbot|inspect|quality|dependencies/.test(q)) response = 'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.';
-  $('#crew-answer').textContent = `${AGENTS[id].name}: ${response}`;
+  answerSource = { id, response };
+  $('#crew-answer').textContent = `${AGENTS[id].name}: ${translate(response)}`;
 }
+$('#ask-roles').addEventListener('click', () => answer('', 'build'));
+$('#ask-wait').addEventListener('click', () => answer('', 'detail'));
 $('#question-form').addEventListener('submit', event => {
   event.preventDefault();
   const input = $<HTMLInputElement>('#question');
@@ -683,6 +691,9 @@ $('#settings').addEventListener('click', () => {
     <p id="local-planner-status" role="status">${esc(localPlanner.message)}</p>
     <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
     <button id="choose-local-ai" class="button outline">Use Local AI</button>
+    ${!hosted ? `<hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
+    <p id="compatible-planner-status" role="status">${esc(compatiblePlanner.message)}</p>
+    <button id="choose-compatible" class="button outline">Use Compatible AI</button>` : ''}
     <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls. Host charges may still apply.</p>
     <button id="choose-local" class="button outline">Use offline templates</button>
     <hr><p><strong>Three model decisions via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two builder models concurrently. Each chooses a real task priority. PlanBot and CheckBot remain local rule-based agents, making five crew members, not five model calls. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
@@ -691,6 +702,7 @@ $('#settings').addEventListener('click', () => {
   $('#choose-local').addEventListener('click', () => { mode = 'local'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
   $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
   $('#choose-local-ai').addEventListener('click', () => { mode = 'local-ai'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
+  document.querySelector<HTMLElement>('#choose-compatible')?.addEventListener('click', () => { mode = 'compatible'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!compatiblePlanner.enabled) notice(compatiblePlanner.message); });
   document.querySelector<HTMLElement>('#choose-azure')?.addEventListener('click', () => { mode = 'azure'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!azurePlanner.enabled) notice(azurePlanner.message); });
   $('#refresh-status').addEventListener('click', () => { void refreshStatus(true); });
 });
@@ -710,15 +722,17 @@ window.addEventListener('beforeunload', () => { planningController?.abort(); sav
 restore();
 render();
 function updateMode() {
-  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
+  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
+    : mode === 'compatible'
+      ? 'Plan with Compatible AI sends this brief to the configured service and may incur charges. No request until you press it. Do not enter personal information.'
     : mode === 'local-ai'
       ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
       : mode === 'azure'
         ? 'Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. No request until you press it. Do not enter personal information.'
         : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
-  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
+  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
 }
 async function refreshStatus(inDialog = false) {
@@ -734,6 +748,8 @@ async function refreshStatus(inDialog = false) {
       localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
     if (data.azurePlanner && typeof data.azurePlanner.message === 'string')
       azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state), message: data.azurePlanner.message };
+    if (data.compatiblePlanner && typeof data.compatiblePlanner.message === 'string')
+      compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state), message: data.compatiblePlanner.message };
     hosted = data.hosted === true;
     if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
@@ -751,6 +767,8 @@ async function refreshStatus(inDialog = false) {
     if (localStatus) localStatus.textContent = localPlanner.message;
     const azureStatus = document.querySelector<HTMLElement>('#azure-planner-status');
     if (azureStatus) azureStatus.textContent = azurePlanner.message;
+    const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
+    if (compatibleStatus) compatibleStatus.textContent = compatiblePlanner.message;
   }
 }
 updateMode();

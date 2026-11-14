@@ -37,7 +37,7 @@ export interface RestoredSceneAppend {
   provenance: SceneAppendProvenance;
 }
 
-const sources: Source[] = ['local', 'copilot', 'local-ai', 'github-models', 'azure'];
+const sources: Source[] = ['local', 'copilot', 'local-ai', 'github-models', 'azure', 'compatible'];
 const colorNames = Object.keys(COLORS) as Color[];
 const sceneProvenance = new WeakMap<Team, SceneAppendProvenance>();
 const cellKey = (x: number, y: number, z: number) => `${x},${y},${z}`;
