@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { elapsedText, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail } from '../src/i18n';
+import { elapsedText, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateTaskName } from '../src/i18n';
 import { EXAMPLES, parseBrief, type World } from '../src/engine';
 
 test('planning estimates stay provider-specific in every supported language', () => {
@@ -24,6 +24,10 @@ test('known activity templates preserve user-defined task names', () => {
   assert.match(translateActivity('I accepted the "body" handoff (5 bricks).', true), /corps/);
   assert.match(translateActivity('I received 2 missing planned bricks for body, eyes. Reclaiming my original task.', true), /corps, yeux/);
   assert.equal(translateActivity('AI mission decision: Lighthouse 🚀'), 'AI mission decision: Lighthouse 🚀');
+  assert.equal(translateTaskName('Structure', false), 'Structure');
+  assert.equal(translateTaskName('Structure · support assembly & details', false, ['Structure']), 'Structure · assemblage des supports et détails');
+  assert.match(translateActivity('I accepted the "Structure · support assembly & details" handoff (5 bricks).', false, ['Structure']), /Structure · assemblage des supports et détails/);
+  assert.match(translateActivity('I received 2 missing planned bricks for Maison, 🚀 · structure, Tour · details. Reclaiming my original task.', false, ['Maison, 🚀', 'Tour']), /Maison, 🚀 · structure, Tour · détails/);
   assert.match(translateActivity('Appended Maison 🚀, Tour at offset -4,10.'), /Maison 🚀, Tour/);
   assert.match(translateActivity('Loaded AI mission attributed to Model 🚀. Imported files are not proof that a model ran.'), /Model 🚀/);
   const details = translateCheckDetail('Lighthouse 🚀: 5/5 face-connected; Hill: 2/2 face-connected. Not a physical stability simulation.', ['Lighthouse 🚀', 'Hill']);
@@ -48,6 +52,11 @@ test('damage, repair and inspection activity is localized in every non-English l
     setLanguage(language);
     for (const message of messages) assert.notEqual(translateActivity(message), message, `${language}: ${message}`);
     assert.match(translateActivity(messages.at(-1)!), /external 🚀/);
+    const task = 'Object 🚀 · support assembly & details';
+    const translatedTask = translateTaskName(task, false, ['Object 🚀']);
+    assert.notEqual(translatedTask, task);
+    assert.ok(translatedTask.startsWith('Object 🚀 · '));
+    assert.ok(translateActivity(`I accepted the "${task}" handoff (5 bricks).`, false, ['Object 🚀']).includes(translatedTask));
   }
   setLanguage('en');
 });
@@ -56,13 +65,45 @@ test('known Local AI status translates while preserving unknown provider text', 
   const status = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL to opt in. Service availability and authentication are unverified. Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
   const off = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 to opt in.';
   const notice = 'Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
+  const denied = 'Local Ollama denied access. Check authentication on the trusted server host; this adapter does not send credentials.';
   for (const language of languages.slice(1)) {
     setLanguage(language);
     assert.notEqual(translate(status), status);
     assert.match(translate(status), /OLLAMA_NO_CLOUD=1/);
     assert.equal(translate(`${off} ${notice}`), `${translate(off)} ${translate(notice)}`);
+    assert.notEqual(translate(denied), denied);
+    assert.equal(translate(`${denied} ${notice}`), `${translate(denied)} ${translate(notice)}`);
+    const azure = 'Azure OpenAI rate or quota limit reached. No retry was attempted.';
+    assert.notEqual(translateActivity(azure), azure);
     assert.equal(translate(`Provider says 🚀 ${notice}`), `Provider says 🚀 ${notice}`);
     assert.equal(translate('Provider says 🚀'), 'Provider says 🚀');
+  }
+  setLanguage('en');
+});
+
+test('scene and imported mission errors translate inside load and restore notices', () => {
+  const details = [
+    'Scene append provenance is invalid.',
+    'AI mission must have one valid decision per model agent.',
+    'Saved build contains unknown or duplicate bricks.',
+    'Custom design exceeds its expanded brick budget or 8192-brick limit.',
+    'Custom brick 17 repeat exceeds bounds.',
+    'Copilot returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or explicitly choose offline templates.',
+    'Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.',
+  ];
+  for (const language of languages.slice(1)) {
+    setLanguage(language);
+    for (const detail of details) {
+      assert.notEqual(translateActivity(detail), detail, `${language}: ${detail}`);
+      const notice = `Could not load this file: ${detail}. The current build is unchanged.`;
+      assert.ok(translateActivity(notice).includes(translateActivity(detail)));
+      const restore = `Could not restore the saved build: ${detail}. Your old save has not been overwritten.`;
+      assert.ok(translateActivity(restore).includes(translateActivity(detail)));
+      if (detail.includes('17')) assert.match(translateActivity(detail), /17/);
+    }
+    const external = 'Cannot append a brick assigned to unknown object "Maison 🚀".';
+    assert.match(translateActivity(external), /Maison 🚀/);
+    assert.match(translateActivity('Could not load this file: external 🚀. The current build is unchanged.'), /external 🚀/);
   }
   setLanguage('en');
 });

@@ -1,6 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAzurePlanner } from '../azure-planner.mjs';
+import { validateCustomSpec } from '../src/custom-design.mjs';
+import { planningPrompt } from '../planning-prompt.mjs';
 
 const endpoint = 'https://bricklab-example.openai.azure.com';
 const credential = { async getToken() { return { token: 'test-token' }; } };
@@ -21,6 +23,30 @@ test('Azure planner sends a bounded authenticated request and returns parsed JSO
   assert.equal(request.options.headers.Authorization, 'Bearer test-token');
   assert.equal(JSON.parse(request.options.body).max_completion_tokens, 12000);
   assert.equal(JSON.parse(request.options.body).max_tokens, undefined);
+});
+
+test('expanded budget counts repeated and single bricks across all objects', async () => {
+  const brick = (x, repeat) => ({
+    x, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame',
+    ...(repeat ? { repeat: { count: repeat, dx: 0, dy: 1, dz: 0 } } : {}),
+  });
+  const spec = { world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+    design: { name: 'Two towers', objects: [
+      { name: 'First', bricks: [brick(0, 6)] },
+      { name: 'Second', bricks: [brick(2, 4), { ...brick(2), y: 4 }] },
+    ] } };
+  let prompt;
+  const plan = createAzurePlanner({ endpoint, deployment: 'model', credential,
+    fetchImpl: async (_url, options) => {
+      prompt = JSON.parse(options.body).messages[0].content;
+      return new Response(envelope(JSON.stringify(spec)));
+    } });
+  const result = await plan({ prompt: planningPrompt('space', 'Two towers, budget 10 bricks') });
+  assert.match(prompt, /count expanded bricks across ALL objects/);
+  assert.match(prompt, /repeat\.count 6, repeat\.count 4, and no repeat contribute 11 bricks/);
+  assert.throws(() => validateCustomSpec(result), /expanded brick budget/);
+  spec.budget = 11;
+  assert.equal(validateCustomSpec(spec).budget, 11);
 });
 
 test('Azure planner rejects untrusted endpoints and incomplete or oversized responses', async () => {

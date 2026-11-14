@@ -4,7 +4,7 @@ import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnaps
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
-import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, type Language } from './i18n';
+import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, translateTaskName, type Language } from './i18n';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -145,10 +145,10 @@ const applyLanguage = () => {
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
   if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${sceneErrorDetail}. ${translate('You can still build using the task board and text inspection below.')}`;
   const statuses = [['#planner-status', plannerMessage], ['#local-planner-status', localPlanner.message],
-    ['#azure-planner-status', azurePlanner.message]] as const;
+    ['#azure-planner-status', azurePlanner.message], ['#compatible-planner-status', compatiblePlanner.message]] as const;
   for (const [selector, message] of statuses) {
     const element = document.querySelector<HTMLElement>(selector);
-    if (element) element.textContent = translate(message);
+    if (element) element.textContent = translateActivity(message);
   }
 };
 languageSelect.addEventListener('change', () => {
@@ -298,6 +298,7 @@ function render() {
     $(`#${id}-state`).classList.toggle('working', text === 'Building');
   }
   const revision = (team?.events.length ?? 0) + eventRevision;
+  const objectNames = team?.plan.spec.design?.objects?.map(object => object.name);
   if (revision !== lastEventCount) {
     lastEventCount = revision;
     const events = team?.events.slice().reverse() ?? [
@@ -307,15 +308,15 @@ function render() {
       { agent: 'detail' as const, kind: 'observe', message: 'I assemble supports and finishing touches after their foundations are ready. We share one task board.', tick: 0 },
       { agent: 'check' as const, kind: 'observe', message: 'I inspect the finished model and check for missing bricks.', tick: 0 },
     ];
-    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(translate(e.kind))} · ${esc(translate('turn'))} ${e.tick}</span></div><p>${esc(translateActivity(e.message, !!team && team.plan.spec.model !== 'custom'))}</p></article>`).join('');
+    $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(translate(e.kind))} · ${esc(translate('turn'))} ${e.tick}</span></div><p>${esc(translateActivity(e.message, !!team && team.plan.spec.model !== 'custom', objectNames))}</p></article>`).join('');
   }
   $('#task-list').innerHTML = team ? team.plan.tasks.map(task => {
     const done = team!.taskDone(task);
     const placed = task.bricks.filter(b => team!.bricks.has(b.id)).length;
     const waiting = task.depends.some(id => !team!.taskDone(team!.plan.tasks.find(t => t.id === id)!));
-    const taskName = (label: string) => team!.plan.spec.model === 'custom' ? label : translate(label);
+    const taskName = (label: string) => translateTaskName(label, team!.plan.spec.model !== 'custom', objectNames);
     return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(taskName(task.label))}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `${esc(translate('Waits for:'))} ${task.depends.map(id => esc(taskName(team!.plan.tasks.find(t => t.id === id)?.label ?? id))).join(', ')}` : esc(translate(done ? 'Shared board updated' : 'Dependencies ready'))}</small></div></article>`;
-  }).join('') : '<p class="empty-note">Make a plan to see the delegated jobs and their dependencies here.</p>';
+  }).join('') : `<p class="empty-note">${esc(translate('Make a plan to see the delegated jobs and their dependencies here.'))}</p>`;
   const checks = team?.checks ?? [];
   $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(translate(c.label))}</strong><small>${esc(translateCheckDetail(c.detail, team?.plan.spec.design?.objects?.map(object => object.name)))}</small></div></div>`).join('')
     : '<p class="empty-note">CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.</p>';
@@ -704,7 +705,7 @@ $('#settings').addEventListener('click', () => {
     <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
     <button id="choose-local-ai" class="button outline">Use Local AI</button>
     ${!hosted ? `<hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
-    <p id="compatible-planner-status" role="status">${esc(compatiblePlanner.message)}</p>
+    <p id="compatible-planner-status" role="status">${esc(translateActivity(compatiblePlanner.message))}</p>
     <button id="choose-compatible" class="button outline">Use Compatible AI</button>` : ''}
     <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls. Host charges may still apply.</p>
     <button id="choose-local" class="button outline">Use offline templates</button>
@@ -774,13 +775,13 @@ async function refreshStatus(inDialog = false) {
   }
   if (inDialog) {
     const status = document.querySelector<HTMLElement>('#planner-status');
-    if (status) status.textContent = translate(plannerMessage);
+    if (status) status.textContent = translateActivity(plannerMessage);
     const localStatus = document.querySelector<HTMLElement>('#local-planner-status');
     if (localStatus) localStatus.textContent = translate(localPlanner.message);
     const azureStatus = document.querySelector<HTMLElement>('#azure-planner-status');
     if (azureStatus) azureStatus.textContent = translate(azurePlanner.message);
     const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
-    if (compatibleStatus) compatibleStatus.textContent = compatiblePlanner.message;
+    if (compatibleStatus) compatibleStatus.textContent = translateActivity(compatiblePlanner.message);
   }
 }
 updateMode();

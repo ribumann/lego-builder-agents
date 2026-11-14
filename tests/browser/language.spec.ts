@@ -63,6 +63,9 @@ test('translated build state and inspection update without altering the brief', 
   } }));
   await page.goto('/');
   await page.locator('#language').selectOption('de');
+  await page.locator('#tab-tasks').click();
+  await expect(page.locator('#task-list')).toContainText('Erstelle einen Plan');
+  await page.locator('#tab-live').click();
   await page.locator('#settings').click();
   await page.locator('#choose-local').click();
   const prompt = 'Build a blue explorer spaceship with wide wings and two engines.';
@@ -83,6 +86,28 @@ test('translated build state and inspection update without altering the brief', 
   await page.locator('#language').selectOption('fr');
   await expect(page.locator('#checks')).toContainText('Consigne respectée');
   await expect(page.locator('#brief')).toHaveValue(prompt);
+});
+
+test('custom task labels localize without translating object names', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.route('**/api/plan', route => route.fulfill({ json: { spec: {
+    world: 'jurassic', model: 'custom', color: 'green', longTail: false, wideWings: false, budget: 10,
+    design: { name: 'External 🚀', objects: [{ name: 'Structure 🚀', bricks: [
+      { x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'green', part: 'frame', repeat: { count: 4, dx: 0, dy: 1, dz: 0 } },
+    ] }] },
+  } } }));
+  await page.goto('/');
+  await page.locator('#language').selectOption('fr');
+  await page.locator('#brief').fill('External 🚀');
+  await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  await page.locator('#tab-tasks').click();
+  await expect(page.locator('#task-list')).toContainText('Structure 🚀 · assemblage des supports et détails');
+  await page.locator('#tab-live').click();
+  await page.locator('#step').click();
+  await expect(page.locator('#event-list')).toContainText('Structure 🚀 · structure');
+  await expect(page.locator('#brief')).toHaveValue('External 🚀');
 });
 
 test('translated guide briefs and crew question buttons work in every language', async ({ page }) => {
@@ -153,6 +178,24 @@ test('known server status is localized without changing external messages', asyn
   await expect(page.locator('#language')).toHaveValue('fr');
 });
 
+test('compatible planner status follows language changes and preserves external messages', async ({ page }) => {
+  const status = 'Compatible AI is configured. Availability and authentication are unverified; only explicit planning sends a prompt.';
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'ready', message: 'external 🚀' },
+    compatiblePlanner: { enabled: true, state: 'configured', message: status },
+  } }));
+  await page.goto('/');
+  await page.locator('#settings').click();
+  for (const [language, expected] of [['fr', 'L’IA compatible est configurée'], ['de', 'Kompatible KI ist konfiguriert'], ['en', status]]) {
+    await page.locator('#language').evaluate((select: HTMLSelectElement, value) => {
+      select.value = value;
+      select.dispatchEvent(new Event('change', { bubbles: true }));
+    }, language);
+    await expect(page.locator('#compatible-planner-status')).toContainText(expected);
+    await expect(page.locator('#planner-status')).toHaveText('external 🚀');
+  }
+});
+
 test('common planning errors are localized in every language without replacing the scene', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
@@ -178,6 +221,32 @@ test('common planning errors are localized in every language without replacing t
     await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
     await expect(page.locator('#notice')).toContainText(expected);
     await expect(page.locator('#brief')).toHaveValue('Original brief');
+    expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+  }
+});
+
+test('invalid saved scenes report localized details without changing the existing build', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#brief').fill('green stegosaurus');
+  await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  for (const [language, expected] of [
+    ['de', 'Herkunft der Szenenergänzungen ist ungültig'],
+    ['fr', 'provenance des ajouts à la scène est invalide'],
+    ['it', 'provenienza delle aggiunte alla scena non è valida'],
+    ['es', 'procedencia de las adiciones a la escena no es válida'],
+    ['pt', 'proveniência das adições à cena é inválida'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#import-file').setInputFiles({
+      name: 'invalid.json', mimeType: 'application/json', buffer: Buffer.from('{"sceneAppend":{}}'),
+    });
+    await expect(page.locator('#notice')).toContainText(expected);
     expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
   }
 });
