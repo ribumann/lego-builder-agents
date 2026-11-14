@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { validateCustomSpec, CUSTOM_DESIGN_PROMPT } from './src/custom-design.mjs';
+import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
 const production = process.argv.includes('--production');
@@ -82,7 +83,9 @@ async function plannerStatus() {
 
 export function extractSpec(text) {
   const clean = text.trim().replace(/^```(?:json)?\s*/, '').replace(/\s*```$/, '');
-  const parsed = JSON.parse(clean);
+  let parsed;
+  try { parsed = JSON.parse(clean); }
+  catch { throw new Error('Copilot returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or use local mode.'); }
   if (parsed?.model === 'custom') return validateCustomSpec(parsed);
   const colors = ['green', 'orange', 'blue', 'purple', 'red', 'white'];
   const types = { jurassic: ['stegosaurus', 'brachiosaurus'], space: ['explorer', 'cargo'] };
@@ -112,7 +115,7 @@ ${CUSTOM_DESIGN_PROMPT}
 No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(brief)}`;
   return new Promise((resolvePromise, reject) => {
     // No shell interpolation and no agent tools. Only the brief and fixed schema go to the model.
-    const child = spawn(copilotExecutable, ['-p', prompt, '--silent', '--stream=off',
+    const child = spawn(copilotExecutable, ['-p', prompt, '--output-format=json', '--stream=off',
       '--available-tools=', '--disable-builtin-mcps',
       '--no-custom-instructions', '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'], {
       cwd: workdir, env: { ...process.env, COPILOT_ALLOW_ALL: 'false', COPILOT_PLUGIN_DIR_ONLY: 'true' }, stdio: ['ignore', 'pipe', 'pipe'],
@@ -129,13 +132,15 @@ No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(bri
     const timer = setTimeout(() => {
       child.kill('SIGTERM');
       setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 2000).unref();
-      finish(new Error('Copilot took longer than 90 seconds. No automatic retry or fallback was made.'));
+      finish(new Error('Copilot took longer than 90 seconds. BrickLab did not retry or fall back.'));
     }, 90_000);
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => {
       stdout += chunk;
-      if (Buffer.byteLength(stdout) > 128_000) {
+      if (Buffer.byteLength(stdout) > 1_048_576) {
         child.kill('SIGTERM');
-        finish(new Error('Copilot response exceeded the size limit.'));
+        finish(new Error('Copilot CLI event stream exceeded the size limit.'));
       }
     });
     child.stderr.on('data', chunk => { stderr = (stderr + chunk).slice(-2000); });
@@ -146,14 +151,15 @@ No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(bri
     child.on('close', code => {
       if (settled) return;
       if (code !== 0) {
-        const authentication = /authenticat|not logged|login required|copilot login|unauthorized|401\b/i.test(`${stderr}\n${stdout}`);
+        const authentication = /authenticat|not logged|login required|copilot login|unauthorized|401\b/i.test(stderr)
+          || copilotAuthenticationFailed(stdout);
         console.error('Copilot planning failed, exit code:', code, authentication ? '(authentication)' : '');
         plannerFailure = authentication
-          ? { state: 'needs-auth', message: 'Copilot reported an authentication failure. Run copilot login in the server terminal with a Copilot-enabled account, check token overrides and organization policy, then retry. No automatic retry or fallback was made.' }
-          : { state: 'unavailable', message: 'Copilot CLI failed. Check copilot --version, copilot login, network access, subscription and quota in the server terminal, or select local mode. No automatic retry or fallback was made.' };
+          ? { state: 'needs-auth', message: 'Copilot reported an authentication failure. Run copilot login in the server terminal with a Copilot-enabled account, check token overrides and organization policy, then retry. BrickLab did not retry or fall back.' }
+          : { state: 'unavailable', message: 'Copilot CLI failed. Check copilot --version, copilot login, network access, subscription and quota in the server terminal, or select local mode. BrickLab did not retry or fall back.' };
         finish(new Error(plannerFailure.message));
       } else {
-        try { const spec = extractSpec(stdout); plannerFailure = null; finish(null, spec); }
+        try { const spec = extractSpec(readCopilotResponse(stdout)); plannerFailure = null; finish(null, spec); }
         catch (error) { finish(new Error(`Could not read the Copilot plan: ${error.message}`)); }
       }
     });

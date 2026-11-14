@@ -6,7 +6,7 @@ import { once } from 'node:events';
 import { request } from 'node:http';
 import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, delimiter } from 'node:path';
 
 function fetchWithHost(url: string, options: { method?: string; headers: Record<string, string>; body?: string }) {
   return new Promise<Response>((resolve, reject) => {
@@ -91,12 +91,17 @@ test('local API rejects cross-origin, wrong-host, malformed and unapproved model
   assert.equal(forwarded.status, 403, 'Forwarding is not implicitly enabled');
 });
 
-test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', async t => {
+const posixExecutableFixtures = {
+  skip: process.platform === 'win32' ? 'These subprocess fixtures require POSIX shebang execution; native Windows CLI execution is not simulated.' : false,
+};
+
+test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {
   const bin = await mkdtemp(join(tmpdir(), 'bricklab-private-test-'));
   t.after(() => rm(bin, { recursive: true, force: true }));
   const visibilityFile = join(bin, 'ports.json');
   const callsFile = join(bin, 'model-calls.json');
   const specFile = join(bin, 'model-spec.json');
+  const invocationsFile = join(bin, 'model-invocations.txt');
   await writeFile(join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify([
@@ -110,12 +115,22 @@ process.stdout.write(fs.readFileSync(process.env.TEST_PORTS_FILE, 'utf8'));
   await writeFile(join(bin, 'copilot'), `#!/usr/bin/env node
 if (process.argv[2] === '--version') { console.log('fixture-cli'); process.exit(0); }
 require('node:fs').writeFileSync(process.env.TEST_CALLS_FILE, JSON.stringify(process.argv.slice(2)));
-console.log(require('node:fs').readFileSync(process.env.TEST_SPEC_FILE, 'utf8'));
+require('node:fs').appendFileSync(process.env.TEST_INVOCATIONS_FILE, 'call\\n');
+const content = require('node:fs').readFileSync(process.env.TEST_SPEC_FILE, 'utf8');
+const events = [
+  { type: 'session.start', data: {} },
+  { type: 'assistant.message', data: { content } },
+  { type: 'result', exitCode: 0 }
+].map(event => JSON.stringify(event)).join('\\n') + '\\n';
+const bytes = Buffer.from(events);
+const split = bytes.indexOf(Buffer.from('é')) + 1;
+process.stdout.write(bytes.subarray(0, split));
+setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
 `, { mode: 0o700 });
   const { port, base, output } = await startServer(t, {
     BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'test-codespace',
-    PATH: `${bin}:${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
-    TEST_CALLS_FILE: callsFile, TEST_SPEC_FILE: specFile,
+    PATH: `${bin}${delimiter}${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
+    TEST_CALLS_FILE: callsFile, TEST_SPEC_FILE: specFile, TEST_INVOCATIONS_FILE: invocationsFile,
   });
   const origin = `https://test-codespace-${port}.app.github.dev`;
   const password = /Temporary app password: ([a-f0-9]+)/.exec(output)?.[1];
@@ -155,8 +170,10 @@ console.log(require('node:fs').readFileSync(process.env.TEST_SPEC_FILE, 'utf8'))
   const args = JSON.parse(await readFile(callsFile, 'utf8')) as string[];
   assert.ok(args.includes('--available-tools='));
   assert.ok(args.includes('--disable-builtin-mcps'));
+  assert.ok(args.includes('--output-format=json'));
+  assert.equal(args.includes('--silent'), false, 'Use machine events, not wrapped terminal rendering');
   const custom = { ...spec, model: 'custom', wideWings: false, design: {
-    name: 'Moon clock tower',
+    name: 'Moon café tower',
     bricks: [
       { x: 0, y: 0, z: 0, width: 4, height: 1, depth: 4, color: 'blue', part: 'frame' },
       { x: 1, y: 1, z: 1, width: 2, height: 4, depth: 2, color: 'white', part: 'frame' },
@@ -171,6 +188,19 @@ console.log(require('node:fs').readFileSync(process.env.TEST_SPEC_FILE, 'utf8'))
     bricks: [custom.design.bricks[0], custom.design.bricks[0]] } }));
   const overlappingPlan = await post();
   assert.equal(overlappingPlan.status, 502, 'Invalid generated geometry fails without a template fallback');
+  const beforeInvalid = (await readFile(invocationsFile, 'utf8')).trim().split('\n').length;
+  await writeFile(specFile, '{"world":"space","model":"custom","design":{"name":"private\nfixture"}}');
+  const malformedPlan = await post();
+  assert.equal(malformedPlan.status, 502, 'The machine envelope never repairs malformed model JSON');
+  const malformedBody = await malformedPlan.json() as { error: string };
+  assert.match(malformedBody.error, /invalid JSON in its final response/);
+  assert.equal(malformedBody.error.includes('private'), false, 'Do not expose raw parser/model excerpts');
+  const afterInvalid = (await readFile(invocationsFile, 'utf8')).trim().split('\n').length;
+  assert.equal(afterInvalid, beforeInvalid + 1, 'Malformed responses do not trigger another model invocation');
+  await writeFile(specFile, 'x'.repeat(1_048_577));
+  const oversizedStream = await post();
+  assert.equal(oversizedStream.status, 502);
+  assert.match((await oversizedStream.json() as { error: string }).error, /event stream exceeded the size limit/);
   await writeFile(specFile, JSON.stringify(spec));
   for (const visibility of ['public', 'org', 'unknown']) {
     await setVisibility(visibility);
@@ -206,7 +236,7 @@ process.exit(1);
   const disabled = await startServer(t, {
     BRICKLAB_CODESPACES: '1', BRICKLAB_COPILOT: '0',
     CODESPACES: 'true', CODESPACE_NAME: 'test-codespace',
-    PATH: `${bin}:${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
+    PATH: `${bin}${delimiter}${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
   });
   const disabledOrigin = `https://test-codespace-${disabled.port}.app.github.dev`;
   const disabledPassword = /Temporary app password: ([a-f0-9]+)/.exec(disabled.output)?.[1];
@@ -232,7 +262,7 @@ test('missing CLI is detected without submitting a brief', async t => {
   assert.match(status.planner.message, /npm install -g @github\/copilot/);
 });
 
-test('an explicit executable avoids PATH shims and detects a misleading installed command', async t => {
+test('an explicit executable avoids PATH shims and detects a misleading installed command', posixExecutableFixtures, async t => {
   const bin = await mkdtemp(join(tmpdir(), 'bricklab-shim-test-'));
   t.after(() => rm(bin, { recursive: true, force: true }));
   const executable = join(bin, 'copilot native fixture');
