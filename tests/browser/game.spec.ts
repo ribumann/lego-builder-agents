@@ -1,5 +1,5 @@
 import { test, expect } from '@playwright/test';
-import { createPlan, parseBrief } from '../../src/engine';
+import { Team, allBricks, createPlan, parseBrief, validateSpec } from '../../src/engine';
 
 test('Jurassic build supports pause, step, repair, replay, download and restore', async ({ page }) => {
   const errors: string[] = [];
@@ -68,7 +68,8 @@ test('mobile layout, crew interaction and input failures remain usable', async (
   await page.goto('/');
   expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   await expect(page.locator('#mission-title')).toHaveText('A little prehistoric. A lot of possibility.');
-  await expect(page.locator('.agent-name small')).toHaveText(['Coordinator', 'Structure specialist', 'Finishing specialist']);
+  await expect(page.locator('.agent-name strong')).toHaveText(['BuildBot', 'PlanBot', 'FrameBot', 'DetailBot', 'CheckBot']);
+  await expect(page.locator('.agent-name small')).toHaveText(['Coordinator', 'Plan verifier', 'Structure specialist', 'Finishing specialist', 'Quality inspector']);
   for (const role of await page.locator('.agent-name small').all()) await expect(role).toBeVisible();
   expect(await page.locator('.stage + .transport + .team-panel').count()).toBe(1);
   const quiz = await page.locator('#quiz-options').boundingBox();
@@ -110,12 +111,16 @@ test('a three-agent AI mission can be loaded and its decisions executed, without
     name: 'ai-mission.json', mimeType: 'application/json', buffer: Buffer.from(JSON.stringify(mission)),
   });
   await expect(page.locator('#event-list')).toContainText('Synthetic test fixture');
+  await expect(page.locator('#event-list')).toContainText('PlanBot');
+  await expect(page.locator('#plan-state')).toHaveText('Reviewed');
   await expect(page.locator('#stage-status')).toContainText('Plan ready');
   await expect(page.getByLabel('What shall we build?')).toHaveValue('red explorer with wide wings');
   await page.getByLabel('Fast-forward speed, currently 1 times').click();
   await page.getByLabel('Fast-forward speed, currently 4 times').click();
   await page.getByRole('button', { name: 'Start building' }).click();
   await expect(page.locator('#inspection-result')).toHaveText('4/4 checks', { timeout: 15_000 });
+  await expect(page.locator('#event-list')).toContainText('CheckBot');
+  await expect(page.locator('#check-state')).toHaveText('Passed');
   await page.locator('#import-file').setInputFiles({
     name: 'bad-mission.json', mimeType: 'application/json', buffer: Buffer.from('{"version":123}'),
   });
@@ -151,6 +156,7 @@ test('fixture Copilot custom design accepts an unrelated brief and survives relo
       ] },
     } } });
   });
+
   await page.goto('/');
   await expect(page.locator('#brief-help')).toContainText('templates only');
   await page.getByRole('button', { name: 'Change mode' }).click();
@@ -171,4 +177,92 @@ test('fixture Copilot custom design accepts an unrelated brief and survives relo
   await page.reload();
   await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
   await expect(page.getByLabel('What shall we build?')).toHaveValue('A lighthouse on a rocky coast');
+});
+
+test('local herd world builds named objects, repairs and survives reload without a model', async ({ page }) => {
+  test.setTimeout(120_000);
+  let requests = 0;
+  await page.route('**/api/plan', route => { requests++; return route.abort(); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Load local Jurassic herd' }).click();
+  await expect(page.getByRole('alert')).toContainText('not a live model result');
+  await expect(page.locator('#scene-caption')).toContainText('Jurassic herd');
+  await page.getByRole('button', { name: 'Task board' }).click();
+  await expect(page.locator('#task-list')).toContainText('Mossback stegosaurus');
+  await expect(page.locator('#task-list')).toContainText('Violet brachiosaurus');
+  await expect(page.locator('#task-list')).toContainText('Valley tree');
+  await expect(page.locator('#plan-state')).toHaveText('Reviewed');
+  await page.getByLabel('Fast-forward speed, currently 1 times').click();
+  await page.getByLabel('Fast-forward speed, currently 4 times').click();
+  await page.getByRole('button', { name: 'Start building' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 90_000 });
+  await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
+  await expect(page.locator('#checks')).toContainText('Mossback stegosaurus');
+  await expect(page.locator('#checks')).toContainText('Violet brachiosaurus');
+  await expect(page.locator('#check-state')).toHaveText('Passed');
+  await page.getByRole('button', { name: 'Hide one brick' }).click();
+  await expect(page.locator('#check-state')).toHaveText('Problem found');
+  await page.getByRole('button', { name: 'Ask team to repair' }).click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
+  await page.getByLabel('Replay placed bricks').fill('20');
+  await expect(page.locator('#replay-label')).toContainText('20 /');
+  await page.getByRole('button', { name: 'Live', exact: true }).click();
+  await page.reload();
+  await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
+  await expect(page.getByLabel('What shall we build?')).toHaveValue('Original local Jurassic herd example');
+  expect(requests).toBe(0);
+});
+
+test('completed advanced synthetic world renders at the occupied-cell limit', async ({ page }) => {
+  test.setTimeout(120_000);
+  const rows = Array.from({ length: 64 }, (_, i) => ({
+    x: -32, y: Math.floor(i / 8) * 8, z: -32 + (i % 8) * 8,
+    width: 8, height: 8, depth: 8, color: 'blue', part: 'frame',
+    repeat: { count: 8, dx: 8, dy: 0, dz: 0 },
+  }));
+  const spec = validateSpec({ world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 8192,
+    design: { name: 'Advanced synthetic world', objects: [{ name: 'Advanced test object', bricks: rows }] } }, 'space');
+  const plan = createPlan(spec);
+  const team = new Team(plan);
+  const bricks = allBricks(plan);
+  expect(bricks).toHaveLength(512);
+  expect(bricks.reduce((sum, b) => sum + b.width! * b.height! * b.depth!, 0)).toBe(262144);
+  for (const brick of bricks) team.bricks.set(brick.id, brick);
+  team.status = 'complete';
+  let requests = 0;
+  const errors: string[] = [];
+  page.on('pageerror', error => errors.push(error.message));
+  await page.route('**/api/plan', route => { requests++; return route.abort(); });
+  await page.goto('/');
+  await page.locator('#import-file').setInputFiles({
+    name: 'advanced-synthetic.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(team.snapshot('Advanced synthetic test world'))),
+  });
+  await expect(page.locator('#scene-error')).toBeHidden();
+  await expect(page.locator('#brick-count')).toContainText('512 / 512');
+  await expect(page.locator('#inspection-result')).toHaveText('3/3 checks');
+  await expect(page.locator('#checks')).toContainText('Advanced test object');
+  await page.getByRole('button', { name: 'Task board' }).click();
+  await expect(page.locator('#task-list')).toContainText('Advanced test object');
+  const canvas = page.locator('#canvas-host canvas');
+  await expect(canvas).toBeVisible();
+  await expect(canvas).toHaveAttribute('data-model-bodies', '512', { timeout: 60_000 });
+  await expect(canvas).toHaveAttribute('data-model-studs', '8192');
+  expect(Number(await canvas.getAttribute('data-render-calls'))).toBeGreaterThan(0);
+  expect(Number(await canvas.getAttribute('data-render-triangles'))).toBeGreaterThan(0);
+  const webgl = await canvas.evaluate(element => {
+    const gl = (element as HTMLCanvasElement).getContext('webgl2');
+    return gl && { error: gl.getError(), width: gl.drawingBufferWidth, height: gl.drawingBufferHeight };
+  });
+  expect(webgl).toBeTruthy();
+  expect(webgl!.error).toBe(0);
+  expect(webgl!.width).toBeGreaterThan(0);
+  expect(webgl!.height).toBeGreaterThan(0);
+  await page.setViewportSize({ width: 390, height: 844 });
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.getByRole('button', { name: 'How to play' }).click();
+  await expect(page.getByRole('dialog')).toContainText('Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.');
+  await expect(page.getByRole('dialog')).toContainText('262,144 cells');
+  expect(requests).toBe(0);
+  expect(errors).toEqual([]);
 });

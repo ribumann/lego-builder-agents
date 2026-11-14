@@ -2,6 +2,7 @@ import './style.css';
 import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnapshot, validateSpec, loadAIMission,
   type AgentId, type Brick, type World } from './engine';
 import { Workbench } from './scene';
+import { worldExample } from './world-examples';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -46,7 +47,7 @@ app.innerHTML = `
       <aside class="mission-panel">
         <div class="mission-heading"><span class="mission-icon">${icon('leaf')}</span><span id="mission-number">Mission: Jurassic</span></div>
         <h1 id="mission-title">A little prehistoric.<br> A lot of possibility.</h1>
-        <p id="mission-intro">You dream it. Three agents team up to build it, one brick at a time.</p>
+        <p id="mission-intro">You dream it. Five agents team up to build it, one brick at a time.</p>
         <div class="mission-steps">
           <div class="mission-step current" data-phase="brief"><b>1</b><div><strong>Imagine it</strong><span>Give your team a clear brief.</span></div></div>
           <div class="mission-step" data-phase="plan"><b>2</b><div><strong>Meet the plan</strong><span>See who does what, and why.</span></div></div>
@@ -71,7 +72,7 @@ app.innerHTML = `
         <div class="stage-footer"><span>Drag to orbit <span class="separator">/</span> Scroll to zoom <span class="separator">/</span> Tap a brick to inspect</span><span class="scale-label">LEGO-style · original geometry</span></div>
       </section>
       <aside class="team-panel">
-        <div class="panel-title"><h2>Your build crew</h2><span class="team-count">3 agents</span></div>
+        <div class="panel-title"><h2>Your build crew</h2><span class="team-count">5 agents</span></div>
         <div class="crew">${(Object.keys(AGENTS) as AgentId[]).map(id => `
           <button class="agent-row" data-agent="${id}" title="Ask ${AGENTS[id].name} about its job">
             <span class="bot-avatar ${id}"><span class="bot-eyes">••</span></span>
@@ -110,7 +111,7 @@ app.innerHTML = `
       <div class="inspection"><div class="section-title"><h3>Build inspection</h3><span id="inspection-result">Waiting for a build</span></div><div id="checks"></div></div>
       <div class="experiments"><h3>Try a little what-if</h3><p>Remove a finishing brick. Watch the team compare reality with its plan and repair the gap.</p><div class="experiment-actions"><button id="damage" class="button outline" disabled>Hide one brick</button><button id="repair" class="button outline" disabled>Ask team to repair</button></div><div class="replay-row"><label for="replay">Build replay</label><input id="replay" type="range" min="0" max="1" value="1" disabled aria-label="Replay placed bricks"/><button id="live-view" class="text-button">Live</button></div><span id="replay-label">Finish a build to explore its timeline.</span></div>
     </section>
-    <section class="learning-strip"><span class="learning-symbol">${icon('help')}</span><div><h3 id="quiz-title">Quick thought: what makes this a team of agents?</h3><div id="quiz-options"><button data-answer="wrong">They all use the same color</button><button data-answer="right">They choose actions and share progress</button><button data-answer="wrong">They build without any plan</button></div><p id="quiz-feedback" role="status">Make a prediction, then watch the crew.</p></div><div class="file-actions"><button id="export" class="button outline" disabled>${icon('download')} Save build file</button><button id="import" class="button outline">Load build / AI mission</button><input id="import-file" type="file" accept=".json,application/json" hidden aria-label="Choose a build or AI mission JSON file"/></div></section>
+    <section class="learning-strip"><span class="learning-symbol">${icon('help')}</span><div><h3 id="quiz-title">Quick thought: what makes this a team of agents?</h3><div id="quiz-options"><button data-answer="wrong">They all use the same color</button><button data-answer="right">They choose actions and share progress</button><button data-answer="wrong">They build without any plan</button></div><p id="quiz-feedback" role="status">Make a prediction, then watch the crew.</p></div><div class="file-actions"><button id="herd-example" class="button outline">Load local Jurassic herd</button><button id="fleet-example" class="button outline">Load local space fleet</button><button id="export" class="button outline" disabled>${icon('download')} Save build file</button><button id="import" class="button outline">Load build / AI mission</button><input id="import-file" type="file" accept=".json,application/json" hidden aria-label="Choose a build or AI mission JSON file"/></div></section>
     <footer><span>BrickLab <span class="footer-dot">·</span> A hands-on introduction to agentic teamwork.</span><span>Independent educational demo. Not affiliated with the LEGO Group.</span></footer>
   </main>
   <dialog id="info-dialog" aria-labelledby="dialog-title"><div class="dialog-heading"><h2 id="dialog-title">Welcome to the workshop</h2><button id="close-dialog" class="tool-button" aria-label="Close dialog">×</button></div><div id="dialog-body"></div></dialog>
@@ -158,7 +159,7 @@ try {
   scene = new Workbench($('#canvas-host'), (brick: Brick) => {
     const info = $('#brick-info');
     info.hidden = false;
-    info.textContent = `${brick.part} · placed by ${AGENTS[brick.agent].name} · grid (${brick.x}, ${brick.y}, ${brick.z}) · ${brick.width ?? 1} × ${brick.height ?? 1} × ${brick.depth ?? 1} cells`;
+    info.textContent = `${brick.object ? `${brick.object} · ` : ''}${brick.part} · placed by ${AGENTS[brick.agent].name} · grid (${brick.x}, ${brick.y}, ${brick.z}) · ${brick.width ?? 1} × ${brick.height ?? 1} × ${brick.depth ?? 1} cells`;
     setTimeout(() => { info.hidden = true; }, 5000);
   });
 } catch (error) {
@@ -200,11 +201,13 @@ function render() {
   setButton('#export', !count);
   setButton('#plan', planning);
   setButton('#demo', planning);
+  setButton('#herd-example', planning);
+  setButton('#fleet-example', planning);
   setButton('#jurassic', planning);
   setButton('#space', planning);
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
-  $('#transport-note').textContent = planning ? 'One bounded model request. The specialists will execute locally.'
+  $('#transport-note').textContent = planning ? 'One CLI planning invocation. The CLI may retry internally; the crew executes locally.'
     : running ? `${speed}× playback · Both builders observe the shared board each turn.`
     : status === 'complete' ? 'Try the repair challenge below, or change your brief.'
     : status === 'damaged' ? 'The inspector noticed a problem. Ask the team to repair it.'
@@ -218,6 +221,8 @@ function render() {
   document.querySelectorAll<HTMLElement>('.mission-step').forEach(el => el.classList.toggle('current', el.dataset.phase === phase));
   for (const id of Object.keys(AGENTS) as AgentId[]) {
     const text = id === 'build' ? planning ? 'Thinking' : running ? 'Checking' : team ? 'Watching' : 'Ready'
+      : id === 'plan' ? team ? 'Reviewed' : 'Ready'
+      : id === 'check' ? status === 'complete' ? 'Passed' : status === 'damaged' ? 'Problem found' : team ? 'Waiting' : 'Ready'
       : running && team?.plan.tasks.some(t => t.agent === id && !team!.taskDone(t) && t.depends.every(d => team!.taskDone(team!.plan.tasks.find(p => p.id === d)!))) ? 'Building'
       : status === 'complete' ? 'Done' : team ? 'Waiting' : 'Ready';
     $(`#${id}-state`).textContent = text;
@@ -228,8 +233,10 @@ function render() {
     lastEventCount = revision;
     const events = team?.events.slice().reverse() ?? [
       { agent: 'build' as const, kind: 'plan', message: 'Hello, director! Give us a dinosaur or spaceship brief. I’ll split it into jobs for our crew.', tick: 0 },
+      { agent: 'plan' as const, kind: 'observe', message: 'I review the task dependencies and check whether the planned bricks connect.', tick: 0 },
       { agent: 'frame' as const, kind: 'observe', message: 'I build the body and structure. I’ll tell DetailBot when a supporting part is ready.', tick: 0 },
       { agent: 'detail' as const, kind: 'observe', message: 'Eyes, plates, cockpits, engines… I make the finishing touches. We share one task board.', tick: 0 },
+      { agent: 'check' as const, kind: 'observe', message: 'I inspect the finished model and check for missing bricks.', tick: 0 },
     ];
     $('#event-list').innerHTML = events.map(e => `<article class="event ${e.agent}"><div><strong>${AGENTS[e.agent].name}</strong><span>${esc(e.kind)} · turn ${e.tick}</span></div><p>${esc(e.message)}</p></article>`).join('');
   }
@@ -237,11 +244,11 @@ function render() {
     const done = team!.taskDone(task);
     const placed = task.bricks.filter(b => team!.bricks.has(b.id)).length;
     const waiting = task.depends.some(id => !team!.taskDone(team!.plan.tasks.find(t => t.id === id)!));
-    return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(task.label)}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `Waits for: ${task.depends.map(id => esc(id.split(':')[1])).join(', ')}` : done ? 'Shared board updated' : 'Dependencies ready'}</small></div></article>`;
+    return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(task.label)}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `Waits for: ${task.depends.map(id => esc(team!.plan.tasks.find(t => t.id === id)?.label ?? id)).join(', ')}` : done ? 'Shared board updated' : 'Dependencies ready'}</small></div></article>`;
   }).join('') : '<p class="empty-note">Make a plan to see the delegated jobs and their dependencies here.</p>';
   const checks = team?.checks ?? [];
   $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(c.label)}</strong><small>${esc(c.detail)}</small></div></div>`).join('')
-    : '<p class="empty-note">The coordinator will compare the finished build with the brief, connectivity, symmetry, and brick budget.</p>';
+    : '<p class="empty-note">CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.</p>';
   $('#inspection-result').textContent = team ? `${checks.filter(c => c.pass).length}/${checks.length} checks` : 'Waiting for a build';
   const replay = $<HTMLInputElement>('#replay');
   replay.disabled = status !== 'complete' && status !== 'damaged';
@@ -340,7 +347,7 @@ function switchWorld(next: World) {
   }
   const space = world === 'space';
   $('#mission-title').innerHTML = space ? 'One small brick.<br> One giant adventure.' : 'A little prehistoric.<br> A lot of possibility.';
-  $('#mission-intro').textContent = space ? 'Destination: your imagination. Give the crew a spaceship mission.' : 'You dream it. Three agents team up to build it, one brick at a time.';
+  $('#mission-intro').textContent = space ? 'Destination: your imagination. Give the crew a spaceship mission.' : 'You dream it. Five agents team up to build it, one brick at a time.';
   $('#mission-number').textContent = `Mission: ${space ? 'Space' : 'Jurassic'}`;
   $('.mission-icon').innerHTML = icon(space ? 'rocket' : 'leaf');
   $('#scene-coordinates').textContent = space ? 'ORBITAL / BUILD SITE B' : 'JURASSIC / BUILD SITE A';
@@ -386,19 +393,21 @@ for (const tab of ['live', 'tasks']) $(`#tab-${tab}`).addEventListener('click', 
 });
 function answer(question: string, agent?: AgentId) {
   const q = question.toLowerCase();
-  const id = agent ?? (/detail|wait|finish/.test(q) ? 'detail' : /frame|structure/.test(q) ? 'frame' : 'build');
+  const id = agent ?? (/checkbot|inspect|quality/.test(q) ? 'check' : /planbot|dependencies/.test(q) ? 'plan' : /detail|wait|finish/.test(q) ? 'detail' : /frame|structure/.test(q) ? 'frame' : 'build');
   const responses: Record<AgentId, string> = {
-    build: 'I turn your goal into tasks, delegate them to the two specialists, and inspect the result. A language model is optional here: our local agents follow explicit rules.',
+    build: 'I turn your goal into tasks and coordinate the crew. A language model is optional here: our local agents follow explicit rules.',
+    plan: 'I review the task graph for missing dependencies and cycles before the build starts, and warn if the planned bricks are disconnected.',
     frame: 'I check the shared board, choose a ready structure task, and place bricks. I tell DetailBot when each supporting part is ready. I do not need a new instruction for every brick.',
     detail: 'I can work alongside FrameBot. Feet wait for legs; eyes wait for a head. Those dependencies stop me from placing details before their supporting part exists.',
+    check: 'I inspect the completed build against its plan, connectivity and budget. If bricks are missing, I identify them so their owners can repair the build.',
   };
   let response = responses[id];
-  if (/cost|money|price/.test(q)) response = 'Local mode makes no model calls. Copilot mode uses one CLI planning request per plan; subscription usage or charges depend on your account. We cannot measure a dollar price here.';
+  if (/cost|money|price/.test(q)) response = 'Local mode makes no model calls. Copilot mode starts one CLI planning invocation per click; the CLI may retry internally, so subscription usage can differ. Charges depend on your account; we cannot measure a dollar price here.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
-  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode we are rule-based agents, not language models. Copilot mode lets a real model interpret the brief; our two specialists still execute and inspect locally. Our messages explain program decisions, not hidden model thoughts.';
-  else if (!agent && !/who|what|job|help|team|wait|frame|detail|build|structure/.test(q)) response = 'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.';
+  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. Copilot can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
+  else if (!agent && !/who|what|job|help|team|wait|frame|detail|build|structure|planbot|checkbot|inspect|quality|dependencies/.test(q)) response = 'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.';
   $('#crew-answer').textContent = `${AGENTS[id].name}: ${response}`;
 }
 $('#question-form').addEventListener('submit', event => {
@@ -422,6 +431,27 @@ $('#export').addEventListener('click', () => {
   link.click();
   setTimeout(() => URL.revokeObjectURL(link.href), 5000);
 });
+function loadWorldExample(exampleWorld: World) {
+  if (planning) return;
+  try {
+    const plan = createPlan(worldExample(exampleWorld), ['This themed world is a deterministic local example, not a model result.'], 'local');
+    const example = new Team(plan);
+    if (world !== plan.spec.world) switchWorld(plan.spec.world);
+    running = false; replaying = false;
+    team = example;
+    activeBrief = `Original local ${exampleWorld === 'jurassic' ? 'Jurassic herd' : 'space fleet'} example`;
+    brief.value = activeBrief;
+    scene?.setBlueprint(allBricks(plan));
+    scene?.showBlueprint(showGhost);
+    eventRevision += 1000;
+    notice('Local world example loaded: original deterministic geometry, not a live model result. Start the crew to build it.');
+    save(); render();
+  } catch (error) {
+    notice(`Could not load the world example: ${error instanceof Error ? error.message : 'invalid design'}.`);
+  }
+}
+$('#herd-example').addEventListener('click', () => loadWorldExample('jurassic'));
+$('#fleet-example').addEventListener('click', () => loadWorldExample('space'));
 $('#import').addEventListener('click', () => $<HTMLInputElement>('#import-file').click());
 $('#import-file').addEventListener('change', async () => {
   const input = $<HTMLInputElement>('#import-file');
@@ -429,7 +459,7 @@ $('#import-file').addEventListener('change', async () => {
   if (!file) return;
   try {
     if (planning) throw new Error('Wait for the current model request to finish before loading a file.');
-    if (file.size > 1_000_000) throw new Error('Build files must be smaller than 1 MB.');
+    if (file.size > 4_000_000) throw new Error('Build files must be smaller than 4 MB.');
     const data: unknown = JSON.parse(await file.text());
     const isMission = !!data && typeof data === 'object' && 'kind' in data && data.kind === 'bricklab-ai-mission';
     const loaded = isMission ? loadAIMission(data) : restoreSnapshot(data);
@@ -443,7 +473,7 @@ $('#import-file').addEventListener('change', async () => {
     scene?.showBlueprint(showGhost);
     eventRevision += 1000;
     clearNotice();
-    if (isMission) notice('AI mission loaded. Its three imported decisions set the task priorities; local agents will execute them. File attribution is not independently verified. Press Start building to watch.');
+    if (isMission) notice('AI mission loaded. Three imported model decisions set the plan and task priorities; PlanBot and CheckBot work locally. File attribution is not independently verified. Press Start building to watch.');
     save(); render();
   } catch (error) {
     notice(`Could not load this file: ${error instanceof Error ? error.message : 'invalid JSON'}. The current build is unchanged.`);
@@ -459,19 +489,20 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>This workshop makes agent teamwork visible. Choose <strong>Jurassic valley</strong> or <strong>Space dock</strong>, then describe your build.</p>
   <ol><li><strong>Imagine:</strong> name the species or ship type, body color, and a feature.</li><li><strong>Plan:</strong> BuildBot delegates jobs. Open the task board to inspect dependencies.</li><li><strong>Build:</strong> approve the plan, pause, step one turn, or fast-forward at 4× and 16×.</li><li><strong>Experiment:</strong> hide a brick, ask for a repair, or replay the placement timeline.</li></ol>
   <p>Supported dinosaurs: <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic. Ships: <strong>explorer and cargo</strong>. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change the model.</p>
-  <p>Local mode uses only these templates and three transparent, rule-based agents. Optional Copilot mode can propose original static designs within bounded brick dimensions and workspace limits; specialist execution stays local. Messages explain decisions, not private model reasoning.</p>
+  <p>Five rule-based agents coordinate, verify the plan, build structure and details, and inspect the result. Local mode uses only these templates. Optional Copilot mode can propose original static designs within bounded brick dimensions and workspace limits; all five agents still work locally. Messages explain decisions, not private model reasoning.</p>
+  <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
   <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
     <p><strong>Local workshop</strong> — rule-based agents build only stegosaurus, brachiosaurus, explorer and cargo templates. Other ideas may be mapped to a template. Runs offline after loading; no model, token, or hosting bill.</p>
     <button id="choose-local" class="button primary">Use local agents</button>
-    <hr><p><strong>GitHub Copilot planner</strong> — one model call can propose an original static design with different rectangular brick sizes, within workspace and count limits. FrameBot and DetailBot remain local agents, not separate LLMs.</p>
-    <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not know the model’s dollar cost. Default limit: 12 calls per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
+    <hr><p><strong>GitHub Copilot planner</strong> — one CLI planning invocation per click can propose an original static design with different rectangular brick sizes, within workspace and count limits. FrameBot and DetailBot remain local agents, not separate LLMs.</p>
+    <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Default limit: 12 CLI invocations per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
     <p id="planner-status" role="status">${esc(plannerMessage)}</p>
     <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Selecting Copilot consents to sending subsequent briefs; readiness does not verify login, subscription, or live access.</p>
     <button id="refresh-status" class="button outline">Retry status</button>
     <button id="choose-copilot" class="button outline" ${copilotEnabled || plannerState === 'needs-auth' ? '' : 'disabled'}>Use Copilot planning</button>
-    <hr><p><strong>Three model agents via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two specialist models concurrently. Each chooses a real task priority. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
+    <hr><p><strong>Three model decisions via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two builder models concurrently. Each chooses a real task priority. PlanBot and CheckBot remain local rule-based agents, making five crew members, not five model calls. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
     <p>This workflow needs repository access and GitHub Models availability. It has not been live-verified in this environment. It uses three bounded requests, no additional model keys, and no model tools. Do not enter personal information in workflow inputs.</p>
     <p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
   $('#choose-local').addEventListener('click', () => { mode = 'local'; updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });

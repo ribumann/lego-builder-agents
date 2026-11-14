@@ -98,6 +98,8 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 .bot-avatar { width: 35px; height: 35px; display: grid; place-items: center; background: #ffe091; border-radius: 10px; flex-shrink: 0; position: relative; }
 .bot-avatar::before { content: ''; position: absolute; top: -3px; left: 16px; width: 3px; height: 5px; background: #be8f35; border-radius: 2px; }
 .bot-avatar.frame { background: #cfdfef; }
+.bot-avatar.plan { background: #ded8ef; }
+.bot-avatar.check { background: #cce9df; }
 .bot-avatar.detail { background: #f3d9dc; }
 .bot-eyes { background: #263b4e; color: #ffeda6; border-radius: 4px; height: 14px; width: 23px; display: flex; align-items: center; justify-content: center; font-size: 16px; letter-spacing: 3px; padding-left: 3px; }
 .agent-name strong { display: block; font-size: 11px; }
@@ -114,6 +116,8 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 .event strong { font-size: 10px; color: #775a20; }
 .event.frame strong { color: #355d8c; }
 .event.detail strong { color: #9c4a59; }
+.event.plan strong { color: #594d85; }
+.event.check strong { color: #25634e; }
 .event > div > span { font-size: 8px; color: #617681; }
 .event p { margin: 5px 0 0; color: #506574; font-size: 10px; line-height: 1.75; }
 .task { display: flex; gap: 11px; padding: 12px 0; border-bottom: 1px solid var(--line); }
@@ -284,7 +288,7 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .bot-eyes { width: 21px; }
   .agent-name strong { font-size: 10px; }
   .agent-name small { line-height: 1.3; }
-  .agent-state { display: none; }
+  .agent-state { margin-left: 0; }
   .team-content { flex: none; max-height: 205px; height: 205px; }
   .event p { font-size: 11px; }
   .event strong { font-size: 11px; }

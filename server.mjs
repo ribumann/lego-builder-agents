@@ -105,12 +105,14 @@ Return ONLY one JSON object. The selected world MUST be "${world}".
 For a brief that exactly fits a supported example, you may use these template fields:
 {"world":"${world}","model":"${world === 'jurassic' ? 'stegosaurus' : 'explorer'}","color":"${world === 'jurassic' ? 'green' : 'blue'}","longTail":false,"wideWings":false,"budget":700}
 Template models for jurassic: stegosaurus, brachiosaurus. Template models for space: explorer, cargo.
-Allowed colors: green, orange, blue, purple, red, white. budget integer 1..1000, default 700.
+Template body colors: green, orange, blue, purple, red, white. Template budget integer 1..1000, default 700.
 Choose the body color, species or ship type, tail length and wing width from the brief.
 A tall or long neck means brachiosaurus.
-For ANY other object or requested geometry (castle, bridge, animal, vehicle, invention, etc.),
+For other dinosaurs, new anatomy, novel spacecraft, herds, fleets, habitats or ANY other requested subject
+(buildings, castles, bridges, animals, vehicles, inventions, etc.),
 design a new custom brick arrangement rather than substituting a dinosaur or spacecraft template.
-The world is only the backdrop and does not limit the subject. Honor different brick dimensions.
+The selected world is only the backdrop and does not limit the subject. Honor different brick dimensions.
+For a herd, fleet or other multi-object world, use separate named objects rather than one disconnected object.
 ${CUSTOM_DESIGN_PROMPT}
 No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(brief)}`;
   return new Promise((resolvePromise, reject) => {
@@ -123,23 +125,33 @@ No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(bri
     let stdout = '';
     let stderr = '';
     let settled = false;
+    let forceKill;
+    const stopChild = () => {
+      child.kill('SIGTERM');
+      forceKill = setTimeout(() => {
+        if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+      }, 2000);
+      forceKill.unref();
+    };
     const finish = (error, value) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      error ? reject(error) : resolvePromise(value);
+      if (error && forceKill && child.exitCode === null && child.signalCode === null)
+        child.once('exit', () => reject(error));
+      else error ? reject(error) : resolvePromise(value);
     };
     const timer = setTimeout(() => {
-      child.kill('SIGTERM');
-      setTimeout(() => { if (child.exitCode === null) child.kill('SIGKILL'); }, 2000).unref();
+      stopChild();
       finish(new Error('Copilot took longer than 90 seconds. BrickLab did not retry or fall back.'));
     }, 90_000);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', chunk => {
+      if (settled) return;
       stdout += chunk;
       if (Buffer.byteLength(stdout) > 1_048_576) {
-        child.kill('SIGTERM');
+        stopChild();
         finish(new Error('Copilot CLI event stream exceeded the size limit.'));
       }
     });
@@ -149,6 +161,7 @@ No commentary, markdown, tools or extra fields. User brief: ${JSON.stringify(bri
       finish(new Error(plannerFailure.message));
     });
     child.on('close', code => {
+      clearTimeout(forceKill);
       if (settled) return;
       if (code !== 0) {
         const authentication = /authenticat|not logged|login required|copilot login|unauthorized|401\b/i.test(stderr)

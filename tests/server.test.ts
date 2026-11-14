@@ -102,6 +102,7 @@ test('private Codespace mode authenticates independently and fails closed on vis
   const callsFile = join(bin, 'model-calls.json');
   const specFile = join(bin, 'model-spec.json');
   const invocationsFile = join(bin, 'model-invocations.txt');
+  const pidFile = join(bin, 'oversized-pid.txt');
   await writeFile(join(bin, 'gh'), `#!/usr/bin/env node
 const fs = require('node:fs');
 if (JSON.stringify(process.argv.slice(2)) !== JSON.stringify([
@@ -117,6 +118,11 @@ if (process.argv[2] === '--version') { console.log('fixture-cli'); process.exit(
 require('node:fs').writeFileSync(process.env.TEST_CALLS_FILE, JSON.stringify(process.argv.slice(2)));
 require('node:fs').appendFileSync(process.env.TEST_INVOCATIONS_FILE, 'call\\n');
 const content = require('node:fs').readFileSync(process.env.TEST_SPEC_FILE, 'utf8');
+if (Buffer.byteLength(content) > 1048576) {
+  require('node:fs').writeFileSync(process.env.TEST_PID_FILE, String(process.pid));
+  process.on('SIGTERM', () => {});
+  setInterval(() => {}, 1000);
+}
 const events = [
   { type: 'session.start', data: {} },
   { type: 'assistant.message', data: { content } },
@@ -130,7 +136,8 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const { port, base, output } = await startServer(t, {
     BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'test-codespace',
     PATH: `${bin}${delimiter}${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
-    TEST_CALLS_FILE: callsFile, TEST_SPEC_FILE: specFile, TEST_INVOCATIONS_FILE: invocationsFile,
+    TEST_CALLS_FILE: callsFile, TEST_SPEC_FILE: specFile,
+    TEST_INVOCATIONS_FILE: invocationsFile, TEST_PID_FILE: pidFile,
   });
   const origin = `https://test-codespace-${port}.app.github.dev`;
   const password = /Temporary app password: ([a-f0-9]+)/.exec(output)?.[1];
@@ -201,6 +208,8 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const oversizedStream = await post();
   assert.equal(oversizedStream.status, 502);
   assert.match((await oversizedStream.json() as { error: string }).error, /event stream exceeded the size limit/);
+  const oversizedPid = Number(await readFile(pidFile, 'utf8'));
+  assert.throws(() => process.kill(oversizedPid, 0), { code: 'ESRCH' }, 'An over-limit CLI that ignores termination must exit before the request releases its planning slot');
   await writeFile(specFile, JSON.stringify(spec));
   for (const visibility of ['public', 'org', 'unknown']) {
     await setVisibility(visibility);
