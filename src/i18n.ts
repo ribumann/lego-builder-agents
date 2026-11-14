@@ -106,6 +106,32 @@ const catalog: Record<string, Translations> = {
   'Agent actions and explanations': ['Aktionen und Erklärungen der Agenten', 'Actions et explications des agents', 'Azioni e spiegazioni degli agenti', 'Acciones y explicaciones de los agentes', 'Ações e explicações dos agentes'],
   'Ask your crew': ['Frag dein Team', 'Interrogez votre équipe', 'Chiedi alla squadra', 'Pregunta al equipo', 'Pergunte à equipe'],
   'Ask crew': ['Team fragen', 'Interroger l’équipe', 'Chiedi alla squadra', 'Preguntar al equipo', 'Perguntar à equipe'],
+  'Waits for:': ['Wartet auf:', 'Attend :', 'Attende:', 'Espera a:', 'Aguarda:'],
+  'Shared board updated': ['Gemeinsame Tafel aktualisiert', 'Tableau partagé actualisé', 'Bacheca condivisa aggiornata', 'Tablero compartido actualizado', 'Quadro compartilhado atualizado'],
+  'Dependencies ready': ['Voraussetzungen erfüllt', 'Prérequis satisfaits', 'Prerequisiti pronti', 'Requisitos cumplidos', 'Pré-requisitos prontos'],
+  'No species specified: I chose a stegosaurus. Try naming a brachiosaurus.': ['Keine Art angegeben: Ich habe einen Stegosaurus gewählt. Probiere einen Brachiosaurus.', 'Aucune espèce précisée : j’ai choisi un stégosaure. Essayez un brachiosaure.', 'Nessuna specie indicata: ho scelto uno stegosauro. Prova un brachiosauro.', 'Sin especie indicada: elegí un estegosaurio. Prueba un braquiosaurio.', 'Sem espécie indicada: escolhi um estegossauro. Experimente um braquiossauro.'],
+  'No ship type specified: I chose an explorer.': ['Kein Schiffstyp angegeben: Ich habe einen Erkunder gewählt.', 'Aucun type de vaisseau précisé : j’ai choisi un explorateur.', 'Nessun tipo di nave indicato: ho scelto un esploratore.', 'Sin tipo de nave indicado: elegí una exploradora.', 'Sem tipo de nave indicado: escolhi uma exploradora.'],
+  'Offline template mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.': ['Offline-Vorlagen verstehen einen kleinen Wortschatz, keine beliebige Sprache. Art, Körperfarbe, langer Schwanz, breite Flügel und Budget werden unterstützt.', 'Les modèles hors ligne comprennent un vocabulaire limité, pas le langage libre. Espèce, couleur, longue queue, ailes larges et budget sont pris en charge.', 'I modelli offline comprendono un vocabolario limitato, non il linguaggio libero. Sono supportati specie, colore, coda lunga, ali larghe e budget.', 'Las plantillas sin conexión entienden vocabulario limitado, no lenguaje libre. Admiten especie, color, cola larga, alas anchas y presupuesto.', 'Os modelos offline entendem vocabulário limitado, não linguagem livre. Aceitam espécie, cor, cauda longa, asas largas e orçamento.'],
+  'No support or finishing tasks are assigned to me in this design; there is no additional construction to share.': ['In diesem Entwurf sind mir keine Stütz- oder Detailaufgaben zugewiesen; es gibt keine weitere Bauarbeit für mich.', 'Aucune tâche de support ou de finition ne m’est attribuée dans cette création ; je n’ai pas de construction supplémentaire à partager.', 'Non mi sono assegnate attività di supporto o finitura in questo progetto; non c’è altro lavoro da condividere.', 'No tengo tareas de soporte ni acabado en este diseño; no hay más construcción que compartir.', 'Não tenho tarefas de suporte ou acabamento neste projeto; não há mais construção para compartilhar.'],
+  'legs': ['Beine', 'pattes', 'zampe', 'patas', 'pernas'],
+  'body': ['Körper', 'corps', 'corpo', 'cuerpo', 'corpo'],
+  'tail': ['Schwanz', 'queue', 'coda', 'cola', 'cauda'],
+  'neck': ['Hals', 'cou', 'collo', 'cuello', 'pescoço'],
+  'head': ['Kopf', 'tête', 'testa', 'cabeza', 'cabeça'],
+  'eyes': ['Augen', 'yeux', 'occhi', 'ojos', 'olhos'],
+  'muzzle': ['Schnauze', 'museau', 'muso', 'hocico', 'focinho'],
+  'plates': ['Platten', 'plaques', 'piastre', 'placas', 'placas'],
+  'feet': ['Füße', 'pieds', 'piedi', 'pies', 'pés'],
+  'landing gear': ['Fahrwerk', 'train d’atterrissage', 'carrello', 'tren de aterrizaje', 'trem de pouso'],
+  'hull': ['Rumpf', 'coque', 'scafo', 'casco', 'casco'],
+  'nose': ['Spitze', 'nez', 'prua', 'morro', 'nariz'],
+  'wings': ['Flügel', 'ailes', 'ali', 'alas', 'asas'],
+  'fin': ['Finne', 'aileron', 'pinna', 'aleta', 'aleta'],
+  'engines': ['Triebwerke', 'moteurs', 'motori', 'motores', 'motores'],
+  'thrusters': ['Düsen', 'propulseurs', 'propulsori', 'propulsores', 'propulsores'],
+  'cockpit': ['Cockpit', 'cockpit', 'cabina', 'cabina', 'cabine'],
+  'cargo': ['Fracht', 'cargaison', 'carico', 'carga', 'carga'],
+  'stripes': ['Streifen', 'bandes', 'strisce', 'franjas', 'faixas'],
   'Who does what?': ['Wer macht was?', 'Qui fait quoi ?', 'Chi fa cosa?', '¿Quién hace qué?', 'Quem faz o quê?'],
   'Why wait?': ['Warum warten?', 'Pourquoi attendre ?', 'Perché aspettare?', '¿Por qué esperar?', 'Por que esperar?'],
   'Choose a question above or ask in English.': ['Wähle oben eine Frage oder frage auf Englisch.', 'Choisissez une question ci-dessus ou demandez en anglais.', 'Scegli una domanda sopra o chiedi in inglese.', 'Elige una pregunta arriba o pregunta en inglés.', 'Escolha uma pergunta acima ou pergunte em inglês.'],
@@ -114,6 +140,11 @@ const catalog: Record<string, Translations> = {
   'I check the shared board, choose a ready structure task, and place bricks. I tell DetailBot when each supporting part is ready. I do not need a new instruction for every brick.': ['Ich prüfe die gemeinsame Tafel, wähle eine bereite Strukturaufgabe und setze Steine. Ich informiere DetailBot, wenn ein tragendes Teil bereit ist. Ich brauche nicht für jeden Stein einen neuen Auftrag.', 'Je consulte le tableau partagé, choisis une tâche de structure prête et place les briques. Je préviens DetailBot quand un support est prêt. Je n’ai pas besoin d’une instruction par brique.', 'Controllo la bacheca, scelgo un’attività strutturale pronta e poso i mattoncini. Avviso DetailBot quando un supporto è pronto. Non serve un’istruzione per ogni mattoncino.', 'Reviso el tablero, elijo una tarea estructural lista y coloco bloques. Aviso a DetailBot cuando un soporte está listo. No necesito una instrucción por bloque.', 'Verifico o quadro, escolho uma tarefa estrutural pronta e coloco blocos. Aviso ao DetailBot quando um suporte está pronto. Não preciso de uma instrução por bloco.'],
   'I build assigned supports and details after their prerequisites are ready. Feet wait for legs; eyes wait for a head. We share the task board.': ['Ich baue zugewiesene Stützen und Details, sobald die Voraussetzungen erfüllt sind. Füße warten auf Beine, Augen auf einen Kopf. Wir teilen eine Aufgabentafel.', 'Je construis les supports et détails confiés lorsque leurs prérequis sont prêts. Les pieds attendent les jambes, les yeux la tête. Nous partageons le tableau.', 'Costruisco supporti e dettagli assegnati quando i prerequisiti sono pronti. I piedi aspettano le gambe, gli occhi la testa. Condividiamo la bacheca.', 'Construyo soportes y detalles asignados cuando se cumplen sus requisitos. Los pies esperan las piernas y los ojos la cabeza. Compartimos el tablero.', 'Construo suportes e detalhes atribuídos quando os pré-requisitos estão prontos. Os pés aguardam as pernas e os olhos a cabeça. Compartilhamos o quadro.'],
   'I inspect the completed build against its plan, connectivity and budget. If bricks are missing, I identify them so their owners can repair the build.': ['Ich prüfe den fertigen Bau anhand von Plan, Verbindung und Budget. Fehlende Steine identifiziere ich, damit ihre zuständigen Bauer sie ersetzen können.', 'Je vérifie la construction terminée par rapport au plan, à la connexion et au budget. J’identifie les briques manquantes pour que leurs responsables les remplacent.', 'Verifico la costruzione finita rispetto al piano, alla connessione e al budget. Identifico i mattoncini mancanti perché i responsabili li sostituiscano.', 'Reviso la construcción terminada frente al plan, la conexión y el presupuesto. Identifico los bloques faltantes para que sus responsables los repongan.', 'Verifico a construção concluída em relação ao plano, à conexão e ao orçamento. Identifico os blocos ausentes para que seus responsáveis os reponham.'],
+  'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.': ['Offline-Vorlagen rufen kein Modell auf. Lokale KI nutzt Server-Rechenleistung. Copilot startet einen CLI-Aufruf; die CLI kann intern wiederholen. Azure Foundry kann Kosten für den Betreiber verursachen. Einen Dollarpreis können wir hier nicht messen.', 'Les modèles hors ligne n’appellent aucun modèle. L’IA locale utilise le serveur. Copilot lance une commande CLI, qui peut réessayer en interne. Azure Foundry peut entraîner des frais pour l’hébergeur. Nous ne pouvons pas mesurer le prix ici.', 'I modelli offline non chiamano modelli linguistici. L’IA locale usa il server. Copilot avvia una chiamata CLI, che può riprovare internamente. Azure Foundry può generare costi per il gestore. Non possiamo misurare il prezzo qui.', 'Las plantillas sin conexión no llaman a modelos. La IA local usa el servidor. Copilot inicia una invocación CLI, que puede reintentar internamente. Azure Foundry puede generar costes para el propietario. No podemos medir el precio aquí.', 'Os modelos offline não chamam modelos. A IA local usa o servidor. O Copilot inicia uma invocação CLI, que pode repetir internamente. O Azure Foundry pode gerar custos para o responsável. Não podemos medir o preço aqui.'],
+  'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.': ['Wir vergleichen das tatsächliche Steineraster mit dem Plan. Der zuständige Spezialist öffnet die Aufgabe erneut und ersetzt den fehlenden Stein. Das ist ein Beobachten-Handeln-Prüfen-Zyklus.', 'Nous comparons la grille réelle au plan. Le spécialiste responsable rouvre sa tâche et remplace la brique manquante. C’est une boucle observer–agir–vérifier.', 'Confrontiamo la griglia reale con il piano. Lo specialista responsabile riapre l’attività e sostituisce il mattoncino mancante. È un ciclo osserva–agisci–verifica.', 'Comparamos la cuadrícula real con el plan. El especialista responsable reabre la tarea y repone el bloque faltante. Es un ciclo observar–actuar–comprobar.', 'Comparamos a grade real com o plano. O especialista responsável reabre a tarefa e repõe o bloco ausente. É um ciclo observar–agir–verificar.'],
+  'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!': ['Ein gemeinsamer Plan zeigt jedem Spezialisten seine Aufgabe und die nötigen Vorarbeiten. Ohne Abhängigkeiten könnte ein Agent Augen vor dem Kopf hinzufügen!', 'Un plan partagé indique à chaque spécialiste quoi faire et quelles pièces doivent exister d’abord. Sans dépendances, un agent pourrait poser les yeux avant la tête !', 'Un piano condiviso indica a ogni specialista cosa fare e quali parti servono prima. Senza dipendenze un agente potrebbe aggiungere gli occhi prima della testa!', 'Un plan compartido indica a cada especialista qué hacer y qué piezas deben existir antes. ¡Sin dependencias un agente podría añadir ojos antes de la cabeza!', 'Um plano compartilhado indica a cada especialista o que fazer e quais peças devem existir antes. Sem dependências, um agente poderia adicionar olhos antes da cabeça!'],
+  'In local mode all five agents follow rules, not language models. A selected cloud or local model can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.': ['Im lokalen Modus folgen alle fünf Agenten Regeln, keinen Sprachmodellen. Ein ausgewähltes Cloud- oder lokales Modell kann den Auftrag interpretieren; alle fünf Agenten arbeiten weiterhin lokal. Unsere Nachrichten erklären Programmentscheidungen, keine verborgenen Modellgedanken.', 'En mode local, les cinq agents suivent des règles, pas des modèles de langage. Un modèle cloud ou local peut interpréter la consigne ; les cinq agents travaillent toujours localement. Nos messages expliquent les décisions du programme, pas les pensées cachées du modèle.', 'In modalità locale tutti e cinque gli agenti seguono regole, non modelli linguistici. Un modello cloud o locale può interpretare la richiesta; gli agenti lavorano comunque localmente. I messaggi spiegano decisioni del programma, non pensieri nascosti del modello.', 'En modo local los cinco agentes siguen reglas, no modelos de lenguaje. Un modelo local o en la nube puede interpretar las instrucciones; los agentes siguen trabajando localmente. Los mensajes explican decisiones del programa, no pensamientos ocultos del modelo.', 'No modo local os cinco agentes seguem regras, não modelos de linguagem. Um modelo local ou em nuvem pode interpretar as instruções; os agentes continuam trabalhando localmente. As mensagens explicam decisões do programa, não pensamentos ocultos do modelo.'],
+  'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.': ['Ich bin eine lokale Lernhilfe, kein offenes Chatmodell. Frage auf Englisch nach Aufgaben, Abhängigkeiten, Auftrag, Reparatur, KI-Modus oder Kosten.', 'Je suis un guide pédagogique local, pas un modèle de conversation ouvert. Posez en anglais des questions sur les rôles, dépendances, consigne, réparation, mode IA ou coût.', 'Sono una guida didattica locale, non un modello di chat aperto. Chiedi in inglese di ruoli, dipendenze, richiesta, riparazione, modalità IA o costi.', 'Soy una guía didáctica local, no un modelo de chat abierto. Pregunta en inglés por tareas, dependencias, instrucciones, reparación, modo IA o costes.', 'Sou um guia didático local, não um modelo de chat aberto. Pergunte em inglês sobre tarefas, dependências, instruções, reparo, modo IA ou custos.'],
   'Build controls': ['Bausteuerung', 'Commandes de construction', 'Controlli di costruzione', 'Controles de construcción', 'Controles de construção'],
   'What shall we build?': ['Was bauen wir?', 'Que construisons-nous ?', 'Cosa costruiamo?', '¿Qué construimos?', 'O que vamos construir?'],
   'Try an idea': ['Idee ausprobieren', 'Essayer une idée', 'Prova un’idea', 'Prueba una idea', 'Experimente uma ideia'],
@@ -306,7 +337,67 @@ export function elapsedText(seconds: number): string {
 export function translateActivity(message: string): string {
   const index = languages.indexOf(language);
   if (!index) return message;
-  let match = /^I routed "(.+)" to (FrameBot|DetailBot); PlanBot, verify its prerequisites before placement\.$/.exec(message);
+  let match = /^This design needs (\d+) bricks, above your (\d+)-brick budget\. Increase the budget or simplify the brief\.$/.exec(message);
+  if (match) return [message, `Dieser Entwurf benötigt ${match[1]} Steine und überschreitet dein Budget von ${match[2]}. Erhöhe das Budget oder vereinfache den Auftrag.`,
+    `Cette création nécessite ${match[1]} briques et dépasse votre budget de ${match[2]}. Augmentez le budget ou simplifiez la consigne.`,
+    `Questo progetto richiede ${match[1]} mattoncini e supera il budget di ${match[2]}. Aumenta il budget o semplifica la richiesta.`,
+    `Este diseño necesita ${match[1]} bloques y supera tu presupuesto de ${match[2]}. Aumenta el presupuesto o simplifica las instrucciones.`,
+    `Este projeto precisa de ${match[1]} blocos e supera seu orçamento de ${match[2]}. Aumente o orçamento ou simplifique as instruções.`][index];
+  match = /^I split this (stegosaurus|brachiosaurus|explorer|cargo|custom) into (\d+) tasks and handed the dependency graph to PlanBot\.$/.exec(message);
+  if (match) return [message, `Ich habe dieses Modell in ${match[2]} Aufgaben aufgeteilt und den Abhängigkeitsplan an PlanBot übergeben.`,
+    `J’ai réparti ce modèle en ${match[2]} tâches et transmis leurs dépendances à PlanBot.`,
+    `Ho diviso questo modello in ${match[2]} attività e consegnato le dipendenze a PlanBot.`,
+    `Dividí este modelo en ${match[2]} tareas y entregué sus dependencias a PlanBot.`,
+    `Dividi este modelo em ${match[2]} tarefas e entreguei as dependências ao PlanBot.`][index];
+  match = /^I checked (\d+) tasks and (\d+) dependencies: no missing tasks or cycles\. (Each planned object is face-connected\.|The planned bricks are face-connected\.|The planned bricks are disconnected; CheckBot will flag this at inspection\.) BuildBot, the task graph is ready\.$/.exec(message);
+  if (match) {
+    const connected = match[3] === 'Each planned object is face-connected.' ? 0
+      : match[3] === 'The planned bricks are face-connected.' ? 1 : 2;
+    const result = [
+      [],
+      ['Jedes Objekt ist über Flächen verbunden.', 'Die Steine sind über Flächen verbunden.', 'Die Steine sind nicht verbunden; CheckBot wird dies bei der Prüfung melden.'],
+      ['Chaque objet est connecté par ses faces.', 'Les briques sont connectées par leurs faces.', 'Les briques sont déconnectées ; CheckBot le signalera à l’inspection.'],
+      ['Ogni oggetto è collegato per faccia.', 'I mattoncini sono collegati per faccia.', 'I mattoncini sono scollegati; CheckBot lo segnalerà all’ispezione.'],
+      ['Cada objeto está conectado por sus caras.', 'Los bloques están conectados por sus caras.', 'Los bloques están desconectados; CheckBot lo señalará en la inspección.'],
+      ['Cada objeto está conectado pelas faces.', 'Os blocos estão conectados pelas faces.', 'Os blocos estão desconectados; CheckBot avisará na inspeção.'],
+    ][index][connected];
+    return [message, `Ich prüfte ${match[1]} Aufgaben und ${match[2]} Abhängigkeiten: keine fehlenden Aufgaben oder Zyklen. ${result} BuildBot, der Plan ist bereit.`,
+      `J’ai vérifié ${match[1]} tâches et ${match[2]} dépendances : aucune tâche manquante ni cycle. ${result} BuildBot, le plan est prêt.`,
+      `Ho verificato ${match[1]} attività e ${match[2]} dipendenze: nessuna attività mancante o ciclo. ${result} BuildBot, il piano è pronto.`,
+      `Revisé ${match[1]} tareas y ${match[2]} dependencias: no faltan tareas ni hay ciclos. ${result} BuildBot, el plan está listo.`,
+      `Verifiquei ${match[1]} tarefas e ${match[2]} dependências: nenhuma tarefa ausente ou ciclo. ${result} BuildBot, o plano está pronto.`][index];
+  }
+  match = /^I verified my assignment of (\d+) support\/finishing tasks?; I will wait for each planned base before placing my bricks\.$/.exec(message);
+  if (match) return [message, `Ich habe meine ${match[1]} Stütz- und Detailaufgaben geprüft und warte jeweils auf die Grundlage.`,
+    `J’ai vérifié mes ${match[1]} tâches de support et de finition ; j’attendrai chaque base.`,
+    `Ho verificato le mie ${match[1]} attività di supporto e finitura; aspetterò ogni base.`,
+    `Revisé mis ${match[1]} tareas de soporte y acabado; esperaré cada base.`,
+    `Verifiquei minhas ${match[1]} tarefas de suporte e acabamento; aguardarei cada base.`][index];
+  match = /^What-if: I removed (\d+) of (\d+) placed bricks \(about one-third\)\. CheckBot, compare the actual build with the plan; I have not disclosed which identities are missing\.$/.exec(message);
+  if (match) return [message, `Was wäre wenn: Ich habe ${match[1]} von ${match[2]} gesetzten Steinen entfernt (etwa ein Drittel). CheckBot, vergleiche den Bau mit dem Plan; ich habe die fehlenden Steine nicht verraten.`,
+    `Hypothèse : j’ai retiré ${match[1]} briques placées sur ${match[2]} (environ un tiers). CheckBot, compare la construction au plan ; je n’ai pas révélé les briques manquantes.`,
+    `Ipotesi: ho rimosso ${match[1]} mattoncini su ${match[2]} (circa un terzo). CheckBot, confronta la costruzione con il piano; non ho rivelato quelli mancanti.`,
+    `Hipótesis: retiré ${match[1]} de ${match[2]} bloques colocados (aproximadamente un tercio). CheckBot, compara la construcción con el plan; no he revelado cuáles faltan.`,
+    `Hipótese: removi ${match[1]} de ${match[2]} blocos colocados (cerca de um terço). CheckBot, compare a construção com o plano; não revelei quais faltam.`][index];
+  match = /^I compared placed identities with the plan and found (\d+) missing bricks?\. BuildBot, route each missing identity to its owning builder\.$/.exec(message);
+  if (match) return [message, `Ich habe die Steine mit dem Plan verglichen und ${match[1]} fehlende Steine gefunden. BuildBot, leite sie an die zuständigen Bauer weiter.`,
+    `J’ai comparé les briques au plan et trouvé ${match[1]} manquantes. BuildBot, transmets-les à leurs responsables.`,
+    `Ho confrontato i mattoncini con il piano e ne mancano ${match[1]}. BuildBot, assegnali ai responsabili.`,
+    `Comparé los bloques con el plan y faltan ${match[1]}. BuildBot, asígnalos a sus responsables.`,
+    `Comparei os blocos com o plano e faltam ${match[1]}. BuildBot, encaminhe-os aos responsáveis.`][index];
+  match = /^I identified (\d+) missing bricks? by planned identity; the owning builder can replace (?:it|them)\. BuildBot, coordinate the repair\.$/.exec(message);
+  if (match) return [message, `Ich habe ${match[1]} fehlende Steine im Plan identifiziert. Die zuständigen Bauer können sie ersetzen. BuildBot, koordiniere die Reparatur.`,
+    `J’ai identifié ${match[1]} briques manquantes dans le plan. Leurs responsables peuvent les remplacer. BuildBot, coordonne la réparation.`,
+    `Ho identificato ${match[1]} mattoncini mancanti nel piano. I responsabili possono sostituirli. BuildBot, coordina la riparazione.`,
+    `Identifiqué ${match[1]} bloques faltantes en el plan. Sus responsables pueden reponerlos. BuildBot, coordina la reparación.`,
+    `Identifiquei ${match[1]} blocos ausentes no plano. Seus responsáveis podem repô-los. BuildBot, coordene o reparo.`][index];
+  match = /^CheckBot found (\d+) missing identities\. I am returning them to their original builder tasks; PlanBot will recheck dependencies\.$/.exec(message);
+  if (match) return [message, `CheckBot fand ${match[1]} fehlende Steine. Ich gebe sie an ihre ursprünglichen Bauaufgaben zurück; PlanBot prüft die Abhängigkeiten erneut.`,
+    `CheckBot a trouvé ${match[1]} briques manquantes. Je les rends à leurs tâches d’origine ; PlanBot revérifiera les dépendances.`,
+    `CheckBot ha trovato ${match[1]} mattoncini mancanti. Li restituisco alle attività originali; PlanBot ricontrollerà le dipendenze.`,
+    `CheckBot encontró ${match[1]} bloques faltantes. Los devuelvo a sus tareas originales; PlanBot volverá a revisar las dependencias.`,
+    `CheckBot encontrou ${match[1]} blocos ausentes. Devolvo-os às tarefas originais; PlanBot verificará novamente as dependências.`][index];
+  match = /^I routed "(.+)" to (FrameBot|DetailBot); PlanBot, verify its prerequisites before placement\.$/.exec(message);
   if (match) return [
     message, `Ich habe „${match[1]}“ an ${match[2]} übergeben; PlanBot, prüfe zuerst die Voraussetzungen.`,
     `J’ai confié « ${match[1]} » à ${match[2]} ; PlanBot, vérifie d’abord les prérequis.`,
@@ -352,6 +443,12 @@ export function translateActivity(message: string): string {
   match = /^(\d+) planned bricks placed\.$/.exec(message);
   if (match) return [message, `${match[1]} geplante Steine gesetzt.`, `${match[1]} briques prévues placées.`,
     `${match[1]} mattoncini previsti posati.`, `${match[1]} bloques previstos colocados.`, `${match[1]} blocos previstos colocados.`][index];
+  match = /^(\d+)\/(\d+) bricks face-connected\. Connectivity check, not a physical clutch or stability simulation\.$/.exec(message);
+  if (match) return [message, `${match[1]}/${match[2]} Steine über Flächen verbunden. Verbindungsprüfung, keine Simulation von Halt oder Stabilität.`,
+    `${match[1]}/${match[2]} briques connectées par leurs faces. Vérification des connexions, pas simulation de stabilité.`,
+    `${match[1]}/${match[2]} mattoncini collegati per faccia. Verifica delle connessioni, non simulazione di stabilità.`,
+    `${match[1]}/${match[2]} bloques conectados por caras. Comprobación de conexión, no simulación de estabilidad.`,
+    `${match[1]}/${match[2]} blocos conectados pelas faces. Verificação de conexão, não simulação de estabilidade.`][index];
   match = /^(\d+) of (\d+) allowed bricks\. No model cost is implied\.$/.exec(message);
   if (match) return [message, `${match[1]} von ${match[2]} erlaubten Steinen. Keine Modellausgaben angegeben.`,
     `${match[1]} briques sur ${match[2]} autorisées. Aucun coût de modèle indiqué.`,

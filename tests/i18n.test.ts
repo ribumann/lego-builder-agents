@@ -22,3 +22,18 @@ test('known activity templates preserve user-defined task names', () => {
   assert.equal(translateActivity('AI mission decision: Lighthouse 🚀'), 'AI mission decision: Lighthouse 🚀');
   setLanguage('en');
 });
+
+test('damage, repair and inspection activity is localized in every non-English language', () => {
+  const messages = [
+    'What-if: I removed 4 of 12 placed bricks (about one-third). CheckBot, compare the actual build with the plan; I have not disclosed which identities are missing.',
+    'I compared placed identities with the plan and found 4 missing bricks. BuildBot, route each missing identity to its owning builder.',
+    'I identified 4 missing bricks by planned identity; the owning builder can replace them. BuildBot, coordinate the repair.',
+    'CheckBot found 4 missing identities. I am returning them to their original builder tasks; PlanBot will recheck dependencies.',
+    '8/12 bricks face-connected. Connectivity check, not a physical clutch or stability simulation.',
+  ];
+  for (const language of languages.slice(1)) {
+    setLanguage(language);
+    for (const message of messages) assert.notEqual(translateActivity(message), message, `${language}: ${message}`);
+  }
+  setLanguage('en');
+});

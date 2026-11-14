@@ -140,7 +140,7 @@ const applyLanguage = () => {
   document.documentElement.lang = getLanguage();
   languageSelect.value = getLanguage();
   translateInterface(app);
-  if (noticeSource) $('#notice').textContent = translate(noticeSource);
+  if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
 };
 languageSelect.addEventListener('change', () => {
@@ -196,7 +196,7 @@ let storageWarningShown = false;
 let quizWon = false;
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = EXAMPLES.jurassic[0];
-const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translate(message); $('#notice').hidden = false; };
+const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
 const clearNotice = () => { noticeSource = ''; $('#notice').hidden = true; };
 const setButton = (id: string, disabled: boolean) => { $<HTMLButtonElement>(id).disabled = disabled; };
 const statusNames: Record<string, string> = {
@@ -304,7 +304,8 @@ function render() {
     const done = team!.taskDone(task);
     const placed = task.bricks.filter(b => team!.bricks.has(b.id)).length;
     const waiting = task.depends.some(id => !team!.taskDone(team!.plan.tasks.find(t => t.id === id)!));
-    return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(task.label)}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `Waits for: ${task.depends.map(id => esc(team!.plan.tasks.find(t => t.id === id)?.label ?? id)).join(', ')}` : done ? 'Shared board updated' : 'Dependencies ready'}</small></div></article>`;
+    const taskName = (label: string) => team!.plan.spec.model === 'custom' ? label : translate(label);
+    return `<article class="task ${done ? 'done' : ''}"><span class="task-dot ${task.agent}">${done ? '✓' : placed ? '↗' : '·'}</span><div><strong>${esc(taskName(task.label))}</strong><small>${AGENTS[task.agent].name} · ${placed}/${task.bricks.length}</small><small>${waiting ? `${esc(translate('Waits for:'))} ${task.depends.map(id => esc(taskName(team!.plan.tasks.find(t => t.id === id)?.label ?? id))).join(', ')}` : esc(translate(done ? 'Shared board updated' : 'Dependencies ready'))}</small></div></article>`;
   }).join('') : '<p class="empty-note">Make a plan to see the delegated jobs and their dependencies here.</p>';
   const checks = team?.checks ?? [];
   $('#checks').innerHTML = checks.length ? checks.map(c => `<div class="check ${c.pass ? 'passed' : ''}"><span>${c.pass ? '✓' : '·'}</span><div><strong>${esc(translate(c.label))}</strong><small>${esc(translateActivity(c.detail))}</small></div></div>`).join('')
