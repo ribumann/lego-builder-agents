@@ -22,6 +22,10 @@ local or private-Codespace API boundaries and requires production serving plus
 the usage gate below. `BRICKLAB_HOSTED=1` serves the anonymous lab separately:
 it disables every planner, including Azure, pending verified public edge
 protections. Never copy a personal Copilot credential into a public host.
+For a separately hosted lab, set `BRICKLAB_HOSTED_ORIGIN` to its exact HTTPS
+DNS origin (for example `https://lab.example.org`), with no port, path or
+trailing slash. The default is `https://bricklab.liberatetheinnerchild.net`.
+This configures host/origin checks only; it does not verify a trusted edge.
 
 The local gate below counts requests; it does **not** enforce the requested
 $50-per-day inference spending cap. Public planning must remain disabled until

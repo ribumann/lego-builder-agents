@@ -234,11 +234,12 @@ process.on('message', message => {
 });
 `);
   const server = await startServer(t, { BRICKLAB_COPILOT_BIN: process.execPath, ...env }, ['--import', preload]);
-  const hostHeaders: Record<string, string> = env.BRICKLAB_HOSTED === '1' ? { Host: 'bricklab.liberatetheinnerchild.net' } : {};
+  const hostedOrigin = env.BRICKLAB_HOSTED_ORIGIN ?? 'https://bricklab.liberatetheinnerchild.net';
+  const hostHeaders: Record<string, string> = env.BRICKLAB_HOSTED === '1' ? { Host: new URL(hostedOrigin).host } : {};
   const statusResponse = await fetchWithHost(server.base + '/api/status', { headers: hostHeaders });
   const status = await statusResponse.json() as { sessionKey: string };
   const headers: Record<string, string> = { ...hostHeaders, Origin: env.BRICKLAB_HOSTED === '1'
-    ? 'https://bricklab.liberatetheinnerchild.net' : server.base, 'X-Bricklab-Key': status.sessionKey };
+    ? hostedOrigin : server.base, 'X-Bricklab-Key': status.sessionKey };
   const body = JSON.stringify({ world: 'space', brief: 'A fixture sculpture' });
   const post = (extra: Record<string, string> = {}, payload = body) =>
     fetchWithHost(server.base + '/api/plan', { method: 'POST', headers: { ...headers, ...extra }, body: payload, stream: true });
@@ -514,6 +515,7 @@ const azureFixtureEnv = {
   AZURE_STORAGE_ACCOUNT: 'fixturestorage',
   BRICKLAB_AZURE_USAGE_CONTAINER: 'fixture-usage',
   BRICKLAB_AZURE_DAILY_CALLS: '5',
+  AZURE_OPENAI_RESOURCE_ID: '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/fixture/providers/Microsoft.CognitiveServices/accounts/fixture',
 };
 
 test('Azure is off by default and status does not instantiate or contact Azure boundaries', { timeout: 10_000 }, async t => {
@@ -607,6 +609,7 @@ test('Azure monetary budget is reserved before inference and fails closed withou
   });
   let state = await command({ action: 'inspect' });
   assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner', 'budget']);
+  assert.equal(state.azureConfig[1].resourceId, azureFixtureEnv.AZURE_OPENAI_RESOURCE_ID);
   const failures = [
     ['BUDGET_EXHAUSTED', 429, /daily inference budget is exhausted/],
     ['BUDGET_WINDOW_CLOSED', 503, /UTC day boundary/],
@@ -749,13 +752,29 @@ test('hosted mode is anonymous static/offline only with exact host/origin bounds
   assert.equal(state.count, 0, 'Hosted mode never starts a CLI, even when its opt-in flag was inherited');
 });
 
+test('hosted origin can be configured for a second exact HTTPS domain', { timeout: 10_000 }, async t => {
+  const { get, post, azurePost, command } = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_HOSTED: '1', BRICKLAB_HOSTED_ORIGIN: 'https://lab.example.org', TEST_STATIC_FIXTURE: '1',
+  });
+  assert.equal((await get()).status, 200);
+  assert.equal((await get('/api/status', { Host: 'bricklab.liberatetheinnerchild.net' })).status, 403);
+  assert.equal((await get('/api/status', { Host: 'lab.example.org', 'X-Forwarded-Host': 'bricklab.liberatetheinnerchild.net' })).status, 200);
+  assert.equal((await post({ Origin: 'https://bricklab.liberatetheinnerchild.net' })).status, 403);
+  assert.equal((await azurePost()).status, 403);
+  assert.deepEqual((await command({ action: 'inspect' })).azureEvents, []);
+});
+
 test('hosted public planning stays blocked and unsafe/incomplete startup configuration fails closed', () => {
   const cases: [NodeJS.ProcessEnv, string[]][] = [
     [{ BRICKLAB_HOSTED: '1' }, []],
     [{ BRICKLAB_HOSTED: '1', BRICKLAB_CODESPACES: '1' }, ['--production']],
     [{ BRICKLAB_HOSTED: '1', PORT: '0' }, ['--production']],
+    ...['http://lab.example.org', 'https://lab.example.org/', 'https://lab.example.org/path',
+      'https://lab.example.org:8443', 'https://user@lab.example.org', 'https://lab.example.org?x=1',
+      'https://127.0.0.1', 'https://localhost', 'https://LAB.example.org', 'https://lab.example.org.']
+      .map((origin): [NodeJS.ProcessEnv, string[]] => [{ BRICKLAB_HOSTED: '1', BRICKLAB_HOSTED_ORIGIN: origin }, ['--production']]),
     [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget' }, ['--production']],
+    [{ ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget', AZURE_OPENAI_RESOURCE_ID: '' }, ['--production']],
     [{ ...azureFixtureEnv }, []],
     [{ ...azureFixtureEnv, AZURE_OPENAI_ENDPOINT: 'http://localhost' }, ['--production']],
     [{ ...azureFixtureEnv, AZURE_OPENAI_DEPLOYMENT: '' }, ['--production']],
@@ -770,7 +789,7 @@ test('hosted public planning stays blocked and unsafe/incomplete startup configu
         BRICKLAB_CODESPACES: '0', BRICKLAB_AZURE_AI: '0', ...extra },
       encoding: 'utf8', timeout: 5000,
     });
-    assert.equal(result.status, 1, 'Invalid configuration must fail before the server starts');
+    assert.equal(result.status, 1, `Invalid configuration must fail before the server starts: ${JSON.stringify(extra)}`);
     assert.equal(result.stdout.includes('BrickLab:'), false);
   }
 });

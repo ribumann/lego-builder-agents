@@ -5,6 +5,7 @@ import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
+import { isIP } from 'node:net';
 import { validateCustomSpec } from './src/custom-design.mjs';
 import { planningPrompt } from './planning-prompt.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
@@ -18,7 +19,19 @@ const production = process.argv.includes('--production');
 const port = Number(process.env.PORT || 4173);
 const host = process.env.HOST || '127.0.0.1';
 const hosted = process.env.BRICKLAB_HOSTED === '1';
-const hostedOrigin = 'https://bricklab.liberatetheinnerchild.net';
+const hostedOrigin = process.env.BRICKLAB_HOSTED_ORIGIN ?? 'https://bricklab.liberatetheinnerchild.net';
+if (hosted) {
+  let validOrigin = false;
+  try {
+    const url = new URL(hostedOrigin);
+    const labels = url.hostname.split('.');
+    validOrigin = url.protocol === 'https:' && url.origin === hostedOrigin && !url.port
+      && !url.username && !url.password && !isIP(url.hostname) && labels.length >= 2
+      && labels.every(label => /^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$/.test(label))
+      && !/^\d+$/.test(labels.at(-1));
+  } catch { /* Invalid URL is rejected below. */ }
+  if (!validOrigin) throw new Error('BRICKLAB_HOSTED_ORIGIN must be an exact HTTPS DNS origin without a port, path, credentials or trailing slash.');
+}
 if (hosted && (!production || process.env.BRICKLAB_CODESPACES === '1'
     || !Number.isInteger(port) || port < 1 || port > 65535))
   throw new Error('BRICKLAB_HOSTED=1 requires production, a valid PORT and no Codespace mode. Hosted mode serves public static/offline content only.');
@@ -42,6 +55,7 @@ const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate(
   container: process.env.BRICKLAB_AZURE_BUDGET_CONTAINER,
   endpoint: process.env.AZURE_OPENAI_ENDPOINT,
   deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+  resourceId: process.env.AZURE_OPENAI_RESOURCE_ID,
 }) : null;
 const azurePlannerStatus = azureEnabled
   ? { enabled: true, state: 'configured', message: `Azure planning and ${azureMonetaryBudget ? 'inference budget' : 'durable quota'} are configured, not verified. Only an explicit Azure planning request reserves ${azureMonetaryBudget ? 'budget' : 'quota'} and sends a brief. No retries or refunds.` }
