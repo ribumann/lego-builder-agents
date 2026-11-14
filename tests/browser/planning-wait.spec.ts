@@ -116,3 +116,23 @@ test('unavailable hosted planner never submits and offline templates remain avai
   await expect(page.locator('#stage-status')).toContainText('Plan ready');
   expect(calls).toBe(0);
 });
+
+test('a configured local Azure planner is an explicit separate choice', async ({ page }) => {
+  let calls = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    hosted: false, sessionKey: 'fixture', copilot: false,
+    azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+  } }));
+  await page.route('**/api/azure-plan', route => {
+    calls++;
+    return route.fulfill({ status: 503, json: { error: 'Fixture unavailable.' } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Copilot');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
+  expect(calls).toBe(0);
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('alert')).toContainText('Fixture unavailable');
+  expect(calls).toBe(1);
+});
