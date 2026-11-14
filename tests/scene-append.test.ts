@@ -104,6 +104,38 @@ test('compact mixed-size repeated geometry stays appendable and survives save an
   assert.deepEqual(restored.provenance, result.provenance);
 });
 
+for (const direction of ['z', 'negative-z', 'y', 'diagonal'] as const) {
+  test(`preserves compact ${direction}-direction repeats through append and reload`, () => {
+    const records = Array.from({ length: direction === 'diagonal' ? 8 : 4 }, (_, i) => ({
+      x: direction === 'diagonal' ? -64 : i * 2,
+      y: 0,
+      z: direction === 'negative-z' ? 62 : direction === 'z' || direction === 'diagonal' ? -64 + (direction === 'diagonal' ? i * 2 : 0) : 0,
+      width: direction === 'z' || direction === 'negative-z' ? 1 : 2, height: 1, depth: direction === 'z' || direction === 'negative-z' ? 2 : 1,
+      color: i % 2 ? 'orange' : 'blue', part: i % 2 ? 'detail' : 'frame',
+      repeat: direction === 'z' ? { count: 64, dx: 0, dy: 0, dz: 2 }
+        : direction === 'negative-z' ? { count: 64, dx: 0, dy: 0, dz: -2 }
+        : direction === 'y' ? { count: 64, dx: 0, dy: 1, dz: 0 }
+          : { count: 32, dx: 2, dy: 1, dz: 2 },
+    }));
+    const previous = new Team(createPlan(validateSpec({
+      world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 300,
+      design: { name: 'Repeated structure', bricks: records },
+    }, 'space'), [], 'copilot'));
+    previous.step(3);
+    const addition = customPlan('Marker', 'local', [{
+      name: 'Marker', bricks: [{ x: 30, y: 0, z: 30, width: 1, height: 1, depth: 1, color: 'white', part: 'frame' }],
+    }]);
+    const { team, provenance } = appendScene(previous, addition);
+    assert.deepEqual(team.plan.spec.design!.objects![0].bricks, records);
+    assert.equal(allBricks(team.plan).length, 257);
+    cells(allBricks(team.plan));
+    const restored = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(team, 'Repeated'))));
+    assert.deepEqual(restored.team.plan.spec.design!.objects![0].bricks, records);
+    assert.deepEqual([...restored.team.bricks.keys()].sort(), [...previous.bricks.keys()].sort());
+    assert.deepEqual(restored.provenance, provenance);
+  });
+}
+
 for (const model of ['explorer', 'custom'] as const) {
   test(`fully built original ${model} retains named membership and completes after append and reload`, () => {
     const spec = validateSpec(model === 'explorer' ? {
@@ -393,6 +425,20 @@ test('placed-work validation still rejects changed identity or geometry atomical
     assert.throws(() => appendScene(previous, plan), /placed bricks differ/);
     assert.deepEqual(previous.snapshot('before'), before);
   }
+});
+
+test('compact records cannot conceal task geometry changed from the canonical spec', () => {
+  const plan = customPlan('Support', 'local', [{
+    name: 'Support', bricks: [
+      { x: 0, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame',
+        repeat: { count: 2, dx: 2, dy: 0, dz: 0 } },
+    ],
+  }]);
+  const previous = new Team(plan);
+  plan.tasks[0].bricks[0].width = 1;
+  assert.throws(() => appendScene(previous, customPlan('Marker', 'local', [{
+    name: 'Marker', bricks: [{ x: 5, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'white', part: 'frame' }],
+  }])), /geometry or object membership/);
 });
 
 test('combined compact-record limits fail atomically without replacing the prior Team', () => {

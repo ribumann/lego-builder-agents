@@ -136,6 +136,21 @@ function customRecords(objects: ObjectGeometry[], parts: Map<string, Brick['agen
   });
 }
 
+function contributionRecords(plan: Plan, objects: ObjectGeometry[], offset: { x: number; z: number },
+  parts: Map<string, Brick['agent']>): { name: string; bricks: CustomBrick[] }[] {
+  if (plan.spec.model !== 'custom') return customRecords(objects, parts);
+  const design = plan.spec.design!;
+  const original = design.objects ?? [{ name: design.name, bricks: design.bricks! }];
+  if (original.length !== objects.length) throw new Error('Cannot append geometry that differs from its canonical specification.');
+  return original.map((object, index) => ({
+    name: objects[index].name,
+    bricks: object.bricks.map(brick => ({
+      ...brick, x: brick.x + offset.x, z: brick.z + offset.z,
+      ...(brick.repeat ? { repeat: { ...brick.repeat } } : {}),
+    })),
+  }));
+}
+
 function uniqueAddedNames(objects: ObjectGeometry[], used: Set<string>): ObjectGeometry[] {
   return objects.map(object => {
     const original = object.name;
@@ -256,7 +271,10 @@ export function appendScene(previous: Team, addition: Plan): SceneAppendResult {
     longTail: false,
     wideWings: false,
     budget,
-    design: { name: designName, objects: customRecords(combinedObjects, canonicalParts) },
+    design: { name: designName, objects: [
+      ...contributionRecords(previous.plan, previousObjects, { x: 0, z: 0 }, canonicalParts),
+      ...contributionRecords(addition, shiftedObjects, offset, canonicalParts),
+    ] },
   }, previous.plan.spec.world);
   const plan = createPlan(spec, [...previous.plan.assumptions, ...addition.assumptions], previous.plan.source);
 
@@ -265,10 +283,16 @@ export function appendScene(previous: Team, addition: Plan): SceneAppendResult {
     for (const brick of object.bricks) originals.set(brick.id, { ...brick, object: object.name });
   for (const object of shiftedObjects)
     for (const brick of object.bricks) originals.set(brick.id, brick);
+  if (originals.size !== allBricks(plan).length)
+    throw new Error('Combined validation changed the number of bricks; append was cancelled.');
   for (const task of plan.tasks)
     task.bricks = task.bricks.map(brick => {
       const original = originals.get(brick.id);
-      if (!original) throw new Error('Combined validation changed a brick ID; append was cancelled.');
+      if (!original || original.object !== brick.object
+          || (original.width ?? 1) !== (brick.width ?? 1)
+          || (original.height ?? 1) !== (brick.height ?? 1)
+          || (original.depth ?? 1) !== (brick.depth ?? 1))
+        throw new Error('Combined validation changed brick geometry or object membership; append was cancelled.');
       // Keep canonical ownership from createPlan (which may split frame-only
       // geometry across builders), while retaining the source identity and geometry.
       return { ...original, agent: brick.agent };
