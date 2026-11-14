@@ -592,12 +592,15 @@ async function makePlan(demo = false) {
   if (team?.status === 'building') team.status = 'paused';
   replaying = false;
   clearNotice();
+  const controller = new AbortController();
+  planningController = controller;
   let wait: ReturnType<typeof startPlanningWait> | undefined;
   try {
     if (!planningBrief.trim() || planningBrief.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
     planning = true; render();
     const image = demo ? undefined : await imageInput?.take();
+    controller.signal.throwIfAborted();
     let spec;
     let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
@@ -609,8 +612,6 @@ async function makePlan(demo = false) {
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
-      const controller = new AbortController();
-      planningController = controller;
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },

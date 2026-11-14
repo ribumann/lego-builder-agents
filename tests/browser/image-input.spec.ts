@@ -3,6 +3,47 @@ import { resolve } from 'node:path';
 
 const image = resolve('tests', 'fixtures', 'vision-fixture.jpg');
 
+test('pagehide during image preparation prevents a later planning request', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+  } }));
+  await page.route('**/api/local-plan', route => {
+    requests++;
+    return route.fulfill({ status: 503, json: { error: 'Must not be reached.' } });
+  });
+  await page.addInitScript(() => {
+    const original = File.prototype.arrayBuffer;
+    File.prototype.arrayBuffer = function () {
+      document.documentElement.dataset.imageReading = 'true';
+      return new Promise<ArrayBuffer>(resolve => {
+        window.addEventListener('release-image-read', () => { void original.call(this).then(resolve); }, { once: true });
+      });
+    };
+  });
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#plan').click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  await page.locator('#settings').click();
+  await page.locator('#choose-local-ai').click();
+  await page.locator('#image-title').click();
+  await page.locator('#image-file').setInputFiles(image);
+  await page.locator('#image-consent').check();
+  await page.locator('#plan').click();
+  await expect(page.locator('html')).toHaveAttribute('data-image-reading', 'true');
+  await page.evaluate(() => {
+    window.dispatchEvent(new Event('pagehide'));
+    window.dispatchEvent(new Event('release-image-read'));
+  });
+  await expect(page.locator('#notice')).toContainText('Planning aborted');
+  await expect(page.locator('#planning-dialog')).not.toBeVisible();
+  await expect(page.locator('#plan')).toBeEnabled();
+  expect(requests).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+});
+
 test('image selection requires explicit consent and sends only on planning', async ({ page }) => {
   let requests = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
