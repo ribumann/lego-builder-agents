@@ -10,7 +10,7 @@ declare global {
   }
 }
 
-async function prepareVoicePage(page: Page) {
+async function prepareVoicePage(page: Page, open = true) {
   const modelRequests: string[] = [];
   const planRequests: string[] = [];
   page.on('request', request => {
@@ -76,11 +76,58 @@ async function prepareVoicePage(page: Page) {
     copilot: true, sessionKey: 'voice-fixture', planner: { state: 'ready', message: 'Ready' },
   } }));
   await page.goto('/');
+  if (open) await page.locator('#voice-entry').click();
   return { modelRequests, planRequests };
 }
 
+for (const width of [1440, 390]) {
+  test(`compact composer keeps media conditional and keyboard accessible at ${width}px`, async ({ page }) => {
+    await page.setViewportSize({ width, height: 900 });
+    const { modelRequests, planRequests } = await prepareVoicePage(page, false);
+    await expect(page.locator('#voice-panel')).toBeHidden();
+    await expect(page.locator('#image-chip')).toBeHidden();
+    await expect(page.locator('#media-privacy')).not.toHaveAttribute('open', '');
+    const attach = await page.locator('#image-choose').boundingBox();
+    const brief = await page.locator('#brief').boundingBox();
+    const mic = await page.locator('#voice-entry').boundingBox();
+    expect(attach!.x + attach!.width).toBeLessThanOrEqual(brief!.x);
+    expect(brief!.x + brief!.width).toBeLessThanOrEqual(mic!.x);
+    expect(Math.abs(attach!.y - mic!.y)).toBeLessThan(1);
+    await page.locator('#image-file').setInputFiles('tests/fixtures/vision-fixture.jpg');
+    await expect(page.locator('#image-chip')).toBeVisible();
+    await expect(page.locator('#image-name')).toHaveText('vision-fixture.jpg');
+    await expect(page.locator('#image-permission')).toBeVisible();
+    await page.locator('#image-remove').focus();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#image-chip')).toBeHidden();
+    await expect(page.locator('#image-choose')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#brief')).toBeFocused();
+    await page.keyboard.press('Tab');
+    await expect(page.locator('#voice-entry')).toBeFocused();
+    await page.keyboard.press('Enter');
+    await expect(page.locator('#voice-start')).toBeFocused();
+    expect(await page.evaluate(() => window.__voiceCalls.microphone)).toBe(0);
+    await page.locator('#voice-cancel').click();
+    await expect(page.locator('#voice-panel')).toBeHidden();
+    await expect(page.locator('#voice-entry')).toBeFocused();
+    for (const language of ['en', 'de', 'fr', 'it', 'es', 'pt']) {
+      await page.locator('#language').selectOption(language);
+      await expect(page.locator('#image-choose')).toHaveAccessibleName(/\S/);
+      await expect(page.locator('#voice-entry')).toHaveAccessibleName(/\S/);
+      expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(width);
+    }
+    expect(modelRequests).toEqual([]);
+    expect(planRequests).toEqual([]);
+  });
+}
+
 test('discloses voice processing before permission and keeps transcript separate until explicit apply', async ({ page }) => {
-  const { modelRequests, planRequests } = await prepareVoicePage(page);
+  const { modelRequests, planRequests } = await prepareVoicePage(page, false);
+  await expect(page.locator('#voice-panel')).toBeHidden();
+  await expect(page.locator('#voice-disclosure')).toBeHidden();
+  await page.locator('#media-privacy > summary').click();
+  await expect(page.locator('#voice-disclosure')).toBeVisible();
   await expect(page.locator('#voice-disclosure')).toContainText('45 MB');
   await expect(page.locator('#voice-disclosure')).toContainText('IP address');
   await expect(page.locator('#voice-disclosure')).toContainText('browser cache');
@@ -88,12 +135,19 @@ test('discloses voice processing before permission and keeps transcript separate
   expect(modelRequests).toEqual([]);
   expect(planRequests).toEqual([]);
 
+  await page.locator('#media-privacy > summary').click();
+  await page.locator('#voice-entry').click();
+  await expect(page.locator('#voice-permission')).toContainText('45 MB');
+  await expect(page.locator('#voice-permission')).toContainText('IP address');
+  await expect(page.locator('#voice-review')).toBeHidden();
+  expect(await page.evaluate(() => window.__voiceCalls.microphone)).toBe(0);
   await page.locator('#brief').fill('Typed during recording');
   await page.locator('#voice-start').click();
   await expect(page.locator('#voice-status')).toContainText('Recording');
   await expect(page.locator('#voice-start')).toBeDisabled();
   await expect(page.locator('#voice-stop')).toBeEnabled();
   await expect(page.locator('#voice-cancel')).toBeEnabled();
+  await expect(page.locator('#voice-entry')).toHaveAccessibleName('Stop and transcribe');
   expect(await page.evaluate(() => window.__voiceCalls.microphone)).toBe(1);
   await page.locator('#brief').fill('Changed while recording');
   await page.locator('#voice-stop').click();
@@ -107,10 +161,13 @@ test('discloses voice processing before permission and keeps transcript separate
   await expect(page.locator('#notice')).toBeHidden();
 
   await page.locator('#voice-apply').click();
+  await expect(page.locator('#voice-panel')).toBeHidden();
+  await expect(page.locator('#brief')).toBeFocused();
   await expect(page.locator('#brief')).toHaveValue('A blue dinosaur with a gold crest');
   expect(modelRequests).toEqual([]);
   expect(planRequests).toEqual([]);
 
+  await page.locator('#voice-entry').click();
   await page.locator('#voice-start').click();
   await expect(page.locator('#voice-status')).toContainText('Recording');
   await page.locator('#voice-cancel').click();
@@ -121,9 +178,13 @@ test('discloses voice processing before permission and keeps transcript separate
 
 test('preserves transcript edits made while recording and requires review before replacing them', async ({ page }) => {
   await prepareVoicePage(page);
+  await page.locator('#voice-start').click();
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-transcript')).toBeVisible();
   await page.locator('#voice-transcript').fill('My existing edited transcript');
   await page.locator('#voice-start').click();
   await page.locator('#voice-transcript').fill('An edit made during recording');
+  await expect(page.locator('#voice-apply')).toBeDisabled();
   await page.locator('#voice-stop').click();
   await expect(page.locator('#voice-pending')).toBeVisible();
   await expect(page.locator('#voice-pending-text')).toHaveText('A blue dinosaur with a gold crest');
@@ -138,6 +199,9 @@ test('preserves transcript edits made while recording and requires review before
 
 test('never replaces an existing transcript without explicit action and can discard a suggestion', async ({ page }) => {
   await prepareVoicePage(page);
+  await page.locator('#voice-start').click();
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-transcript')).toBeVisible();
   await page.locator('#voice-transcript').fill('My edited transcript');
   await page.locator('#voice-start').click();
   await page.locator('#voice-stop').click();
@@ -180,6 +244,7 @@ test('reports permission and unsupported-browser errors while leaving typed inpu
 
 test('uses app-owned voice labels and disclosures in all six languages', async ({ page }) => {
   const { modelRequests } = await prepareVoicePage(page);
+  await page.locator('#media-privacy > summary').click();
   for (const [language, title, start, networkDisclosure] of [
     ['en', 'Optional voice input', 'Allow and record', 'IP address'],
     ['de', 'Freiwillige Spracheingabe', 'Erlauben und aufnehmen', 'IP-Adresse'],
@@ -192,6 +257,7 @@ test('uses app-owned voice labels and disclosures in all six languages', async (
     await expect(page.locator('#voice-title')).toHaveText(title);
     await expect(page.locator('#voice-start')).toHaveText(start);
     await expect(page.locator('#voice-disclosure')).toContainText(networkDisclosure);
+    await expect(page.locator('#voice-permission')).toContainText(networkDisclosure);
     await expect(page.locator('#voice-status')).toBeVisible();
   }
   expect(await page.evaluate(() => window.__voiceCalls.microphone)).toBe(0);

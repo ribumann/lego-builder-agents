@@ -325,6 +325,24 @@ Models use stylized solid bricks, not official LEGO part geometry. Face connecti
 
 Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates and hosted/Azure planning do not accept images. Local Ollama must report vision support; a compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
 
+### Brief, images and voice
+
+The rounded brief composer keeps **Choose image (+)** on the left and **Voice input**
+on the right. Choosing an image reveals its removable filename chip, destination
+and unchecked consent box; it does not upload anything. **Media & privacy**
+contains the full metadata, model-download and recovery disclosures.
+
+The microphone button first opens a permission explanation, not a recording.
+Choose **Allow and record**, then stop or cancel; active recording remains visible
+and stops after 30 seconds. Transcription runs on this device. First use downloads
+about 45 MB from Hugging Face/CDN, exposing ordinary network metadata including
+your IP address, not audio or transcripts. The bundled WebAssembly runtime is
+about 22 MB uncompressed; model files can remain in browser cache. Review and edit
+the result, then explicitly replace the brief; this does not submit a plan.
+Typing remains available if recording or transcription is unsupported, slow or
+inaccurate. The selected planner may subsequently receive the brief when you
+submit it.
+
 ### Optional Windows Copilot images (private server only)
 
 Copilot images are **off by default** and unavailable on POSIX or public hosted
@@ -364,5 +382,11 @@ files before restarting. Abrupt server/host termination may leave owner-only
 attachment files; automatic deletion after a crash is not guaranteed. Local
 administrators and processes running as the same user are outside this isolation
 boundary. No personal Copilot credentials belong in a public deployment.
+
+The planning lock is in memory: restarting clears the lock, not the residue.
+Before restarting, the operator must confirm the affected processes have exited,
+review the exact request-owned `bricklab-copilot-<UUID>` directory in the Windows
+temporary folder, and remove any verified leftover attachment. Do not remove
+unrelated or pre-existing directories.
 
 Independent educational demo, not affiliated with or endorsed by the LEGO Group, Microsoft, or the author of the reference post. LEGO is a trademark of the LEGO Group.

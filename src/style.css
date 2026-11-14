@@ -155,25 +155,41 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 .interior-option small { color: #4d6170; font-size: 11px; line-height: 1.4; }
 .interior-option input:disabled { cursor: not-allowed; }
 .interior-option:has(input:disabled) { cursor: not-allowed; opacity: 0.65; }
-.brief-input { display: flex; align-items: center; gap: 14px; }
+.brief-input { display: grid; grid-template-columns: 44px minmax(0, 1fr) 44px; align-items: center; gap: 6px; padding: 4px; background: #f7f9fa; border: 1px solid #cdd9e0; border-radius: 25px; }
+.brief-input:focus-within { border-color: #3279ae; box-shadow: 0 0 0 2px #3279ae; }
 textarea { resize: vertical; border: 1px solid #d7e0e5; border-radius: 8px; padding: 11px 12px; color: var(--ink); background: #fbfcfd; flex: 1; min-width: 0; height: 52px; max-height: 160px; min-height: 52px; line-height: 1.5; font-size: 12px; }
-.brief-input .button { min-height: 50px; }
+#brief { width: 100%; height: 48px; min-height: 48px; padding: 13px 2px; border: 0; border-radius: 0; background: transparent; font-size: 14px; }
+#brief:focus-visible { outline: none; }
+.composer-tool { display: grid; place-items: center; width: 44px; height: 44px; flex: none; padding: 0; border: 0; border-radius: 50%; color: #35556c; background: transparent; }
+.composer-tool svg { width: 21px; height: 21px; }
+.composer-tool:hover:not(:disabled) { background: #e5edf1; }
+.composer-tool.recording { color: #9d293d; background: #fae7ec; }
+.composer-tool:disabled { opacity: .5; cursor: not-allowed; }
+.composer-footer { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; margin-top: 9px; }
+.composer-footer > .button { flex: none; min-height: 44px; }
+.media-privacy { flex: 1; min-width: 0; color: #465e6e; font-size: 12px; line-height: 1.6; }
+.media-privacy summary { cursor: pointer; min-height: 44px; align-content: center; width: fit-content; }
+.media-privacy summary:focus-visible { outline-offset: 3px; }
+.media-privacy h3 { margin: 12px 0 5px; font-size: 12px; }
+.media-privacy p { margin: 8px 0; max-width: 70ch; }
 #brief-help { font-size: 9px; color: var(--muted); margin: 7px 0 0; }
-.image-input { margin-top: 12px; font-size: 13px; line-height: 1.5; }
-.image-input summary { cursor: pointer; font-weight: 800; }
+.image-input { font-size: 12px; line-height: 1.5; }
 .image-input p { margin: 8px 0; overflow-wrap: anywhere; }
 .image-input label { display: flex; align-items: flex-start; gap: 7px; }
 .image-input label input { flex: none; margin-top: 4px; }
-.image-actions { display: flex; flex-wrap: wrap; gap: 8px; }
+.attachment-chip { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; margin-top: 9px; padding-left: 12px; border-radius: 24px; color: #35556c; background: #edf2f5; }
+#image-name { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+#image-remove { font-size: 22px; }
+#image-status:not(.image-error) { position: absolute; width: 1px; height: 1px; padding: 0; overflow: hidden; clip-path: inset(50%); }
+.image-error { color: #9d293d; font-weight: 700; }
 #voice-pending-text { white-space: pre-wrap; overflow-wrap: anywhere; }
-.voice-panel { margin-top: 13px; padding: 14px; border: 1px solid #dfe6e9; border-radius: 10px; background: #f7f9fa; }
+.voice-panel { margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
 .voice-panel h3 { margin: 0 0 7px; font-size: 12px; }
-.voice-panel > p { margin: 6px 0; color: #506574; font-size: 10px; line-height: 1.65; }
-.voice-panel > #voice-disclosure { color: #405563; }
+.voice-panel > p { margin: 6px 0; max-width: 70ch; color: #405563; font-size: 12px; line-height: 1.6; }
 .voice-controls { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 5px; }
-.voice-controls .button, .voice-panel .button { min-height: 38px; padding: 9px 12px; font-size: 10px; }
+.voice-controls .button, .voice-panel .button, .voice-controls .text-button { min-height: 44px; padding: 9px 12px; font-size: 12px; }
 .voice-status { min-height: 1.6em; font-weight: 800; }
-.voice-panel > label { display: block; margin-top: 10px; font-size: 10px; font-weight: 850; }
+#voice-transcript-label { display: block; margin-top: 10px; font-size: 12px; font-weight: 850; }
 #voice-transcript { display: block; width: 100%; height: 82px; min-height: 64px; max-height: 220px; margin-top: 5px; background: #fff; font-size: 12px; }
 .voice-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }
 .voice-meta p { margin: 5px 0 0; color: #596c7a; font-size: 9px; line-height: 1.5; }
@@ -307,9 +323,6 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   .discovery { grid-template-columns: 1fr 1fr; }
   .discovery-intro { display: none; }
   .control-deck { grid-template-columns: 1fr 290px; }
-  .brief-input { align-items: stretch; gap: 9px; }
-  .brief-input .button { font-size: 11px; padding: 10px; }
-  .brief-input .button svg { display: none; }
   .voice-controls .button { flex: 1 1 140px; }
   .brief-form { padding: 17px; }
   .learning-strip { align-items: flex-start; flex-wrap: wrap; }
@@ -370,13 +383,12 @@ hr { border: 0; border-top: 1px solid var(--line); margin: 24px 0; }
   #crew-answer { font-size: 10px; }
   .control-deck { display: flex; flex-direction: column; margin-top: 12px; }
   .brief-form { padding: 17px 15px; }
-  .brief-input { flex-wrap: wrap; }
   textarea { flex-basis: 100%; font-size: 13px; height: 70px; }
-  .brief-input .button { width: 100%; font-size: 13px; min-height: 43px; }
-  .brief-input .button svg { display: block; }
+  #brief { font-size: 16px; }
+  .composer-footer { gap: 10px; flex-wrap: wrap; }
+  .media-privacy[open] { flex-basis: 100%; }
   #brief-help { font-size: 10px; line-height: 1.6; }
-  .voice-panel { padding: 12px; }
-  .voice-controls { display: grid; grid-template-columns: 1fr; }
+  .voice-controls { display: flex; }
   .voice-controls .button, .voice-panel .button { width: 100%; min-height: 42px; font-size: 11px; }
   .voice-meta { flex-direction: column; gap: 2px; }
   #voice-count { text-align: left; }

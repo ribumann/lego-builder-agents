@@ -50,6 +50,7 @@ test('real MediaRecorder and Whisper accept a simulated microphone signal', asyn
   } }));
   await page.goto('/');
   expect(modelRequests).toHaveLength(0);
+  await page.locator('#voice-entry').click();
   await page.locator('#voice-start').click();
   await expect(page.locator('#voice-status')).toContainText('Recording');
   await page.waitForTimeout(1200);

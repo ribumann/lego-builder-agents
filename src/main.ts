@@ -26,6 +26,9 @@ const icon = (name: string) => {
     leaf: '<path d="M4 20 17 7M5 16C-1 5 12 3 21 3c0 9-2 22-13 16"/>',
     rocket: '<path d="M8 16c-4 0-5 5-5 5s5-1 5-5zm1-1L5 11l4-4c5-5 12-4 12-4s1 7-4 12l-4 4z"/><circle cx="15" cy="9" r="2"/>',
     cutaway: '<path d="M4 20V4h10l6 8-6 8H4zm5-1V5m4 14V5"/>',
+    plus: '<path d="M12 5v14M5 12h14"/>',
+    mic: '<rect x="9" y="3" width="6" height="12" rx="3"/><path d="M5 10v2a7 7 0 0 0 14 0v-2m-7 9v3m-4 0h8"/>',
+    stop: '<rect x="6" y="6" width="12" height="12" rx="1"/>',
   };
   return `<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${paths[name] || paths.cube}</svg>`;
 };
@@ -102,26 +105,38 @@ app.innerHTML = `
         <div class="brief-label"><label for="brief">What shall we build?</label><button type="button" id="inspire" class="text-button">Try an idea ${icon('star')}</button></div>
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <label class="interior-option"><input id="hollow-interior" type="checkbox" aria-describedby="interior-help"><span><strong>Try a hollow interior</strong><small id="interior-help">Custom planning only. It asks for an empty space and usable opening when the design supports it; geometry remains model-generated.</small></span></label>
-        <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
-        <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
+        <div class="brief-input" id="brief-composer">
+          <button id="image-choose" class="composer-tool" type="button" aria-label="Choose image">${icon('plus')}</button>
+          <textarea id="brief" rows="1" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea>
+          <button id="voice-entry" class="composer-tool" type="button" aria-label="Optional voice input" aria-expanded="false" aria-controls="voice-panel">${icon('mic')}</button>
+        </div>
         <div id="image-input"></div>
-        <section class="voice-panel" aria-labelledby="voice-title">
+        <section id="voice-panel" class="voice-panel" aria-labelledby="voice-title" hidden>
           <h3 id="voice-title">Optional voice input</h3>
-          <p id="voice-disclosure">Voice is optional. With your permission, record up to 30 seconds. Transcription runs on this device; audio is not sent to a speech service. The first use downloads about 45 MB of model files from Hugging Face and its CDN. This contacts those services and exposes ordinary network metadata, including your IP address; recordings and transcripts are not sent there. Model files may stay in browser cache, be evicted, and can be removed with site data. Network charges may apply. Speed, memory needs, and accuracy vary; local transcription may fail. Other planning choices may separately send the brief you choose to use.</p>
-          <p id="voice-language">Speech recognition uses the selected app language when recording starts.</p>
+          <p id="voice-permission"></p>
           <div class="voice-controls">
             <button id="voice-start" class="button outline" type="button">Allow and record</button>
             <button id="voice-stop" class="button outline" type="button" disabled>Stop and transcribe</button>
-            <button id="voice-cancel" class="button outline" type="button" disabled>Cancel voice input</button>
+            <button id="voice-cancel" class="text-button" type="button">Cancel voice input</button>
           </div>
           <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true">Ready for voice input</p>
-          <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
-          <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
-          <div class="voice-meta"><p id="voice-review-help">Review and edit the text before planning. It stays separate until you choose to use it.</p><p id="voice-count">0 / 1,000 characters</p></div>
-          <p id="voice-length-warning" class="voice-warning" role="status" hidden></p>
-          <div id="voice-pending" class="voice-pending" hidden><p id="voice-pending-note"></p><p id="voice-pending-text"></p><button id="voice-use-pending" class="button outline" type="button">Replace with new transcription</button> <button id="voice-discard-pending" class="button outline" type="button">Discard new transcription</button></div>
-          <button id="voice-apply" class="button outline voice-apply" type="button" disabled>Use transcription in brief</button>
+          <div id="voice-review" hidden>
+            <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
+            <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
+            <div class="voice-meta"><p id="voice-review-help">Review and edit the text before planning. It stays separate until you choose to use it.</p><p id="voice-count">0 / 1,000 characters</p></div>
+            <p id="voice-length-warning" class="voice-warning" role="status" hidden></p>
+            <div id="voice-pending" class="voice-pending" hidden><p id="voice-pending-note"></p><p id="voice-pending-text"></p><button id="voice-use-pending" class="button outline" type="button">Replace with new transcription</button> <button id="voice-discard-pending" class="button outline" type="button">Discard new transcription</button></div>
+            <button id="voice-apply" class="button outline voice-apply" type="button" disabled>Use transcription in brief</button>
+          </div>
         </section>
+        <div class="composer-footer">
+          <details id="media-privacy" class="media-privacy"><summary>Media & privacy</summary>
+            <div id="image-privacy"></div><p id="voice-disclosure"></p><p id="voice-language"></p>
+            <p>If a Copilot image helper crashes, private temporary files may remain. Unconfirmed cleanup locks planning; the server operator must verify processes and files before restarting.</p>
+          </details>
+          <button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button>
+        </div>
+        <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
         <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Your brief, model output and external error details are not translated. Names created by local examples stay in the language selected when created.</p>
       </form>
       <div class="transport">
@@ -172,21 +187,36 @@ let voiceTranscriptAtStart = '';
 let voiceTranscriptRevision = 0;
 let voiceRevisionAtStart = 0;
 let pendingVoiceTranscript: string | null = null;
+let voicePanelOpen = false;
+let voiceReviewAvailable = false;
 let voiceInput: ReturnType<typeof createVoiceInput> | undefined;
 let imageInput: ReturnType<typeof createPlanningImageInput> | undefined;
 const refreshVoiceUI = () => {
+  const focused = document.activeElement;
   const labels = voiceLabels[getLanguage()];
   const transcript = $<HTMLTextAreaElement>('#voice-transcript');
   const active = ['requesting', 'recording', 'processing'].includes(voiceUpdate.state);
   const start = $<HTMLButtonElement>('#voice-start');
   const stop = $<HTMLButtonElement>('#voice-stop');
-  const cancel = $<HTMLButtonElement>('#voice-cancel');
   const apply = $<HTMLButtonElement>('#voice-apply');
+  const entry = $<HTMLButtonElement>('#voice-entry');
   const tooLong = transcript.value.length > 1000;
   start.disabled = active || pendingVoiceTranscript !== null;
+  start.hidden = active;
   stop.disabled = voiceUpdate.state !== 'recording';
-  cancel.disabled = voiceUpdate.state === 'idle';
-  apply.disabled = !transcript.value.trim() || tooLong;
+  stop.hidden = voiceUpdate.state !== 'recording';
+  entry.disabled = voiceUpdate.state === 'requesting' || voiceUpdate.state === 'processing';
+  entry.classList.toggle('recording', voiceUpdate.state === 'recording');
+  entry.innerHTML = icon(voiceUpdate.state === 'recording' ? 'stop' : 'mic');
+  entry.setAttribute('aria-label', voiceUpdate.state === 'recording' ? labels.stop : labels.title);
+  entry.setAttribute('title', voiceUpdate.state === 'recording' ? labels.stop : labels.title);
+  entry.setAttribute('aria-expanded', String(voicePanelOpen || active));
+  $('#voice-panel').hidden = !voicePanelOpen && !active;
+  $('#voice-permission').hidden = active;
+  $('#voice-review').hidden = !voiceReviewAvailable;
+  if ((start.hidden && focused === start) || (stop.hidden && focused === stop) || (entry.disabled && focused === entry))
+    (voiceUpdate.state === 'recording' ? stop : $('#voice-cancel')).focus();
+  apply.disabled = active || !transcript.value.trim() || tooLong;
   $('#voice-status').textContent = `${labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
   $('#voice-count').textContent = labels.count.replace('{count}', String(transcript.value.length));
   const warning = $<HTMLParagraphElement>('#voice-length-warning');
@@ -200,6 +230,7 @@ const applyVoiceLabels = () => {
   const labels = voiceLabels[getLanguage()];
   $('#voice-title').textContent = labels.title;
   $('#voice-disclosure').textContent = `${labels.disclosure} ${labels.runtime}`;
+  $('#voice-permission').textContent = labels.permission;
   $('#voice-language').textContent = labels.language;
   $('#voice-start').textContent = labels.start;
   $('#voice-stop').textContent = labels.stop;
@@ -286,24 +317,39 @@ let quizWon = false;
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = translate(EXAMPLES.jurassic[0]);
-imageInput = createPlanningImageInput($('#image-input'), () => hosted ? 'hosted' : mode, () => copilotImagesEnabled);
+imageInput = createPlanningImageInput({
+  container: $('#image-input'), chooser: $<HTMLButtonElement>('#image-choose'), privacy: $('#image-privacy'),
+  target: () => hosted ? 'hosted' : mode, copilotImages: () => copilotImagesEnabled,
+});
 const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
 voiceInput = createVoiceInput(
   update => { voiceUpdate = update; refreshVoiceUI(); },
   text => {
+    voiceReviewAvailable = true;
     if (!voiceTranscriptAtStart && voiceTranscriptRevision === voiceRevisionAtStart) voiceTranscript.value = text;
     else pendingVoiceTranscript = text;
     refreshVoiceUI();
   },
 );
 voiceTranscript.addEventListener('input', () => { voiceTranscriptRevision++; refreshVoiceUI(); });
+$('#voice-entry').addEventListener('click', () => {
+  if (voiceUpdate.state === 'recording') { voiceInput?.stop(); return; }
+  voicePanelOpen = true;
+  refreshVoiceUI();
+  $('#voice-start').focus();
+});
 $('#voice-start').addEventListener('click', () => {
   voiceTranscriptAtStart = voiceTranscript.value;
   voiceRevisionAtStart = voiceTranscriptRevision;
   void voiceInput?.start(true, getLanguage());
 });
 $('#voice-stop').addEventListener('click', () => voiceInput?.stop());
-$('#voice-cancel').addEventListener('click', () => voiceInput?.cancel());
+$('#voice-cancel').addEventListener('click', () => {
+  voiceInput?.cancel();
+  voicePanelOpen = false;
+  refreshVoiceUI();
+  $('#voice-entry').focus();
+});
 $('#voice-use-pending').addEventListener('click', () => {
   if (pendingVoiceTranscript === null) return;
   voiceTranscript.value = pendingVoiceTranscript;
@@ -319,6 +365,8 @@ $('#voice-discard-pending').addEventListener('click', () => {
 $('#voice-apply').addEventListener('click', () => {
   if (!voiceTranscript.value.trim() || voiceTranscript.value.length > 1000) return;
   brief.value = voiceTranscript.value;
+  voicePanelOpen = false;
+  refreshVoiceUI();
   brief.focus();
 });
 const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
