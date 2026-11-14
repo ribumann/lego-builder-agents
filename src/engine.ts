@@ -104,6 +104,43 @@ const models: Model[] = ['stegosaurus', 'brachiosaurus', 'explorer', 'cargo'];
 const colorNames = COLOR_NAMES;
 const key = (x: number, y: number, z: number) => `${x},${y},${z}`;
 
+const colorVocabulary: [RegExp, Color][] = [
+  [/(?:grün(?:e|er|es|en)?|vert(?:e)?s?|verdes?)/u, 'green'],
+  [/(?:violett(?:e|er|es|en)?|lila|violet(?:te)?|viola|morado|morada|roxo|roxa)/u, 'purple'],
+  [/(?:blau(?:e|er|es|en)?|bleu(?:e)?|blu|azul)/u, 'blue'],
+  [/(?:weiß(?:e|er|es|en)?|blanc(?:he)?|bianc[oa]|blanc[oa]|branc[oa])/u, 'white'],
+  [/(?:rot(?:e|er|es|en)?|rouge|ross[oa]|roj[oa]|vermelh[oa])/u, 'red'],
+  [/(?:orange(?:farben(?:e|er|es|en)?)?|arancion[ei]|naranjas?|laranjas?)/u, 'orange'],
+  [/(?:schwarz(?:e|er|es|en)?|noir(?:e)?|ner[oa]|negr[oa]|pret[oa])/u, 'black'],
+  [/(?:gelb(?:e|er|es|en)?|jaune|giall[oa]|amarill[oa]|amarel[oa])/u, 'yellow'],
+  [/(?:grau(?:e|er|es|en)?|gray|grey|gris(?:e)?|grigi[oa]|cinza)/u, 'gray'],
+  [/(?:braun(?:e|er|es|en)?|marron(?:e)?|marrón|marrom|brun(?:e)?|castanh[oa])/u, 'brown'],
+  [/(?:pink(?:e|er|es|en)?|rose|ros[ae]|ros[ao])/u, 'pink'],
+];
+
+function briefColors(prompt: string): { body?: Color; detail: boolean; unsupportedBody: boolean } {
+  let text = prompt.toLowerCase();
+  for (const [pattern, canonical] of colorVocabulary)
+    text = text.replace(new RegExp(`(?<!\\p{L})(?:${pattern.source})(?!\\p{L})`, 'gu'), canonical);
+  const detail = '(?:plates?|engines?|thrusters?|stripes?|eyes?|cockpit|accents?|details?|feet|muzzle|triebwerke?n?|platten|augen|moteurs?|plaques?|yeux|motori|piastre|occhi|motores?|placas?|ojos|olhos)';
+  const followingDetail = new RegExp(`^\\s+(?:${detail})(?!\\p{L})`, 'u');
+  const precedingDetail = new RegExp(`(?<!\\p{L})(?:${detail})\\s+(?:(?:is|are|ist|sind|est|sont|è|sono|es|son|é|são)\\s+)?$`, 'u');
+  const mentions = [...text.matchAll(new RegExp(`(?<!\\p{L})(${[...colorNames, 'cyan', 'teal', 'turquoise', 'beige', 'silver', 'gold'].join('|')})(?!\\p{L})`, 'gu'))];
+  let body: Color | undefined;
+  let hasDetail = false;
+  let unsupportedBody = false;
+  for (const match of mentions) {
+    const start = match.index;
+    const isDetail = followingDetail.test(text.slice(start + match[0].length))
+      || precedingDetail.test(text.slice(0, start));
+    const color = colorNames.find(name => name === match[1]);
+    if (isDetail) hasDetail = true;
+    else if (!color) unsupportedBody = true;
+    else if (!body) body = color;
+  }
+  return { body, detail: hasDetail, unsupportedBody };
+}
+
 // Recognize the vocabulary shown in the translated guide, without changing the saved brief.
 function offlineVocabulary(prompt: string): string {
   const text = prompt.toLowerCase();
@@ -114,17 +151,6 @@ function offlineVocabulary(prompt: string): string {
     [/(?:fracht(?:schiff)?|cargo|carga|cargaison)/u, 'cargo'],
     [/(?:erkunder|erkundungs(?:schiff|schiffe)|explorateur|exploratrice|explorador|exploradora|esploratore|esploratrice)/u, 'explorer'],
     [/(?:raumschiff|vaisseau|astronave|nave\s+espacial)/u, 'spaceship'],
-    [/(?:grün(?:e|er|es|en)?|vert(?:e)?|verde)/u, 'green'],
-    [/(?:violett(?:e|er|es|en)?|lila|violet(?:te)?|viola|morado|morada|roxo|roxa)/u, 'purple'],
-    [/(?:blau(?:e|er|es|en)?|bleu(?:e)?|blu|azul)/u, 'blue'],
-    [/(?:weiß(?:e|er|es|en)?|blanc(?:he)?|bianc[oa]|blanc[oa]|branc[oa])/u, 'white'],
-    [/(?:rot(?:e|er|es|en)?|rouge|ross[oa]|roj[oa]|vermelh[oa])/u, 'red'],
-    [/(?:orange(?:farben(?:e|er|es|en)?)?|arancione|naranja|laranja)/u, 'orange'],
-    [/(?:schwarz(?:e|er|es|en)?|noir(?:e)?|ner[oa]|negr[oa]|pret[oa])/u, 'black'],
-    [/(?:gelb(?:e|er|es|en)?|jaune|giall[oa]|amarill[oa]|amarel[oa])/u, 'yellow'],
-    [/(?:grau(?:e|er|es|en)?|gray|grey|gris(?:e)?|grigi[oa]|cinza)/u, 'gray'],
-    [/(?:braun(?:e|er|es|en)?|marron(?:e)?|marrón|marrom|brun(?:e)?|castanh[oa])/u, 'brown'],
-    [/(?:pink(?:e|er|es|en)?|rose|ros[ae]|ros[ao])/u, 'pink'],
     [/(?:lang(?:e|er|en|em)?\s+schwanz|longue?\s+queue|coda\s+lunga|cola\s+larga|cauda\s+longa)/u, 'long tail'],
     [/(?:breit(?:e|en|er|es)?\s+flügeln?|larges?\s+ailes|ailes\s+larges|ali\s+larghe|alas\s+anchas|asas\s+largas)/u, 'wide wings'],
   ];
@@ -155,15 +181,18 @@ export function parseBrief(world: World, prompt: string): { spec: Spec; assumpti
     model = /cargo|freight/.test(text) ? 'cargo' : 'explorer';
     if (!/cargo|explorer/.test(text)) assumptions.push('No ship type specified: I chose an explorer.');
   }
-  const color = colorNames.find(c => new RegExp(`\\b${c}\\b`).test(text)) ?? (world === 'jurassic' ? 'green' : 'blue');
-  if (!colorNames.some(c => new RegExp(`\\b${c}\\b`).test(text)))
+  const colors = briefColors(prompt);
+  const color = colors.body ?? (world === 'jurassic' ? 'green' : 'blue');
+  if (!colors.body)
     assumptions.push(`No body color specified: I chose ${color}.`);
+  if (colors.detail)
+    assumptions.push('Detail colors are fixed in offline templates; requested detail colors may not be reflected.');
   if (/fly|flying|laser|weapon|walk|roar|animate/.test(text))
     assumptions.push('I can build a static brick model, but cannot simulate walking, flying, sounds, or weapons.');
   const budgetMatch = text.match(/(?:under|within|max(?:imum)?|budget(?: of)?)\s*(\d+)\s*(?:bricks)?/);
   const budget = budgetMatch ? Number(budgetMatch[1]) : 700;
   if (budget < 1 || budget > 1000) throw new Error('Choose a brick budget between 1 and 1,000.');
-  if (/\bcyan\b/.test(text))
+  if (colors.unsupportedBody)
     assumptions.push('Body palette: green, orange, blue, purple, red, white, black, yellow, gray, brown, or pink. Other requested colors are not supported.');
   return {
     spec: { world, model, color, longTail: /long.tail/.test(text), wideWings: /wide|broad/.test(text), budget },

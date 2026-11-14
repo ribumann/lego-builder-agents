@@ -103,6 +103,40 @@ test('expanded colors parse and render in both offline scenes, including transla
       assert.equal(parseBrief('jurassic', `${aliases[index]} stegosaurus`).spec.color, color);
   assert.equal(parseBrief('space', 'grey explorer').spec.color, 'gray');
 });
+test('body colors remain distinct from fixed detail colors in multilingual briefs', () => {
+  const fixedDetails = 'Detail colors are fixed in offline templates; requested detail colors may not be reflected.';
+  const examples: [World, string, string][] = [
+    ['space', 'black explorer with orange engines', 'black'],
+    ['jurassic', 'yellow stegosaurus with green plates', 'yellow'],
+    ['space', 'orange engines on a black explorer', 'black'],
+    ['space', 'schwarzer Erkunder mit orangefarbenen Triebwerken', 'black'],
+    ['jurassic', 'stégosaure jaune avec plaques vertes', 'yellow'],
+    ['space', 'esploratrice nera con motori arancioni', 'black'],
+    ['jurassic', 'estegosaurio amarillo con placas verdes', 'yellow'],
+    ['space', 'exploradora preta com motores laranja', 'black'],
+    ['space', 'black explorer with cyan engines', 'black'],
+    ['space', 'black explorer with teal engines', 'black'],
+  ];
+  for (const [world, brief, expected] of examples) {
+    const result = parseBrief(world, brief);
+    assert.equal(result.spec.color, expected, brief);
+    assert.ok(result.assumptions.includes(fixedDetails), brief);
+    assert.ok(!result.assumptions.some(item => item.startsWith('Body palette:')), brief);
+  }
+  const detailsOnly = parseBrief('space', 'explorer with orange engines');
+  assert.equal(detailsOnly.spec.color, 'blue');
+  assert.ok(detailsOnly.assumptions.includes('No body color specified: I chose blue.'));
+  assert.ok(detailsOnly.assumptions.includes(fixedDetails));
+  const unsupportedDetail = parseBrief('space', 'explorer with teal engines');
+  assert.equal(unsupportedDetail.spec.color, 'blue');
+  assert.ok(unsupportedDetail.assumptions.includes(fixedDetails));
+  assert.ok(!unsupportedDetail.assumptions.some(item => item.startsWith('Body palette:')));
+  const unsupportedBody = parseBrief('space', 'cyan explorer with orange engines');
+  assert.equal(unsupportedBody.spec.color, 'blue');
+  assert.ok(unsupportedBody.assumptions.some(item => item.startsWith('Body palette:')));
+  assert.ok(unsupportedBody.assumptions.includes(fixedDetails));
+  assert.equal(parseBrief('jurassic', 'stegosaurus').spec.color, 'green');
+});
 test('vague brief exposes assumptions; supported inputs actually change geometry', () => {
   const vague = parseBrief('jurassic', 'Build a dinosaur.');
   assert.equal(vague.assumptions.length, 2);

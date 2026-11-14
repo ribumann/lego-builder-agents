@@ -26,6 +26,8 @@ test('mission navigation and guide disclosures have translations in all six lang
     for (const text of interfaceText) assert.notEqual(translate(text), text, `${language}: ${text}`);
     const paletteGuidance = 'Additional offline template body colors: black, yellow, gray, brown and pink.';
     assert.notEqual(translate(paletteGuidance), paletteGuidance, `${language}: expanded color guidance`);
+    const fixedDetails = 'Detail colors are fixed in offline templates; requested detail colors may not be reflected.';
+    assert.notEqual(translate(fixedDetails), fixedDetails, `${language}: fixed detail guidance`);
     for (const color of ['black', 'yellow', 'gray', 'brown', 'pink'])
       assert.notEqual(translate(color), color, `${language}: ${color}`);
   }
