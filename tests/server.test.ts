@@ -7,6 +7,7 @@ import { request, createServer as createHttpServer } from 'node:http';
 import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join, delimiter } from 'node:path';
+import { pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
 
 function fetchWithHost(url: string, options: { method?: string; headers: Record<string, string>; body?: string; stream?: boolean }) {
@@ -96,8 +97,10 @@ import { PassThrough } from 'node:stream';
 import { promisify } from 'node:util';
 import http from 'node:http';
 import fs from 'node:fs/promises';
+import { basename, dirname } from 'node:path';
 const actualReadFile = fs.readFile;
-fs.readFile = (file, ...args) => process.env.TEST_STATIC_FIXTURE === '1' && String(file).endsWith('/dist/index.html')
+fs.readFile = (file, ...args) => process.env.TEST_STATIC_FIXTURE === '1'
+  && basename(String(file)) === 'index.html' && basename(dirname(String(file))) === 'dist'
   ? Promise.resolve(Buffer.from('<!doctype html><title>Offline fixture</title>')) : actualReadFile(file, ...args);
 Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
 const realTimeout = globalThis.setTimeout;
@@ -233,7 +236,7 @@ process.on('message', message => {
   reply();
 });
 `);
-  const server = await startServer(t, { BRICKLAB_COPILOT_BIN: process.execPath, ...env }, ['--import', preload]);
+  const server = await startServer(t, { BRICKLAB_COPILOT_BIN: process.execPath, ...env }, ['--import', pathToFileURL(preload).href]);
   const hostedOrigin = env.BRICKLAB_HOSTED_ORIGIN ?? 'https://bricklab.liberatetheinnerchild.net';
   const hostHeaders: Record<string, string> = env.BRICKLAB_HOSTED === '1' ? { Host: new URL(hostedOrigin).host } : {};
   const statusResponse = await fetchWithHost(server.base + '/api/status', { headers: hostHeaders });
