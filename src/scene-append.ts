@@ -53,16 +53,16 @@ function assertPlan(plan: Plan): void {
   validateSpec(plan.spec, plan.spec.world);
 }
 
-function defaultObjectName(spec: Spec): string {
+function defaultObjectName(spec: Spec, localize: (name: string) => string): string {
   if (spec.model === 'custom') return spec.design!.name;
-  return spec.model[0].toUpperCase() + spec.model.slice(1);
+  return localize(spec.model[0].toUpperCase() + spec.model.slice(1));
 }
 
-function objectGroups(plan: Plan): ObjectGeometry[] {
+function objectGroups(plan: Plan, localize: (name: string) => string): ObjectGeometry[] {
   const bricks = allBricks(plan);
   if (!bricks.length) throw new Error('Cannot append an empty scene.');
   const declaredObjects = plan.spec.model === 'custom' ? plan.spec.design?.objects : undefined;
-  const fallbackName = defaultObjectName(plan.spec);
+  const fallbackName = defaultObjectName(plan.spec, localize);
   const groups = new Map<string, Brick[]>();
 
   if (declaredObjects) {
@@ -225,14 +225,15 @@ function cloneProvenance(value: SceneAppendProvenance): SceneAppendProvenance {
  * Atomically compose a Team and a generated Plan. Neither input is mutated.
  * The old geometry stays at its exact coordinates; only the new Plan is translated.
  */
-export function appendScene(previous: Team, addition: Plan): SceneAppendResult {
+export function appendScene(previous: Team, addition: Plan, designName = 'Appended scene',
+  localize: (name: string) => string = name => name): SceneAppendResult {
   assertPlan(previous.plan);
   assertPlan(addition);
   if (previous.plan.spec.world !== addition.spec.world)
     throw new Error('Cannot append scenes from different worlds.');
 
-  const previousObjects = objectGroups(previous.plan);
-  const addedObjects = objectGroups(addition);
+  const previousObjects = objectGroups(previous.plan, localize);
+  const addedObjects = objectGroups(addition, localize);
   const usedNames = new Set(previousObjects.map(object => object.name));
   if (usedNames.size !== previousObjects.length)
     throw new Error('Cannot append a scene with duplicate existing object names.');
@@ -263,7 +264,6 @@ export function appendScene(previous: Team, addition: Plan): SceneAppendResult {
     throw new Error('Cannot append more than 32 named objects to a scene.');
 
   const budget = Math.min(8192, previous.plan.spec.budget + addition.spec.budget);
-  const designName = 'Appended scene';
   const spec = validateSpec({
     world: previous.plan.spec.world,
     model: 'custom',

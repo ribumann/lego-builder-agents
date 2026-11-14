@@ -33,25 +33,25 @@ function templateObject(name: string, world: World, brief: string, offsetX: numb
   return { name, bricks };
 }
 
-export function worldExample(world: World): Spec {
+export function worldExample(world: World, localize: (name: string) => string = name => name): Spec {
   const objects = world === 'jurassic'
     ? [
-      templateObject('Mossback stegosaurus', world, 'green stegosaurus', -18),
-      templateObject('Violet brachiosaurus', world, 'purple brachiosaurus', 18),
-      { name: 'Valley tree', bricks: [
+      templateObject(localize('Mossback stegosaurus'), world, 'green stegosaurus', -18),
+      templateObject(localize('Violet brachiosaurus'), world, 'purple brachiosaurus', 18),
+      { name: localize('Valley tree'), bricks: [
         { x: -1, y: 0, z: -13, width: 2, height: 6, depth: 2, color: 'orange', part: 'frame' },
         { x: -3, y: 6, z: -15, width: 6, height: 2, depth: 6, color: 'green', part: 'detail' },
       ] as CustomBrick[] },
     ]
     : [
-      templateObject('Blue explorer', world, 'blue explorer', -15),
-      templateObject('White cargo ship', world, 'white cargo', 15),
-      { name: 'Orbital station', bricks: [
+      templateObject(localize('Blue explorer'), world, 'blue explorer', -15),
+      templateObject(localize('White cargo ship'), world, 'white cargo', 15),
+      { name: localize('Orbital station'), bricks: [
         { x: -4, y: 0, z: -19, width: 8, height: 2, depth: 6, color: 'white', part: 'frame' },
         { x: -2, y: 2, z: -18, width: 4, height: 3, depth: 4, color: 'blue', part: 'frame' },
         { x: -3, y: 5, z: -19, width: 6, height: 1, depth: 6, color: 'orange', part: 'detail' },
       ] as CustomBrick[] },
     ];
   return { world, model: 'custom', color: world === 'jurassic' ? 'green' : 'blue', longTail: false, wideWings: false, budget: 1000,
-    design: { name: world === 'jurassic' ? 'Jurassic herd · local example' : 'Space fleet · local example', objects } };
+    design: { name: localize(world === 'jurassic' ? 'Jurassic herd · local example' : 'Space fleet · local example'), objects } };
 }

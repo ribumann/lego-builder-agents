@@ -3,12 +3,12 @@
 A LEGO-style game with **cloud-first, open-ended planning** and visible **agentic teamwork for ages 11-15**. Give a brief and watch five agents coordinate: BuildBot delegates, PlanBot checks the blueprint, FrameBot and DetailBot build, and CheckBot inspects the result. Optional Local AI and explicit offline presets are separate choices.
 
 The interface offers English, German, French, Italian, Spanish and Portuguese,
-with the selection saved on this device. Translation is partial: detailed
-guidance, some agent messages and technical errors remain in English. Offline
-templates recognize the translated guide examples and a limited English
-vocabulary; the rule-based crew offers translated question buttons, while
-free-form questions recognize English keywords only. Briefs and model-generated
-content remain in their original language.
+with the selection saved on this device. Offline templates recognize the
+translated guide examples and a limited English vocabulary; the rule-based crew
+offers translated question buttons, while free-form questions recognize English
+keywords only. Briefs, model-generated content and external error details remain
+in their original language. Names generated for local examples retain the
+language selected when the example was created.
 
 Inspired by the user-supplied National Future Day post: three agents build a Minecraft castle from children's ideas. This original implementation translates its lesson into two brick-building worlds, not a reproduction of Minecraft or official LEGO software.
 

@@ -32,6 +32,21 @@ function customPlan(name: string, source: Plan['source'], objects: NonNullable<S
   return createPlan(spec, [], source);
 }
 
+test('localized generated names preserve scene geometry and survive reload', () => {
+  const template = createPlan(validateSpec({
+    world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: false, budget: 700,
+  }, 'space'));
+  const original = new Team(template);
+  original.step(5);
+  const result = appendScene(original, template, 'Scène complétée', name => name === 'Explorer' ? 'Explorateur' : name);
+  assert.equal(result.team.plan.spec.design!.name, 'Scène complétée');
+  assert.deepEqual(result.team.plan.spec.design!.objects!.map(object => object.name), ['Explorateur', 'Explorateur (2)']);
+  assert.deepEqual([...original.bricks.keys()], [...result.team.bricks.keys()]);
+  const restored = restoreSceneAppend(snapshotSceneAppend(result.team, 'Exemple'));
+  assert.equal(restored.team.plan.spec.design!.name, 'Scène complétée');
+  assert.deepEqual(restored.team.plan.spec.design!.objects!.map(object => object.name), ['Explorateur', 'Explorateur (2)']);
+});
+
 test('appends overlapping template Plans deterministically and preserves existing work', () => {
   const template = createPlan(validateSpec({
     world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: false, budget: 700,

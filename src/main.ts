@@ -97,7 +97,7 @@ app.innerHTML = `
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
         <div class="brief-input"><textarea id="brief" rows="2" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea><button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button></div>
         <p id="brief-help">Name the object, body color, and a special feature. Clearer instructions help your team.</p>
-        <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Some guidance, technical errors and agent messages remain in English; your brief and model output are not translated.</p>
+        <p id="language-note">Offline templates recognize the translated guide examples and limited English keywords. Use the translated crew question buttons, or ask in English. Your brief, model output and external error details are not translated. Names created by local examples stay in the language selected when created.</p>
       </form>
       <div class="transport">
         <div class="build-progress"><strong id="brick-count">0 <span>bricks placed</span></strong><span id="progress-value">0%</span></div>
@@ -143,7 +143,7 @@ const applyLanguage = () => {
   translateInterface(app);
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
-  if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${sceneErrorDetail}. ${translate('You can still build using the task board and text inspection below.')}`;
+  if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${translate(sceneErrorDetail)}. ${translate('You can still build using the task board and text inspection below.')}`;
   const statuses = [['#planner-status', plannerMessage], ['#local-planner-status', localPlanner.message],
     ['#azure-planner-status', azurePlanner.message], ['#compatible-planner-status', compatiblePlanner.message]] as const;
   for (const [selector, message] of statuses) {
@@ -221,7 +221,7 @@ try {
 } catch (error) {
   $('#scene-error').hidden = false;
   sceneErrorDetail = error instanceof Error ? error.message : 'WebGL is not supported';
-  $('#scene-error').textContent = `${translate('3D is unavailable:')} ${sceneErrorDetail}. ${translate('You can still build using the task board and text inspection below.')}`;
+  $('#scene-error').textContent = `${translate('3D is unavailable:')} ${translate(sceneErrorDetail)}. ${translate('You can still build using the task board and text inspection below.')}`;
 }
 
 function save() {
@@ -463,7 +463,7 @@ async function makePlan(demo = false) {
     }
     const plan = createPlan(spec, assumptions, source);
     if (adding && team) {
-      const appended = appendScene(team, plan);
+      const appended = appendScene(team, plan, translate('Appended scene'), translate);
       team = appended.team;
       hasSceneAppend = true;
       notice(`Added to the scene at grid offset (${appended.offset.x}, ${appended.offset.z}). Existing bricks remain in place.`);
@@ -624,14 +624,14 @@ $('#export').addEventListener('click', () => {
 function loadWorldExample(exampleWorld: World) {
   if (planning) return;
   try {
-    const plan = createPlan(worldExample(exampleWorld), ['This themed world is a deterministic local example, not a model result.'], 'local');
+    const plan = createPlan(worldExample(exampleWorld, translate), ['This themed world is a deterministic local example, not a model result.'], 'local');
     const example = new Team(plan);
     mode = 'local'; modeChosen = true; updateMode();
     if (world !== plan.spec.world) switchWorld(plan.spec.world);
     running = false; replaying = false;
     team = example;
     hasSceneAppend = false;
-    activeBrief = `Original local ${exampleWorld === 'jurassic' ? 'Jurassic herd' : 'space fleet'} example`;
+    activeBrief = translate(exampleWorld === 'jurassic' ? 'Original local Jurassic herd example' : 'Original local space fleet example');
     brief.value = activeBrief;
     scene?.setBlueprint(allBricks(plan));
     scene?.showBlueprint(showGhost);

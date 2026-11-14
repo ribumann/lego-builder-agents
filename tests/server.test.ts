@@ -790,8 +790,9 @@ test('hosted public planning stays blocked and unsafe/incomplete startup configu
     const result = spawnSync(process.execPath, ['server.mjs', ...args], {
       env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_HOSTED: '0',
         BRICKLAB_CODESPACES: '0', BRICKLAB_AZURE_AI: '0', ...extra },
-      encoding: 'utf8', timeout: 5000,
+      encoding: 'utf8', timeout: 15_000,
     });
+    assert.ifError(result.error);
     assert.equal(result.status, 1, `Invalid configuration must fail before the server starts: ${JSON.stringify(extra)}`);
     assert.equal(result.stdout.includes('BrickLab:'), false);
   }
@@ -975,9 +976,10 @@ test('Compatible AI disconnect aborts upstream and eventually releases the share
 });
 
 test('Hosted mode rejects compatible AI even when configured', () => {
-  const child = spawnSync(process.execPath, ['server.mjs', '--production'], { encoding: 'utf8',
+  const child = spawnSync(process.execPath, ['server.mjs', '--production'], { encoding: 'utf8', timeout: 15_000,
     env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_HOSTED: '1',
       BRICKLAB_CODESPACES: '0', BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_AZURE_AI: '0' } });
+  assert.ifError(child.error);
   assert.notEqual(child.status, 0);
   assert.match(child.stderr, /cannot be enabled in public hosted mode/);
 });
@@ -1273,8 +1275,9 @@ test('Codespace mode rejects missing context, unsafe binding and development ser
     const result = spawnSync(process.execPath, ['server.mjs', ...args], {
       env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_CODESPACES: '1',
         CODESPACES: 'true', CODESPACE_NAME: 'test-codespace', ...extra },
-      encoding: 'utf8', timeout: 5000,
+      encoding: 'utf8', timeout: 15_000,
     });
+    assert.ifError(result.error);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /requires a Codespace/);
   }

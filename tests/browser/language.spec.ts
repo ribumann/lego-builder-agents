@@ -163,6 +163,24 @@ test('suggested offline briefs are localized and retain their intended designs',
   }
 });
 
+test('local example names use the selected language and survive reload', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
+  } }));
+  await page.goto('/');
+  await page.locator('#language').selectOption('fr');
+  await page.locator('#herd-example').click();
+  await expect(page.locator('#brief')).toHaveValue('Exemple local original de troupeau jurassique');
+  await page.locator('#tab-tasks').click();
+  await expect(page.locator('#task-list')).toContainText('Stégosaure dos-mousse');
+  await page.locator('#language').selectOption('de');
+  await expect(page.locator('#task-list')).toContainText('Stégosaure dos-mousse');
+  await page.reload();
+  await expect(page.locator('#brief')).toHaveValue('Exemple local original de troupeau jurassique');
+  await page.locator('#tab-tasks').click();
+  await expect(page.locator('#task-list')).toContainText('Stégosaure dos-mousse');
+});
+
 test('known server status is localized without changing external messages', async ({ page }) => {
   const status = 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.';
   await page.route('**/api/status', route => route.fulfill({ json: {
@@ -265,4 +283,28 @@ test('translated guide describes template limitations and model consent', async 
   await page.locator('#settings').click();
   await expect(page.locator('#dialog-body')).toContainText('Le coût en dollars est inconnu');
   await expect(page.locator('#dialog-body')).toContainText('La boucle locale seule ne prouve pas');
+});
+
+test('guide and planning choices are available in all six languages', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'ready', message: 'external 🚀' },
+  } }));
+  await page.goto('/');
+  for (const [language, guide, settings] of [
+    ['en', 'You’re the director. They’re the crew.', 'Choose how the team plans'],
+    ['de', 'Du führst Regie. Sie sind das Team.', 'Wähle die Planung des Teams'],
+    ['fr', 'Vous dirigez. Ils forment l’équipe.', 'Choisissez le mode de planification'],
+    ['it', 'Tu dirigi. Loro sono la squadra.', 'Scegli come pianifica la squadra'],
+    ['es', 'Tú diriges. Ellos son el equipo.', 'Elige cómo planifica el equipo'],
+    ['pt', 'Você dirige. Eles são a equipe.', 'Escolha como a equipe planeja'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#guide').click();
+    await expect(page.locator('#dialog-title')).toHaveText(guide);
+    await page.locator('#close-dialog').click();
+    await page.locator('#settings').click();
+    await expect(page.locator('#dialog-title')).toHaveText(settings);
+    await expect(page.locator('#planner-status')).toHaveText('external 🚀');
+    await page.locator('#close-dialog').click();
+  }
 });

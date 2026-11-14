@@ -56,12 +56,13 @@ export function validateCustomSpec(value) {
       throw new Error(`Custom brick ${index + 1} repeat exceeds bounds.`);
     count += n;
     volume += n * b.width * b.height * b.depth;
-    if (count > 8192 || count > s.budget) throw new Error('Custom design exceeds its expanded brick budget or 8192-brick limit.');
+    if (count > 8192) throw new Error('Custom design exceeds the 8192-brick limit.');
     if (volume > 262144) throw new Error('Custom design exceeds 262144 occupied cells.');
     const result = { x: b.x, y: b.y, z: b.z, width: b.width, height: b.height, depth: b.depth, color: b.color, part: b.part };
     if (r) result.repeat = { count: r.count, dx: r.dx, dy: r.dy, dz: r.dz };
     return result;
   }) }));
+  if (count > s.budget) throw new Error('Custom design exceeds its expanded brick budget.');
   const occupied = new Set();
   for (const b of canonicalObjects.flatMap(object => expandCustomBricks(object.bricks)))
     for (let x = b.x; x < b.x + b.width; x++)

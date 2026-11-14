@@ -49,6 +49,22 @@ test('expanded budget counts repeated and single bricks across all objects', asy
   assert.equal(validateCustomSpec(spec).budget, 11);
 });
 
+test('expanded budget errors distinguish the declared budget from the absolute ceiling', () => {
+  const record = (x, count = 64) => ({
+    x, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame',
+    repeat: { count, dx: 0, dy: 1, dz: 0 },
+  });
+  const spec = { world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
+    design: { name: 'Budget fixture', bricks: [record(0, 11)] } };
+  assert.throws(() => validateCustomSpec(spec), /exceeds its expanded brick budget\./);
+  spec.budget = 8192;
+  spec.design.bricks = Array.from({ length: 128 }, (_, i) => record(i - 64));
+  spec.design.bricks.push({ x: 0, y: 0, z: 1, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' });
+  assert.throws(() => validateCustomSpec(spec), /exceeds the 8192-brick limit\./);
+  spec.budget = 10;
+  assert.throws(() => validateCustomSpec(spec), /exceeds the 8192-brick limit\./);
+});
+
 test('Azure planner rejects untrusted endpoints and incomplete or oversized responses', async () => {
   assert.throws(() => createAzurePlanner({ endpoint: 'https://evil.example', deployment: 'model', credential }));
   for (const body of [envelope('{"model":"custom"}', 'length'), 'x'.repeat(1_048_577),

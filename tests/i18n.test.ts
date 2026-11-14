@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { elapsedText, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateTaskName } from '../src/i18n';
 import { EXAMPLES, parseBrief, type World } from '../src/engine';
+import { worldExample } from '../src/world-examples';
 
 test('planning estimates stay provider-specific in every supported language', () => {
   for (const language of languages) {
@@ -81,12 +82,25 @@ test('known Local AI status translates while preserving unknown provider text', 
   setLanguage('en');
 });
 
+test('fallback status and graphics messages translate in every language', () => {
+  const messages = ['Checking the local planner…', 'Azure planning is unavailable on this server.',
+    'Planner status unavailable.', 'WebGL is not supported'];
+  for (const language of languages.slice(1)) {
+    setLanguage(language);
+    for (const message of messages) assert.notEqual(translate(message), message, `${language}: ${message}`);
+    assert.equal(translate('Unknown graphics error 🚀'), 'Unknown graphics error 🚀');
+  }
+  setLanguage('en');
+});
+
 test('scene and imported mission errors translate inside load and restore notices', () => {
   const details = [
     'Scene append provenance is invalid.',
     'AI mission must have one valid decision per model agent.',
     'Saved build contains unknown or duplicate bricks.',
     'Custom design exceeds its expanded brick budget or 8192-brick limit.',
+    'Custom design exceeds its expanded brick budget.',
+    'Custom design exceeds the 8192-brick limit.',
     'Custom brick 17 repeat exceeds bounds.',
     'Copilot returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or explicitly choose offline templates.',
     'Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.',
@@ -116,6 +130,21 @@ test('every translated suggested offline brief produces the same specification',
         assert.deepEqual(parseBrief(world, translate(example)).spec, parseBrief(world, example).spec,
           `${language}: ${example}`);
       }
+    }
+  }
+  setLanguage('en');
+});
+
+test('local world examples translate only their generated names and preserve geometry', () => {
+  for (const world of ['jurassic', 'space'] as World[]) {
+    const original = worldExample(world);
+    for (const language of languages.slice(1)) {
+      setLanguage(language);
+      const localized = worldExample(world, translate);
+      assert.notEqual(localized.design!.name, original.design!.name);
+      assert.deepEqual(localized.design!.objects!.map(object => object.bricks),
+        original.design!.objects!.map(object => object.bricks));
+      assert.ok(localized.design!.objects!.every(object => object.name.length <= 60));
     }
   }
   setLanguage('en');
