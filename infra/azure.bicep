@@ -12,6 +12,10 @@ param frontDoorId string = ''
 @description('Object ID of the operator allowed to upload release packages.')
 param packageUploaderObjectId string
 
+@description('Dedicated GPT-5.4 DataZoneStandard quota units (1,000 TPM per unit); token-billed, not provisioned throughput.')
+@minValue(1)
+param plannerCapacity int = 200
+
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 var webName = 'bricklab-${suffix}'
 var storageName = 'bricklab${suffix}'
@@ -212,7 +216,7 @@ resource model 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
   name: 'bricklab-planner-gpt54'
   sku: {
     name: 'DataZoneStandard'
-    capacity: 1
+    capacity: plannerCapacity
   }
   properties: {
     model: {
