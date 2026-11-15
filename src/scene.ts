@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AGENTS, type Brick, type World } from './engine';
 import { BrickBatch } from './brick-batch';
+import { DEFAULT_CAMERA_OFFSET } from './camera-view.mjs';
 
 const UNIT_Y = 0.7;
 export class Workbench {
@@ -249,7 +250,9 @@ export class Workbench {
   }
   explode(value: boolean) { this.exploded = value; this.modelBatch?.setExploded(value, performance.now()); }
   resetCamera() {
-    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(0.55, 0.35, 0.7).normalize().multiplyScalar(this.cameraDistance));
+    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(
+      DEFAULT_CAMERA_OFFSET.x, DEFAULT_CAMERA_OFFSET.y, DEFAULT_CAMERA_OFFSET.z,
+    ).normalize().multiplyScalar(this.cameraDistance));
     this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }
