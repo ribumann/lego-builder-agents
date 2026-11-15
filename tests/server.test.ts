@@ -2485,6 +2485,10 @@ test('Codespace diagnostics redact headers and never trust forwarded values', { 
   await new Promise(resolve => setImmediate(resolve));
   assert.match(diagnostics, /"host":"other"/);
   assert.match(diagnostics, /"host":"loopback"/);
+  assert.match(diagnostics, /"access":"host-rejected"/);
+  assert.match(diagnostics, /"access":"origin-rejected"/);
+  assert.match(diagnostics, /"requestKind":"navigation"/);
+  assert.match(diagnostics, /"requestKind":"api"/);
   assert.match(diagnostics, /"forwardedHost":"expected"/);
   assert.match(diagnostics, /"forwardedProto":"expected"/);
   assert.match(diagnostics, /"forwarded":"present"/);

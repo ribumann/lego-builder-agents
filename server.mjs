@@ -364,10 +364,15 @@ const server = http.createServer(async (req, res) => {
   catch { return send(res, 400, { error: 'Invalid request URL.' }); }
   if (codespaces) {
     res.setHeader('Cache-Control', 'no-store');
+    const acceptedHost = allowedHosts.has(req.headers.host);
+    const acceptedOrigin = !req.headers.origin || allowedOrigins.has(req.headers.origin);
     if (codespacesDiagnostics && diagnosticRequests++ < 20) {
       const classify = (value, expected) => value === undefined ? 'absent'
         : value === expected ? 'expected' : 'other';
       console.error('Codespace request diagnostics:', JSON.stringify({
+        requestKind: url.pathname.startsWith('/api/') ? 'api' : url.pathname === '/' ? 'navigation' : 'asset',
+        access: !acceptedHost ? 'host-rejected' : !acceptedOrigin ? 'origin-rejected'
+          : !sameSecret(req.headers.authorization, appAuthorization) ? 'app-auth-required' : 'private-port-check',
         host: [`localhost:${port}`, `127.0.0.1:${port}`].includes(req.headers.host)
           ? 'loopback' : classify(req.headers.host, new URL(forwardedOrigin).host),
         origin: classify(req.headers.origin, forwardedOrigin),
@@ -376,8 +381,7 @@ const server = http.createServer(async (req, res) => {
         forwarded: req.headers.forwarded === undefined ? 'absent' : 'present',
       }));
     }
-    if (!allowedHosts.has(req.headers.host)
-        || (req.headers.origin && !allowedOrigins.has(req.headers.origin)))
+    if (!acceptedHost || !acceptedOrigin)
       return send(res, 403, { error: 'Use this Codespace port\'s exact HTTPS URL and origin.' });
     if (!sameSecret(req.headers.authorization, appAuthorization)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="BrickLab private Codespace", charset="UTF-8"');
