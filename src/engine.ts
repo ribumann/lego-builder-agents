@@ -256,8 +256,22 @@ export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan[
           ? [...sortBricks(bricks.filter(brick => brick.part === 'frame')),
             ...sortBricks(bricks.filter(brick => brick.part === 'detail'))]
           : sortBricks(bricks);
-        tasks.push({ id: `${agent}:${suffix}`, label: multi ? `${object.name} · ${label}` : agent === 'frame' ? 'Structure' : supportCount ? 'Support assembly & details' : 'Finishing details',
-          agent, depends: agent === 'detail' && groups.has('frame') ? [`frame:${multi ? `object-${index}` : 'frame'}`] : [], bricks: ordered });
+        const id = `${agent}:${suffix}`;
+        const title = multi ? `${object.name} · ${label}` : agent === 'frame' ? 'Structure' : supportCount ? 'Support assembly & details' : 'Finishing details';
+        // Split only substantial work into deterministic, ordered bands, keeping
+        // each builder's original brick sequence and at least 24 bricks per band.
+        const stages = Math.min(5, Math.max(1, Math.floor(ordered.length / 24)));
+        const frameId = `frame:${multi ? `object-${index}` : 'frame'}`;
+        const frameTasks = tasks.filter(task => task.id === frameId || task.id.startsWith(`${frameId}:stage-`));
+        for (let stage = 0; stage < stages; stage++) {
+          const stageId = stage ? `${id}:stage-${stage + 1}` : id;
+          const previous = stage === 1 ? id : `${id}:stage-${stage}`;
+          tasks.push({
+            id: stageId, label: stages > 1 ? `${title} · ${stage + 1}/${stages}` : title, agent,
+            depends: stage ? [previous] : agent === 'detail' && frameTasks.length ? [frameTasks[frameTasks.length - 1].id] : [],
+            bricks: ordered.slice(Math.floor(stage * ordered.length / stages), Math.floor((stage + 1) * ordered.length / stages)),
+          });
+        }
       }
     }
     return { spec: canonical, tasks, assumptions, source };
@@ -568,18 +582,26 @@ export function inspect(plan: Plan, bricks: Brick[]): Check[] {
   ];
 }
 
-// Older custom plans had no DetailBot task when all bricks were structural.
-// Accept exactly that legacy task set (or the full current set), never a
-// partially omitted order, and append the newly shared construction tasks.
+// Expand only complete pre-stage task orders. Still accept the older
+// frame-only order, but never a partially omitted or duplicated order.
 function compatibleTaskOrder(tasks: BuildTask[], value: unknown, custom: boolean): string[] | undefined {
   if (!Array.isArray(value) || value.some(id => typeof id !== 'string')
     || new Set(value).size !== value.length) return;
-  const legacy = tasks.filter(task => !(custom && task.agent === 'detail'
-    && task.bricks.length > 0 && task.bricks.every(brick => brick.part === 'frame')));
   const matches = (expected: BuildTask[]) => value.length === expected.length
     && value.every(id => expected.some(task => task.id === id));
-  if (!matches(tasks) && !matches(legacy)) return;
-  return [...value, ...tasks.filter(task => !value.includes(task.id)).map(task => task.id)];
+  if (matches(tasks)) return value;
+  const groups = new Map<string, BuildTask[]>();
+  for (const task of tasks) {
+    const id = custom ? task.id.replace(/:stage-\d+$/, '') : task.id;
+    if (!groups.has(id)) groups.set(id, []);
+    groups.get(id)!.push(task);
+  }
+  const representatives = [...groups.values()].map(group => group[0]);
+  const legacy = representatives.filter(task => !(custom && task.agent === 'detail'
+    && groups.get(task.id)!.every(stage => stage.bricks.every(brick => brick.part === 'frame'))));
+  if (!matches(representatives) && !matches(legacy)) return;
+  return [...value.flatMap(id => groups.get(id)!.map(task => task.id)),
+    ...representatives.filter(task => !value.includes(task.id)).flatMap(task => groups.get(task.id)!.map(stage => stage.id))];
 }
 
 export function restoreSnapshot(value: unknown): { team: Team; prompt: string } {

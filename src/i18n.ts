@@ -664,17 +664,22 @@ export function elapsedText(seconds: number): string {
 
 export function translateTaskName(name: string, localTemplate: boolean, objectNames?: string[]): string {
   if (localTemplate) return translate(name);
+  const translateRole = (role: string, known: string[]) => {
+    const match = /^(.*?)( · \d+\/\d+)?$/.exec(role)!;
+    return known.includes(match[1]) ? translate(match[1]) + (match[2] ?? '') : undefined;
+  };
   if (objectNames?.length) {
     for (const objectName of objectNames) {
       const prefix = `${objectName} · `;
       if (name.startsWith(prefix)) {
         const role = name.slice(prefix.length);
-        if (['structure', 'support assembly & details', 'details'].includes(role)) return prefix + translate(role);
+        const translated = translateRole(role, ['structure', 'support assembly & details', 'details']);
+        if (translated !== undefined) return prefix + translated;
       }
     }
     return name;
   }
-  return ['Structure', 'Support assembly & details', 'Finishing details'].includes(name) ? translate(name) : name;
+  return translateRole(name, ['Structure', 'Support assembly & details', 'Finishing details']) ?? name;
 }
 
 export function translateActivity(message: string, localTemplate = false, objectNames?: string[], nested = false): string {
@@ -691,7 +696,11 @@ export function translateActivity(message: string, localTemplate = false, object
       const translated: string[] = [];
       let rest = name;
       while (rest) {
-        const candidate = ordered.find(item => rest === item || rest.startsWith(`${item}, `));
+        const candidate = ordered.map(item => {
+          if (!rest.startsWith(item)) return '';
+          const suffix = /^( · \d+\/\d+)?(?=, |$)/.exec(rest.slice(item.length));
+          return suffix ? item + (suffix[1] ?? '') : '';
+        }).find(Boolean);
         if (!candidate) return name;
         translated.push(translateTaskName(candidate, false, objectNames));
         rest = rest === candidate ? '' : rest.slice(candidate.length + 2);

@@ -32,6 +32,52 @@ function customPlan(name: string, source: Plan['source'], objects: NonNullable<S
   return createPlan(spec, [], source);
 }
 
+test('staged hollow objects keep their geometry and partial work through repeated append, legacy reload and repair', () => {
+  const walls = Array.from({ length: 4 }, (_, y) => [
+    { x: 0, y, z: 0, width: 1, height: 1, depth: 1, color: 'blue' as const, part: 'frame' as const,
+      repeat: { count: 10, dx: 1, dy: 0, dz: 0 } },
+    { x: 0, y, z: 9, width: 1, height: 1, depth: 1, color: 'blue' as const, part: 'frame' as const,
+      repeat: { count: 10, dx: 1, dy: 0, dz: 0 } },
+    ...[0, 9].map(x => ({
+      x, y, z: 1, width: 1, height: 1, depth: 1, color: 'blue' as const, part: 'frame' as const,
+      repeat: { count: 8, dx: 0, dy: 0, dz: 1 },
+    })),
+  ]).flat();
+  const original = createPlan(validateSpec({
+    world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 144,
+    design: { name: 'Hollow tower', bricks: walls },
+  }, 'space'));
+  assert.ok(original.tasks.length >= 5);
+  const partial = new Team(original);
+  partial.step(20);
+  const initialIds = [...partial.bricks.keys()];
+  const first = appendScene(partial, original);
+  const second = appendScene(first.team, original);
+  assert.deepEqual([...second.team.bricks.keys()], initialIds);
+  assert.equal(new Set(allBricks(second.team.plan).map(brick => brick.id)).size, 432);
+  const occupied = cells(allBricks(second.team.plan));
+  assert.ok(!occupied.has('5,0,5'), 'the original interior remains hollow');
+  const saved = snapshotSceneAppend(second.team, 'Hollow scene');
+  const legacy = { ...saved, taskOrder: saved.taskOrder.filter(id => !/:stage-\d+$/.test(id)) };
+  const restored = restoreSceneAppend(JSON.parse(JSON.stringify(legacy))).team;
+  const older = { ...legacy, taskOrder: legacy.taskOrder.filter(id => id.startsWith('frame:')) };
+  assert.deepEqual([...restoreSceneAppend(JSON.parse(JSON.stringify(older))).team.bricks.keys()], initialIds);
+  assert.throws(() => restoreSceneAppend({ ...older, taskOrder: older.taskOrder.slice(1) }), /priority order/);
+  assert.deepEqual([...restored.bricks.keys()], initialIds);
+  assert.deepEqual(restored.plan.spec.design!.objects!.map(object => object.name),
+    ['Hollow tower', 'Hollow tower (2)', 'Hollow tower (3)']);
+  finish(restored);
+  const replayOrder = [...restored.bricks.keys()];
+  const reloaded = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(restored, 'Hollow scene')))).team;
+  assert.deepEqual([...reloaded.bricks.keys()], replayOrder);
+  reloaded.damage();
+  const damaged = restoreSceneAppend(JSON.parse(JSON.stringify(snapshotSceneAppend(reloaded, 'Damaged scene')))).team;
+  damaged.repair();
+  finish(damaged);
+  assert.deepEqual([...damaged.bricks.keys()].sort(), replayOrder.slice().sort());
+  assert.ok(damaged.checks.every(check => check.pass));
+});
+
 test('localized generated names preserve scene geometry and survive reload', () => {
   const template = createPlan(validateSpec({
     world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: false, budget: 700,

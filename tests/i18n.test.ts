@@ -64,6 +64,25 @@ test('known activity templates preserve user-defined task names', () => {
   setLanguage('en');
 });
 
+test('staged task labels translate without changing user object names or stage numbers', () => {
+  for (const language of languages) {
+    setLanguage(language);
+    const single = translateTaskName('Support assembly & details · 2/5', false);
+    assert.ok(single.endsWith(' · 2/5'));
+    if (language !== 'en') assert.notEqual(single, 'Support assembly & details · 2/5');
+    const objectName = 'Maison, 🚀';
+    const task = `${objectName} · support assembly & details · 3/5`;
+    const translated = translateTaskName(task, false, [objectName, 'Tour']);
+    assert.ok(translated.startsWith(`${objectName} · `));
+    assert.ok(translated.endsWith(' · 3/5'));
+    if (language !== 'en') assert.notEqual(translated, task);
+    const activity = translateActivity(`I received 2 missing planned bricks for ${task}, Tour · details · 1/2. Reclaiming my original task.`, false, [objectName, 'Tour']);
+    assert.ok(activity.includes(translated));
+    assert.ok(activity.includes(translateTaskName('Tour · details · 1/2', false, ['Tour'])));
+  }
+  setLanguage('en');
+});
+
 test('damage, repair and inspection activity is localized in every non-English language', () => {
   const messages = [
     'What-if: I removed 4 of 12 placed bricks (about one-third). CheckBot, compare the actual build with the plan; I have not disclosed which identities are missing.',

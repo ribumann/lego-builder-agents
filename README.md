@@ -143,7 +143,7 @@ Do not make the port public to troubleshoot. If the private URL or visibility ve
 - **Space dock:** explorer or cargo spacecraft, with stars, a ringed planet, engines and landing gear.
 - **Player-directed builds:** choose a body color, species/ship type, long tail or wide wings, and optional brick budget.
 - **Multi-object examples:** choose **Load local Jurassic herd** (three named objects, 400 bricks, 494 occupied cells) or **Load local space fleet** (three named objects, 359 bricks, 536 occupied cells), then start the crew. These are original deterministic examples, not live model results.
-- **A visible team of five:** BuildBot decomposes the goal; PlanBot checks dependencies and connectivity; FrameBot and DetailBot independently choose ready construction tasks; CheckBot inspects the result and identifies missing bricks for repair.
+- **A visible team of five:** BuildBot decomposes the goal; PlanBot checks dependencies and connectivity; FrameBot and DetailBot independently choose ready construction tasks; CheckBot inspects the result and identifies missing bricks for repair. Larger custom objects divide each builder's work into ordered, dependency-linked stages; small objects remain small jobs.
 - **Real-time controls:** start, pause, single-step, and cycle **1x / 4x / 16x fast-forward**. Guided demo uses 4x.
 - **Explainable actions:** task ownership, dependency waits, turn numbers, observations and completion messages. Messages describe application decisions, not hidden model chain-of-thought.
 - **Special experiments:** blueprint overlay, exploded view, cutaway view, tap-to-inspect bricks, timeline replay, and a missing-brick challenge that agents detect and repair.
