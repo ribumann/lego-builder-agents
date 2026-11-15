@@ -317,6 +317,9 @@ npm run test:e2e
 ```
 
 CI checks the engine, type safety, production build and browser journeys on both worlds. No paid model calls run in CI.
+CI uses one Playwright worker, following [Playwright's CI guidance](https://playwright.dev/docs/ci#workers),
+so concurrent SwiftShader scenes do not compete with motion screenshot capture.
+Local runs retain Playwright's default worker count; use `--workers=1` to reproduce CI scheduling.
 
 Coverage includes scene growth and provenance, deterministic damage and repair,
 planner consent and failure handling, fake-clock 300-second limits, subprocess
