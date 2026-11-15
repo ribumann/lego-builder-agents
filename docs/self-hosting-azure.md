@@ -39,6 +39,42 @@ Check quota, regional availability and organizational policies before
 provisioning. Do not use another application's identity, storage, model or
 developer credentials.
 
+### Dedicated model throughput quota
+
+The base template's `plannerCapacity` parameter defaults to **200** for the
+dedicated GPT-5.4 DataZoneStandard deployment: Azure currently reports
+200,000 tokens/minute and 200 requests/minute at this allocation. This is
+[pay-per-token standard capacity](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/deployment-types),
+not fixed-cost provisioned throughput. Check unallocated regional quota
+before deployment; do not reduce another application's allocation to fit.
+The approved preview allocation on 2026-11-15 used 201 of 333 shared regional
+GPT-5.4 DataZoneStandard units, leaving 132 free.
+
+Capacity is separate from the app's 20 simultaneous requests and 50 shared
+attempts per UTC day. It does not guarantee 20 simultaneous large completions:
+prompt and maximum completion estimates, short rate windows and service
+availability can still cause 429 responses. The initial 1,000 TPM allocation
+produced a confirmed provider 429; its original subtype and rate-limit
+headers were not retained, so the exact historical cause is unknown.
+
+To reproduce the chosen quota allocation on an existing dedicated deployment,
+update only its capacity, not the entire infrastructure template:
+
+```bash
+MODEL_ID="/subscriptions/$SUBSCRIPTION/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/$AI/deployments/bricklab-planner-gpt54"
+az resource update --subscription "$SUBSCRIPTION" --ids "$MODEL_ID" \
+  --api-version 2024-10-01 --set sku.capacity=200
+az cognitiveservices account deployment show --subscription "$SUBSCRIPTION" \
+  --resource-group "$RG" --name "$AI" --deployment-name bricklab-planner-gpt54
+az cognitiveservices usage list --subscription "$SUBSCRIPTION" --location swedencentral
+```
+
+Set `AI` to the dedicated account name and first confirm the existing SKU is
+`DataZoneStandard`. Preserve its model, content policy, all other deployments
+and application settings. Pass `plannerCapacity=200` on subsequent base-template
+deployments; do not restore the former capacity of 1. Wait at least one rate
+window after a change before a separately approved bounded inference check.
+
 Costs start when resources are provisioned even if the origin is disabled.
 Estimate using your subscription's
 [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/).
