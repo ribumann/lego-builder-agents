@@ -57,26 +57,38 @@ The server adapters are deliberately separate:
 - Copilot invokes the standalone CLI under the server user's account. It is not
   the Copilot desktop/IDE sign-in. Copilot image requests are a separate
   Windows-only opt-in with process containment and private temporary files.
-- Azure uses managed identity and a dedicated reservation gate. Public hosted
-  Azure planning remains blocked pending verification. Reservations estimate
-  application usage; they are not subscription budgets or bill caps.
+- Azure uses backend managed identity and a dedicated reservation gate; the
+  public visitor remains anonymous. The current live app has Azure planning
+  off. Its hosted route is a provisional contract, not live availability:
+  Azure uses a global daily call count plus a shared Blob CAS ledger for an
+  estimated $50/day, reserving $0.55 per request without refund. The proposed
+  call cap is configured by `BRICKLAB_AZURE_DAILY_CALLS` (default 50, range
+  1-100). The ledger's remaining allowance is read-only and unavailable state
+  must be explicit. These are app-level estimates, not invoice caps or
+  subscription budgets; local/Codespaces have no application daily-call cap.
+  Before hosted use, `properties.raiPolicyName` must match the verified
+  blocking content-filter policy.
 - Local AI and OpenAI-compatible adapters exist in code but are backlog, not
   supported MVP choices. They must not be presented as release-ready paths.
 
 Planning is explicit, bounded, and fail-closed: input size and schema are
 checked, provider output is validated, and provider errors do not trigger a
-template fallback. Capacity changes currently under integration are intended
-to bound concurrent work rather than queue it. The final deployed limits and
-quota scope must be confirmed before they are described as release behavior.
+template fallback. The provisional capacity contract is 20 total/20 per
+provider in hosted mode and 8 total/2 per provider in private mode. Hosted
+limits are configurable from 1 to 20, with each provider limit at most the
+total; final concurrency environment variable names remain unconfirmed. A
+20-slot hosted deployment requires one worker and one Node process and is not
+an upstream guarantee. These figures are not yet checked against an immutable
+backend SHA or full final run.
 
-Cancellation and cleanup are critical correctness properties. A client abort,
-disconnect, or 300-second deadline must abort provider work; a slot must not be
-released until the associated provider/process cleanup settles. In particular,
-unconfirmed process termination must not be described as clean cancellation.
-Fake-provider tests cover timeout and cancellation paths, but current real
-process cleanup and long-running Azure-edge transport have not been verified.
-The backend's 300-second deadline is distinct from Azure Front Door's
-profile-wide origin response timeout setting of 16-240 seconds
+Cancellation and cleanup are critical correctness properties. The provisional
+backend contract specifies a 300-second HTTP abort and waiting for cleanup
+before releasing capacity; this cannot prove remote model computation or
+billing stopped. Native Windows Copilot text/image jobs use Job containment;
+unknown cleanup retains the slot and quarantines all planning. Owner-reported
+focused tests pass, but the immutable SHA/full final run and current real
+process cleanup are not verified. The backend deadline is distinct from Azure
+Front Door's profile-wide origin response timeout setting of 16-240 seconds
 ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
 That setting does not prove a hard limit on an already-streaming response;
 live long-stream behavior remains unverified. Do not treat an HTTP timeout

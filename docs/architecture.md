@@ -53,26 +53,58 @@ plan. The five visible roles are application logic, not five model calls.
 | --- | --- | --- |
 | Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | One prior Windows ARM64 candidate completed a real text request and a consented synthetic-image request. The current integrated source and reliable process cleanup are not yet confirmed; these samples are not a reliability claim. |
 | Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | Public service is limited to anonymous static/offline use until hosted planning controls are verified. Azure planning must remain blocked by its startup guard. | The HTTPS custom-domain/Front Door endpoint returned 200. The live revision was not freshly established; the last recorded deployment was offline-only. Real tenant identity, storage contention, public inference, and long-stream behavior remain unverified. |
+| Azure-hosted app | The current live app is anonymous and serves static/offline use; its public Azure planner is off. The next hosted planner candidate is not live or release-verified. | The custom-domain/Front Door endpoint returned HTTPS 200 and a direct App Service request returned 403 under the existing Front Door-only origin rules. The last recorded package is `release-084cfb4b5ec7bed93c362ce8a50f29ae2ab76142.zip`; the exact live source revision and next package/rollback path are unverified. |
 
-Planning-capacity work is being integrated to reject overload instead of
-queuing or silently retrying provider requests. Its final integrated revision
-and limits still require owner confirmation. No 2x speed or throughput increase
-has been measured. A 300-second timeout is a release invariant: it must abort
-backend work and keep capacity held until provider/process cleanup settles.
-This backend deadline is distinct from Azure Front Door's documented origin
-response timeout, which is profile-wide and configurable from 16 to 240 seconds
+Read-only Azure inventory for the existing deployment: Front Door Standard
+with WAF Prevention and a 240-second profile origin-response timeout; Linux
+App Service B1 in Italy North; private Blob storage and an approved private
+endpoint in Sweden Central; and Azure OpenAI deployments for `gpt-4.1-mini`
+and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. The
+current app settings report `BRICKLAB_HOSTED=1` and
+`BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. A private
+VM runner is deallocated. These observations describe the existing site, not
+the next package.
+
+### Provisional hosted-planning contract
+
+The following is the backend owner's contract proposal, received before its
+immutable commit SHA and full final verification. It is not a statement of
+current deployed behavior or availability:
+
+- The hosted lab remains anonymous. The backend app uses managed identity for
+  Azure services; visitor Entra sign-in and a client-hash key are not part of
+  the design.
+- Hosted concurrency is proposed at 20 total planning slots and 20 per
+  provider, each configurable from 1 to 20 with the provider limit no higher
+  than the total. The 20-slot deployment figure requires one worker and one
+  Node process; it is not an upstream capacity guarantee. Private mode remains
+  8 total and 2 per provider. The final environment variable names for these
+  capacity limits are not confirmed here.
+- Hosted Azure calls use `BRICKLAB_AZURE_DAILY_CALLS` (default 50, range
+  1-100) and a shared private Blob compare-and-swap ledger for global calls and
+  an estimated $50 daily spend limit. Each request reserves an estimated $0.55
+  and is not refunded. A read-only remaining allowance is shown; unavailable
+  ledger state must fail explicitly. Local and Codespaces modes have no
+  application daily-call cap. These are app controls and estimates, not
+  invoice caps or subscription-level governance.
+- Azure access remains off in the current live app. Before enabling the
+  candidate, its `properties.raiPolicyName` must match the verified blocking
+  content-filter policy; merely finding a custom policy is insufficient.
+- The candidate contract specifies a 300-second HTTP abort and waiting for
+  cleanup. That cannot prove remote model computation or billing stopped.
+  Windows Copilot text/image jobs use Job containment; if cleanup is unknown,
+  the shared slot remains held and all planning is quarantined.
+- The backend owner reports focused overlap/quota/unavailable-state tests and
+  an anonymous adapter socket-close test at 300 seconds passing on the
+  provisional candidate. The full final run and immutable SHA are pending.
+
+The backend's 300-second deadline is distinct from Azure Front Door's
+documented origin response timeout, which is profile-wide and configurable
+from 16 to 240 seconds
 ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
 That setting does not establish a hard limit for an already-streaming response.
-Fixture-based timeout tests do not establish end-to-end cleanup or long-stream
-reliability through Azure Front Door; that behavior remains unverified.
-
-The target quota scope is daily application quotas for hosted Azure only;
-local and Codespaces use should not have an application daily-call cap. The
-scope change and environment-configurable hosted limits are still being
-integrated, so do not claim that local/Codespaces are cap-free or quote final
-hosted limits until that revision is merged and verified. Any Azure reservation
-is an application estimate, not actual billing.
+Live long-stream reliability remains unverified. No 2x speed or throughput
+increase has been measured.
 
 ## Trust and data boundaries
 
@@ -86,10 +118,12 @@ is an application estimate, not actual billing.
   app's HTTPS Basic Authentication prompt only, enter username `bricklab` and
   the temporary app password printed in the Codespace terminal; never use a
   GitHub password or token there.
-- Public hosted mode serves static/offline content only. Host and Origin checks
-  are not authentication; forwarded client headers do not establish a trusted
-  identity. The app must not enable public paid planning until the edge, caller
-  identity, quota, cancellation, and transport controls are verified.
+- The current public hosted app serves static/offline content only. The
+  proposed paid route remains disabled pending the immutable backend candidate
+  and live verification. The design is anonymous at the visitor boundary;
+  Azure managed identity is the backend's service identity. Host and Origin
+  checks alone are not authentication, and forwarded client headers do not
+  establish a trusted identity.
 - A submitted brief is sent only after the user explicitly starts planning.
   Depending on the selected provider, it goes to GitHub, a configured local or
   compatible service, or Azure. Azure image planning is unsupported. Image
