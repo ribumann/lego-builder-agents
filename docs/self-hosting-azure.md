@@ -219,9 +219,11 @@ slash, port, path, or credentials.
 
 Build the exact reviewed application revision in a clean Linux environment
 using `npm ci`, `npm run build`, then `npm prune --omit=dev`.
-The pinned Transformers dependency is build-time only: Vite emits its browser
-voice worker and WebAssembly assets into `dist`. Keep those built assets, but
-do not ship its unused Node/ONNX inference dependencies with the server.
+Transformers, Three.js and MSAL Browser are build-time dependencies: Vite emits
+the application, browser voice worker and WebAssembly assets into `dist`.
+Keep those built assets, but do not ship unused browser libraries or Node/ONNX
+inference dependencies with the server. Azure Identity, Azure Blob Storage
+and JOSE remain server runtime dependencies.
 The existing 25 MB archive guard remains unchanged. Create the
 release using the repository packager, which verifies the runtime module
 closure, production dependency tree, required worker/runtime assets and
