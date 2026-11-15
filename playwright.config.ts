@@ -7,6 +7,8 @@ export default defineConfig({
   testDir: './tests/browser',
   timeout: 45_000,
   fullyParallel: false,
+  // SwiftShader rendering and screenshot capture share the CI runner's CPU.
+  workers: process.env.CI ? 1 : undefined,
   use: {
     baseURL,
     headless: true,
