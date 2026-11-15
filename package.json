@@ -16,11 +16,11 @@
     "@azure/identity": "^4.14.1",
     "@azure/msal-browser": "^5.29.1",
     "@azure/storage-blob": "^12.34.0",
-    "@huggingface/transformers": "3.8.1",
     "jose": "^6.2.12",
     "three": "^0.180.0"
   },
   "devDependencies": {
+    "@huggingface/transformers": "3.8.1",
     "@playwright/test": "^1.56.1",
     "@types/node": "^24.10.0",
     "@types/three": "^0.180.0",
