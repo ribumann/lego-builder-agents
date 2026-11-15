@@ -6,7 +6,13 @@ have provisioned the individual resources. One staging deployment loaded a
 private Blob package with managed identity, and a non-paid synthetic stream
 completed after 271.6 seconds; an earlier stream closed early. Full
 reproducibility, reliable streaming, edge protections and hosted model
-generation have not been verified. The simplified preview uses an anonymous
+generation were not established by that staging sample. Subsequently, exact
+application revision `2720ec7` with the user-selected Terra default completed
+one representative 100-brick airplane in 29.619 seconds: valid geometry,
+100/100 bricks built, 4/4 tasks and 3/3 inspection checks, with a recognizable
+cuboid airplane. It used one model request without correction. This is
+one-case evidence, not general reliability or live correction-path validation.
+The simplified preview uses an anonymous
 managed-identity Azure wrapper with a mandatory shared call count; deployment
 defaults keep paid planning off until the real configuration is verified.
 Until these checks and the application integration are complete, this is a
@@ -75,15 +81,16 @@ and application settings. Pass `plannerCapacity=200` on subsequent base-template
 deployments; do not restore the former capacity of 1. Wait at least one rate
 window after a change before a separately approved bounded inference check.
 
-### Optional GPT-6.1 Terra deployment
+### Selected default: GPT-6.1 Terra
 
-The user-authorized default-model test on 2026-11-15 uses
+The user selected and retained the working default on 2026-11-15:
 `bricklab-planner-terra`: `gpt-6.1-terra` version `2026-10-26`,
 `GlobalStandard`, capacity **40**, with `bricklab-public-safe` and automatic
 version upgrades disabled. Azure accepted this deployment in the dedicated
 Sweden Central account and reports 40 requests/minute and 40,000 tokens/minute.
 Global Standard is not restricted to EU processing. GPT-5.4's existing
-200-unit allocation remains unchanged; there is no automatic model fallback.
+200-unit allocation remains unchanged; it is not the selected startup planner
+and there is no automatic model fallback.
 Terra public unit prices were not returned by the queried Azure Retail API;
 do not infer an invoice price from another model.
 
@@ -97,20 +104,30 @@ az deployment group create --subscription $Subscription --resource-group $Group 
   --template-file infra\terra-planner.bicep --parameters accountName=$AI capacity=40
 ```
 
-To select it, first verify `/api/status` reports no active planning request,
-then update only `AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra` on the existing
-app and restart. Preserve every other setting, the private package pointer,
+The durable live app setting is
+`AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`; ordinary package updates must
+preserve it. No model switch or additional probe is needed to retain it.
+For a separately authorized installation or configuration change, first verify
+`/api/status` reports no active planning request, then set only that app setting
+on the existing app and restart. Preserve every other setting, the private package pointer,
 the shared 50-submission daily ledger and 20/20 concurrency controls. The base
-template still describes the retained GPT-5.4 deployment; do not redeploy the
-whole base stack to switch a model. After restart verify the intended package,
+template still creates the retained GPT-5.4 deployment at capacity 200, but its
+`plannerDeploymentName` parameter and `openAiDeployment` output default to
+`bricklab-planner-terra`. That output is selection metadata, not proof the
+deployment exists: new installations must provision the isolated Terra
+template first. The parameter does not enable paid planning or change any
+resource or app setting. Do not copy the retained GPT-5.4 resource name into
+startup settings or redeploy the whole base stack to switch a model.
+After an authorized restart verify the intended package,
 an available allowance snapshot and one separately authorized guarded
 submission. A configured status or successful ARM deployment is not proof of
 inference, valid geometry, or a completed local build. One submission may
 make at most two model requests under the bounded correction flow; never
 retry transport, authentication or 429 failures automatically.
 
-To remove only this test deployment after deliberately selecting another
-model and waiting for active requests to finish:
+Do not delete the selected default deployment. Only after a separately
+authorized replacement has been selected and active requests have finished,
+the following removes just the former Terra deployment:
 
 ```powershell
 az cognitiveservices account deployment delete --subscription $Subscription `
@@ -325,15 +342,17 @@ environment without relaxing your network policy.
 The hosted app settings are `HOST=0.0.0.0`, `BRICKLAB_HOSTED=1`, and the
 exact `BRICKLAB_HOSTED_ORIGIN`. Azure injects `PORT`. For the currently
 opt-in paid planner the additional settings are
-`BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`,
+`BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`,
+`AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`,
 `AZURE_STORAGE_ACCOUNT`,
 `BRICKLAB_AZURE_USAGE_CONTAINER=usage` for a new deployment,
 `BRICKLAB_AZURE_DAILY_CALLS=50`,
 `BRICKLAB_PLANNING_CONCURRENCY=20` and `BRICKLAB_PROVIDER_CONCURRENCY=20`.
 The Bicep parameter `azureDailyCalls` wires the global daily allowance
 into the web app while leaving `BRICKLAB_AZURE_AI=0`; use 50 for this preview.
-Changing a quota does not enable paid planning. No deployment was
-performed to validate these settings on the live app. Public visitors do not sign in; the server's managed identity
+Changing a quota does not enable paid planning. The representative Terra
+result above validates one live application path, not reproduction of this
+entire infrastructure guide. Public visitors do not sign in; the server's managed identity
 authenticates to model and storage APIs. No model credential
 is sent to the browser. The Entra/MSAL option remains for separately configured
 private Azure servers, not the anonymous public lab.

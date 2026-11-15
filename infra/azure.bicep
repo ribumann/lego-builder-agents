@@ -21,6 +21,13 @@ param azureDailyCalls int = 50
 @minValue(1)
 param plannerCapacity int = 200
 
+@description('Selected startup deployment output; does not create that deployment or enable paid planning. Provision Terra separately with terra-planner.bicep before selecting it.')
+@allowed([
+  'bricklab-planner-terra'
+  'bricklab-planner-gpt54'
+])
+param plannerDeploymentName string = 'bricklab-planner-terra'
+
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 var webName = 'bricklab-${suffix}'
 var storageName = 'bricklab${suffix}'
@@ -328,5 +335,5 @@ output storageContainerName string = container.name
 output packageContainerName string = packages.name
 output openAiAccountId string = ai.id
 output openAiEndpoint string = ai.properties.endpoint
-output openAiDeployment string = model.name
+output openAiDeployment string = plannerDeploymentName
 output openAiContentFilterPolicy string = contentFilter.name

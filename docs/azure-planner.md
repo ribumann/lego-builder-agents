@@ -16,7 +16,7 @@ Set `BRICKLAB_HOSTED=1`, production serving, the exact HTTPS
 | --- | --- |
 | `BRICKLAB_AZURE_AI` | Explicit opt-in `1`; otherwise Azure planning is off |
 | `AZURE_OPENAI_ENDPOINT` | HTTPS `*.openai.azure.com` endpoint |
-| `AZURE_OPENAI_DEPLOYMENT` | Deployment supporting strict JSON-schema structured output and, for images, vision |
+| `AZURE_OPENAI_DEPLOYMENT` | Selected hosted default `bricklab-planner-terra`; deployment must support strict JSON-schema structured output and, for images, vision |
 | `AZURE_STORAGE_ACCOUNT` | Storage account holding the existing shared counter |
 | `BRICKLAB_AZURE_BUDGET_CONTAINER` | Migration alias: continue the existing `daily-budget.json` blob |
 | `BRICKLAB_AZURE_USAGE_CONTAINER` | Fresh-install container for `daily-usage.json`, when no migration alias is set |
@@ -28,6 +28,15 @@ No visitor sign-in or client-hash secret is required. The server managed
 identity needs Cognitive Services OpenAI User and Storage Blob Data Contributor
 on the counter container. Runtime admission needs no ARM policy/model/region
 verification or pricing-reader permission.
+
+The user-selected hosted default is `gpt-6.1-terra` version `2026-10-26`,
+GlobalStandard capacity 40, with the existing native content policy and
+automatic upgrades disabled. Preserve its startup app setting across package
+updates; the retained GPT-5.4 capacity 200 is not an automatic fallback.
+The isolated deployment template and operational boundaries are documented in
+[the Azure runbook](self-hosting-azure.md#selected-default-gpt-61-terra).
+This is deployment configuration, not a hardcoded model requirement in the
+adapter or permission to enable paid planning.
 
 Every valid admitted user planning submission increments a shared count once using a Blob ETag
 conditional write. There is no monetary ledger, estimated-cost reservation,
