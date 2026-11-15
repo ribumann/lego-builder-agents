@@ -11,7 +11,7 @@ passed manual acceptance.
 | --- | --- | --- |
 | Local server | In scope | Offline templates need no provider. Copilot planning requires an explicit submission and separate server-side CLI setup. One earlier local candidate completed real text and consented synthetic-image requests; current-candidate manual UAT and general provider reliability are not established. |
 | Private Codespaces | In scope | Keep the forwarded port private and use the production server. Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. |
-| Azure deployment | In scope, constrained | The last verified anonymous HTTPS Front Door app is offline-only with Azure planning off. The source now implements simplified shared call limits, backend managed identity and consented images; this does not establish live deployment or provider availability. |
+| Azure deployment | In scope, constrained | Azure owner confirms revision `2720ec7` live with the selected Terra planner. One representative 100-brick airplane planned and fully built successfully; this is not broad reliability, live correction-path validation or local manual UAT. Newer PR commits are not automatically deployed. |
 | Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
 | Planning optimization | In integration | Bounded shared capacity and request cleanup were tested in an earlier candidate; the revised candidate needs its own verification. No 2x speed or throughput gain is measured or promised. |
 | Voice | Stretch | Opt-in browser-local transcription uses manual start/stop with a 30-second cap. Automatic onset/silence handling is not implemented, and real-microphone usability has not been accepted. See [voice limitations](docs/voice-integration.md) and #15. |
@@ -173,11 +173,15 @@ Scene saves retain contribution sources and offsets; they do not prove that an
 imported model attribution is genuine.
 
 The separate **Azure Foundry** adapter uses a managed identity, not a personal
-Copilot credential. At the last verification the public hosted app served
-offline templates only, with paid hosted planning disabled. The revised
-planner is implemented in source; real tenant/storage/policy and public-edge
-verification and deployment remain outstanding. Azure service
-usage can incur charges. See [Azure planner setup](docs/azure-planner.md).
+Copilot credential. Azure owner confirms application revision `2720ec7` live
+with `bricklab-planner-terra` (`gpt-6.1-terra`), the selected startup default.
+One representative 100-brick airplane completed planning in 29.619 seconds
+with one model request, no correction, valid geometry and full local execution
+(100/100 bricks, 4/4 tasks, 3/3 inspection checks). This is one-case evidence,
+not general reliability or verification of local Copilot/manual UAT. The PR
+head may be newer than the live package; source integration is not deployment.
+Azure service usage can incur charges. See
+[Azure planner setup](docs/azure-planner.md).
 
 ## Run in a private GitHub Codespace
 

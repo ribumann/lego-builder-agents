@@ -53,23 +53,29 @@ plan. The five visible roles are application logic, not five model calls.
 | --- | --- | --- |
 | Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | One earlier Windows ARM64 candidate completed a real text request and a consented synthetic-image request. An earlier backend candidate has automated coverage for HTTP timeout, Windows text-job cleanup, and capacity retention; the revised candidate and manual UAT remain unverified. |
 | Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | The last verified live app is anonymous and serves static/offline use; its public Azure planner was off. The simplified planner is implemented in source, not verified as deployed. | Azure owner confirmed source/package revision `084cfb4b5ec7bed93c362ce8a50f29ae2ab76142`; the custom-domain/Front Door endpoint returned HTTPS 200, `/api/status` reported hosted offline-only, and a direct App Service request returned 403 under the existing Front Door-only origin rules. These observations do not verify a newer release. |
+| Azure-hosted app | Anonymous hosted planning uses backend managed identity and the shared submission limit. Azure owner confirms package `2720ec7` live with the selected Terra startup default. | One representative 100-brick airplane planned in 29.619 seconds with one model request and no correction, then built 100/100 bricks with 4/4 tasks and 3/3 inspection checks. This is one-case evidence, not broad reliability, live correction-path validation or local manual UAT. Newer PR commits are not automatically deployed. |
 
-Read-only Azure inventory for the existing deployment: Front Door Standard
+Earlier read-only Azure inventory recorded Front Door Standard
 with WAF Prevention and a 240-second profile origin-response timeout; Linux
 App Service B1 in Italy North; private Blob storage and an approved private
 endpoint in Sweden Central; and Azure OpenAI deployments for `gpt-4.1-mini`
 and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. Azure
-owner reported app settings `BRICKLAB_HOSTED=1` and
+owner then reported app settings `BRICKLAB_HOSTED=1` and
 `BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. A private
 VM runner was deallocated. These observations describe the previously
-verified site, not a new MVP candidate.
+verified site, not the current planner configuration. The subsequent owner
+handoff confirms `2720ec7` with `AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`,
+gpt-6.1-terra version 2026-10-26, GlobalStandard capacity 40, the
+`bricklab-public-safe` policy and automatic upgrades disabled. GPT-5.4 capacity
+200 is retained without automatic fallback; all existing guards and the
+ledger remain preserved. GlobalStandard is not EU-processing restricted.
 
-### Simplified hosted-planning source contract (not deployment verification)
+### Simplified hosted-planning contract and evidence boundary
 
 The source implements the following user-approved simplification, covered by
-mock/unit and browser checks. These are not a claim that the simplified
-planner is deployed or that real Azure inference has been verified.
+mock/unit and browser checks. The live Terra result above verifies one
+representative path, not every provider, cleanup edge case or model output.
+The integrated PR head may differ from the live package.
 
 - Hosted visitors are anonymous; the backend uses managed identity for Azure
   services. Visitor Entra sign-in and visitor client-hash keys are not used.
@@ -119,8 +125,8 @@ remain unverified. No 2x speed or throughput increase has been measured.
   app's HTTPS Basic Authentication prompt only, enter username `bricklab` and
   the temporary app password printed in the Codespace terminal; never use a
   GitHub password or token there.
-- The last verified public hosted app served static/offline content only. The
-  revised paid route has not been verified live. The design is anonymous at the
+- The owner-confirmed `2720ec7` public hosted app completed the representative
+  Terra plan/build above. The design is anonymous at the
   visitor boundary; Azure managed identity is the backend's service identity.
   Host and Origin checks alone are not authentication, and forwarded client
   headers do not establish a trusted identity.

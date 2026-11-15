@@ -69,11 +69,16 @@ spec validation, and tests. The current boundaries are:
   server user's account. It is not the Copilot desktop/IDE sign-in. Copilot
   image requests are a separate Windows-only opt-in with process containment
   and private temporary files.
-- Azure uses backend managed identity; hosted visitors remain anonymous. The
-  last verified live planner was off. The simplified source adapter enforces a
+- Azure uses backend managed identity; hosted visitors remain anonymous.
+  Azure owner confirms package `2720ec7` live with the selected Terra startup
+  default. One representative 100-brick airplane planned in 29.619 seconds
+  with one model request and no correction, then built 100/100 bricks with
+  4/4 tasks and 3/3 inspection checks. This is one-case evidence, not broad
+  reliability, live correction-path validation or local manual UAT. Newer PR
+  commits are not automatically deployed. The adapter enforces a
   shared atomic limit of 50 public submissions per UTC day (up to 100 model requests with one invalid-design correction per submission) and accepts
-  validated images only with explicit consent. Mock checks do not establish
-  deployment or live inference. It removes the estimated-dollar gate, live price verification,
+  validated images only with explicit consent. Mock checks alone do not
+  establish deployment or live inference. It removes the estimated-dollar gate, live price verification,
   model/version/region/price pins, and six-minute day-boundary blackout while
   retaining the approved native Azure content policy and network protections.
   The application call limit is not an invoice cap. Local and Codespaces have
@@ -105,7 +110,8 @@ unconfirmed cleanup retains capacity and quarantines planning until an operator
 verifies before restart. The backend owner reports that the full suite, an
 HTTP-to-native-Windows text timeout-isolation check, and host-loss quarantine
 verification passed for that earlier SHA. Mock checks also cover the simplified
-backend; manual UAT and live Azure inference remain unverified. The backend deadline is
+backend; local manual UAT remains unverified, and the live Azure evidence is
+limited to the representative result above. The backend deadline is
 distinct from Azure Front Door's profile-wide origin response timeout setting
 of 16-240 seconds
 ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
