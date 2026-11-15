@@ -789,7 +789,7 @@ export function translateActivity(message: string, localTemplate = false, object
     `Raggiunto il limite giornaliero di ${match[1]} chiamate Copilot. I modelli offline e l’IA locale configurata sono opzioni separate.`,
     `Se alcanzó el límite diario de ${match[1]} llamadas a Copilot. Las plantillas sin conexión y la IA local configurada son opciones separadas.`,
     `O limite diário de ${match[1]} chamadas do Copilot foi atingido. Modelos offline e IA local configurada são opções separadas.`][index];
-  match = /^Custom brick (\d+) (has invalid dimensions, bounds, color, or part|has an invalid repeat|repeat exceeds bounds)\.$/.exec(message);
+  match = /^Custom brick (\d+)(?: in object (\d+))? (has invalid dimensions, bounds, color, or part|has an invalid repeat|repeat exceeds bounds)(?: \(([^)]+)\))?\.( No build was started\. Try a smaller scene size or ask for tiled parts; no automatic retry\.)?$/.exec(message);
   if (match) {
     const reason = [
       [],
@@ -798,10 +798,18 @@ export function translateActivity(message: string, localTemplate = false, object
       ['ha dimensioni, limiti, colore o pezzo non validi', 'ha una ripetizione non valida', 'supera i limiti nella ripetizione'],
       ['tiene dimensiones, límites, color o pieza no válidos', 'tiene una repetición no válida', 'supera los límites al repetirse'],
       ['tem dimensões, limites, cor ou peça inválidos', 'tem uma repetição inválida', 'ultrapassa os limites na repetição'],
-    ][index][['has invalid dimensions, bounds, color, or part', 'has an invalid repeat', 'repeat exceeds bounds'].indexOf(match[2])];
-    return [message, `Eigener Stein ${match[1]} ${reason}.`, `La brique personnalisée ${match[1]} ${reason}.`,
+    ][index][['has invalid dimensions, bounds, color, or part', 'has an invalid repeat', 'repeat exceeds bounds'].indexOf(match[3])];
+    const base = [message, `Eigener Stein ${match[1]} ${reason}.`, `La brique personnalisée ${match[1]} ${reason}.`,
       `Il mattoncino personalizzato ${match[1]} ${reason}.`, `El bloque personalizado ${match[1]} ${reason}.`,
       `O bloco personalizado ${match[1]} ${reason}.`][index];
+    const object = match[2] ? ` ${['Object', 'Objekt', 'Objet', 'Oggetto', 'Objeto', 'Objeto'][index]} ${match[2]}: ${match[4]}.` : '';
+    const advice = match[5] ? ['',
+      ' Kein Bau wurde gestartet. Wähle eine kleinere Szene oder bitte um gekachelte Teile; kein automatischer Neuversuch.',
+      ' Aucune construction lancée. Choisissez une scène plus petite ou demandez des pièces assemblées en tuiles ; aucun nouvel essai automatique.',
+      ' Nessuna costruzione avviata. Scegli una scena più piccola o chiedi pezzi affiancati; nessun tentativo automatico.',
+      ' No se inició ninguna construcción. Elige una escena menor o pide piezas en mosaico; no se reintenta automáticamente.',
+      ' Nenhuma construção iniciada. Escolha uma cena menor ou peça peças em mosaico; sem nova tentativa automática.'][index] : '';
+    return base + object + advice;
   }
   match = /^(Copilot|Local AI) returned invalid JSON in its final response\. No build was started and BrickLab did not retry\. Revise the brief or explicitly choose offline templates\.$/.exec(message);
   if (match) return [message, `${match[1]} lieferte ungültiges JSON. Kein Bau und kein erneuter Versuch. Überarbeite den Auftrag oder wähle Offline-Vorlagen.`,

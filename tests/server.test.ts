@@ -1238,6 +1238,45 @@ test('obsolete private spend-budget settings add no monetary or daily gate', { t
   assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner']);
 });
 
+test('Azure malformed geometry is rejected with a safe exact field reason at the requested scene size', { timeout: 15_000 }, async t => {
+  let requests = 0;
+  const provider = createHttpServer(async (req, res) => {
+    const chunks: Buffer[] = [];
+    for await (const chunk of req) chunks.push(chunk);
+    const request = JSON.parse(Buffer.concat(chunks).toString('utf8'));
+    assert.match(request.messages[0].content, /roughly 100 expanded bricks/);
+    assert.deepEqual(request.response_format.json_schema.schema.$defs.dimension.enum, [1, 2, 3, 4, 5, 6, 7, 8]);
+    requests++;
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { content: JSON.stringify({
+      ...lifecycleSpec, design: { name: 'private-model-name', bricks: [
+        { x: 0, y: 0, z: 0, width: 16, height: 1, depth: 1, color: 'blue', part: 'frame' },
+      ] },
+    }) } }] }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => {
+    provider.closeAllConnections();
+    return new Promise<void>(resolve => provider.close(() => resolve()));
+  });
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
+    TEST_AZURE_HTTP_ENDPOINT: `http://127.0.0.1:${address.port}/fixture`,
+  });
+  const response = await server.azurePost(ndjson,
+    JSON.stringify({ world: 'space', brief: 'Synthetic scene', sceneSize: 100 }));
+  const result = streamEvents(await response.text()).at(-1);
+  assert.equal(result.type, 'error');
+  assert.match(result.error, /Custom brick 1 in object 1.*width: above-maximum/);
+  assert.match(result.error, /no automatic retry/);
+  assert.doesNotMatch(result.error, /private-model-name/);
+  assert.equal(result.spec, undefined);
+  assert.equal(requests, 1);
+  assert.equal((await (await server.get()).json() as any).publicAllowance.used, 1);
+});
+
 test('Azure provider diagnostics survive JSON and NDJSON without exposing upstream bodies or retrying', { timeout: 15_000 }, async t => {
   let requests = 0;
   const provider = createHttpServer(async (req, res) => {

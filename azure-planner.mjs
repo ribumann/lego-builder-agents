@@ -83,15 +83,21 @@ async function providerDiagnostic(response) {
 const objectSchema = properties => ({
   type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
 });
+const integerEnum = (min, max) => ({
+  type: 'integer', enum: Array.from({ length: max - min + 1 }, (_, index) => min + index),
+});
 const brickProperties = {
-  x: { type: 'integer' }, y: { type: 'integer' }, z: { type: 'integer' },
-  width: { type: 'integer' }, height: { type: 'integer' }, depth: { type: 'integer' },
+  x: { $ref: '#/$defs/horizontal' }, y: { $ref: '#/$defs/vertical' }, z: { $ref: '#/$defs/horizontal' },
+  width: { $ref: '#/$defs/dimension' }, height: { $ref: '#/$defs/dimension' }, depth: { $ref: '#/$defs/dimension' },
   color: { type: 'string', enum: COLOR_NAMES }, part: { type: 'string', enum: ['frame', 'detail'] },
 };
 const brickSchema = { anyOf: [
   objectSchema(brickProperties),
   objectSchema({ ...brickProperties, repeat: objectSchema({
-    count: { type: 'integer' }, dx: { type: 'integer' }, dy: { type: 'integer' }, dz: { type: 'integer' },
+    count: { $ref: '#/$defs/repeatCount' },
+    dx: { type: 'integer', description: 'Integer stride from -127 to 127; all repeated bricks must remain in bounds.' },
+    dy: { type: 'integer', description: 'Integer stride from -63 to 63; all repeated bricks must remain in bounds.' },
+    dz: { type: 'integer', description: 'Integer stride from -127 to 127; all repeated bricks must remain in bounds.' },
   }) }),
 ] };
 const bricksSchema = { type: 'array', items: brickSchema };
@@ -136,14 +142,20 @@ export function createAzurePlanner({ endpoint, deployment,
             : prompt }],
           max_completion_tokens: 12000,
           response_format: { type: 'json_schema', json_schema: {
-            name: 'bricklab_custom_design', strict: true, schema: objectSchema({
+            name: 'bricklab_custom_design', strict: true, schema: { ...objectSchema({
               world: { type: 'string', enum: world ? [world] : ['jurassic', 'space'] },
               model: { type: 'string', enum: ['custom'] },
               color: { type: 'string', enum: COLOR_NAMES },
               longTail: { type: 'boolean', enum: [false] },
               wideWings: { type: 'boolean', enum: [false] },
-              budget: { type: 'integer' }, design: designSchema,
-            }),
+              budget: { type: 'integer', description: 'Expanded brick budget from 1 to 8192; at least the sum of all repeat counts and single bricks.' },
+              design: designSchema,
+            }), $defs: {
+              horizontal: integerEnum(-64, 63), vertical: integerEnum(0, 63),
+              dimension: integerEnum(1, 8),
+              // A straight nonzero integer stride cannot fit more than 128 positions.
+              repeatCount: integerEnum(2, 128),
+            } },
           } },
         }),
       });

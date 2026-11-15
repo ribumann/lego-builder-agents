@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createAzurePlanner, getAzurePlannerDiagnostic } from '../azure-planner.mjs';
-import { validateCustomSpec } from '../src/custom-design.mjs';
+import { validateCustomSpec, expandCustomBricks } from '../src/custom-design.mjs';
 import { planningPrompt } from '../planning-prompt.mjs';
 
 const endpoint = 'https://bricklab-example.openai.azure.com';
@@ -88,6 +88,61 @@ test('expanded budget counts repeated and single bricks across all objects', asy
   assert.throws(() => validateCustomSpec(result), /expanded brick budget/);
   spec.budget = 11;
   assert.equal(validateCustomSpec(spec).budget, 11);
+});
+
+test('native enum bounds reject oversized primitives while preserving requested nontrivial multi-object sizes', async () => {
+  for (const size of [100, 1000, 2048, 8192]) {
+    const objects = [0, 1].map(object => {
+      const bricks = [];
+      for (let remaining = size / 2, column = 0; remaining > 0; column++) {
+        const count = Math.min(64, remaining);
+        bricks.push({ x: column - 64, y: 0, z: object * 2,
+          width: 1, height: 1, depth: 1, color: 'blue', part: 'frame',
+          ...(count > 1 ? { repeat: { count, dx: 0, dy: 1, dz: 0 } } : {}),
+        });
+        remaining -= count;
+      }
+      return { name: `Object ${object + 1}`, bricks };
+    });
+    const plan = createPlanner({ endpoint, deployment: 'model', credential,
+      fetchImpl: async (_url, options) => {
+        const body = JSON.parse(options.body);
+        assert.ok(body.messages[0].content.includes(`roughly ${size} expanded bricks`));
+        assert.match(body.messages[0].content, /Large bases and walls MUST be tiled/);
+        const schema = body.response_format.json_schema.schema;
+        const record = schema.properties.design.anyOf[1].properties.objects.items.properties.bricks.items.anyOf[1];
+        for (const object of objects)
+          for (const brick of object.bricks)
+            for (const field of ['x', 'y', 'z', 'width', 'height', 'depth']) {
+              const definition = record.properties[field].$ref.split('/').at(-1);
+              assert.ok(schema.$defs[definition].enum.includes(brick[field]), `${size} retains valid ${field}`);
+            }
+        assert.deepEqual(schema.$defs.dimension.enum, [1, 2, 3, 4, 5, 6, 7, 8]);
+        assert.equal(schema.$defs.horizontal.enum.includes(-65), false);
+        assert.equal(schema.$defs.horizontal.enum.includes(64), false);
+        assert.equal(schema.$defs.vertical.enum.includes(-1), false);
+        assert.ok(schema.$defs.repeatCount.enum.includes(128));
+        assert.equal(schema.$defs.repeatCount.enum.includes(129), false);
+        let enumValues = 0;
+        const inspect = value => {
+          if (!value || typeof value !== 'object') return;
+          if (Array.isArray(value.enum)) enumValues += value.enum.length;
+          assert.equal(Object.hasOwn(value, 'minimum'), false);
+          assert.equal(Object.hasOwn(value, 'maximum'), false);
+          for (const child of Object.values(value)) inspect(child);
+        };
+        inspect(schema);
+        assert.ok(enumValues <= 500, 'Shared definitions avoid duplicating large enums');
+        return new Response(envelope(JSON.stringify({
+          world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: size,
+          design: { name: 'Representative repeated columns', objects },
+        })));
+      } });
+    const spec = validateCustomSpec(await plan({ world: 'space',
+      prompt: planningPrompt('space', 'Two connected towers', false, size) }));
+    assert.equal(spec.budget, size);
+    assert.equal(spec.design.objects.flatMap(object => expandCustomBricks(object.bricks)).length, size);
+  }
 });
 
 test('expanded budget errors distinguish the declared budget from the absolute ceiling', () => {

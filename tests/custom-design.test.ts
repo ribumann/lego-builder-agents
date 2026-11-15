@@ -71,6 +71,47 @@ test('invalid custom metadata reports only failed field names without coercion o
     { message: 'Custom specification has invalid fields: longTail, budget.' });
 });
 
+test('brick rejection identifies exact safe fields, object indexes and cross-field extents without repairing geometry', () => {
+  for (const [changes, reason] of [
+    [{ width: 16 }, 'width: above-maximum'],
+    [{ height: 0 }, 'height: below-minimum'],
+    [{ depth: 'private-output' }, 'depth: integer-required'],
+    [{ x: -65 }, 'x: below-minimum'], [{ y: -1 }, 'y: below-minimum'], [{ z: 64 }, 'z: above-maximum'],
+    [{ color: 'private-output' }, 'color: unsupported'], [{ part: 'private-output' }, 'part: unsupported'],
+    [{ x: 63, width: 2 }, 'x/width: occupied-extent-above-maximum'],
+    [{ y: 63, height: 2 }, 'y/height: occupied-extent-above-maximum'],
+    [{ z: 63, depth: 2 }, 'z/depth: occupied-extent-above-maximum'],
+  ] as const) {
+    const invalid = { ...brick(0, 0, 0, 1, 1, 1), ...changes };
+    const spec = { ...fixtures[0], design: { name: 'private-design-name', objects: [
+      { name: 'private-first-name', bricks: [brick(0, 0, 0, 1, 1, 1)] },
+      { name: 'private-second-name', bricks: [invalid] },
+    ] } };
+    assert.throws(() => validateCustomSpec(spec), error => {
+      assert.ok(error instanceof Error);
+      assert.match(error.message, /^Custom brick 1 in object 2/);
+      assert.ok(error.message.includes(reason));
+      assert.doesNotMatch(error.message, /private-/);
+      return true;
+    });
+    assert.deepEqual(spec.design.objects[1].bricks[0], invalid, 'Rejected input is not clamped or rewritten');
+  }
+});
+
+test('repeat rejection identifies stride fields and endpoint extents on each axis', () => {
+  for (const [changes, repeat, reason] of [
+    [{}, { count: 2, dx: 0, dy: 0, dz: 0 }, 'repeat.stride: zero'],
+    [{}, { count: 2, dx: 128, dy: 0, dz: 0 }, 'repeat.dx: above-maximum'],
+    [{ x: 63 }, { count: 2, dx: 1, dy: 0, dz: 0 }, 'repeat.x/width: occupied-extent-above-maximum'],
+    [{ y: 63 }, { count: 2, dx: 0, dy: 1, dz: 0 }, 'repeat.y/height: occupied-extent-above-maximum'],
+    [{ z: -64 }, { count: 2, dx: 0, dy: 0, dz: -1 }, 'repeat.z: occupied-extent-below-minimum'],
+  ] as const) {
+    const record = { ...brick(0, 0, 0, 1, 1, 1), ...changes, repeat };
+    assert.throws(() => validateCustomSpec({ ...fixtures[0], design: { name: 'Repeat fixture', bricks: [record] } }),
+      error => error instanceof Error && error.message.includes(reason));
+  }
+});
+
 test('expanded palette is accepted by custom geometry, rendered, and preserved through save and reload', () => {
   const colors: Color[] = ['black', 'yellow', 'gray', 'brown', 'pink'];
   const spec = validateCustomSpec({

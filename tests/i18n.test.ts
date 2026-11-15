@@ -146,6 +146,8 @@ test('scene and imported mission errors translate inside load and restore notice
     'Custom design exceeds its expanded brick budget.',
     'Custom design exceeds the 8192-brick limit.',
     'Custom brick 17 repeat exceeds bounds.',
+    'Custom brick 17 in object 2 has invalid dimensions, bounds, color, or part (width: above-maximum). No build was started. Try a smaller scene size or ask for tiled parts; no automatic retry.',
+    'Custom brick 17 in object 2 repeat exceeds bounds (repeat.x/width: occupied-extent-above-maximum).',
     'Copilot returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or explicitly choose offline templates.',
     'Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.',
   ];
@@ -158,6 +160,10 @@ test('scene and imported mission errors translate inside load and restore notice
       const restore = `Could not restore the saved build: ${detail}. Your old save has not been overwritten.`;
       assert.ok(translateActivity(restore).includes(translateActivity(detail)));
       if (detail.includes('17')) assert.match(translateActivity(detail), /17/);
+      if (detail.includes('in object 2')) {
+        assert.match(translateActivity(detail), /2/);
+        assert.match(translateActivity(detail), /width:/);
+      }
     }
     const external = 'Cannot append a brick assigned to unknown object "Maison 🚀".';
     assert.match(translateActivity(external), /Maison 🚀/);

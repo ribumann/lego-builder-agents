@@ -94,6 +94,16 @@ custom model, false template flags and integer metadata, using the existing
 single-design or named-object geometry shapes. Local geometry, overlap, volume
 and budget checks remain authoritative; schema output is not treated as trusted.
 Malformed metadata reports only failed field names, never raw model values.
+Supported integer enums in shared schema definitions constrain brick dimensions
+to 1-8, x/z lower corners to -64..63, y to 0..63 and straight repeat counts to
+2..128. These are not unsupported JSON-schema minimum/maximum keywords.
+A nonzero integer straight stride cannot fit more than 128 positions in this
+world; larger scenes use multiple records, not oversized bricks.
+The model must tile large bases/walls and check complete first/last extents.
+Enums cannot express cross-field occupied extents, overlap or repeat endpoints;
+local rejection remains mandatory. Errors identify one-based object/record
+indexes and allowlisted property/reason pairs, without coordinates, colors,
+names or other raw model values. No geometry is clamped, resized or invented.
 Before each explicit external Plan, the browser refreshes uncached server status
 and captures the current process token. A failed refresh sends no brief, and
 neither a token rejection nor invalid output automatically retries inference.
