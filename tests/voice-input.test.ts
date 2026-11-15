@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createVoiceInput, type VoiceUpdate } from '../src/voice-input';
+import { createVoiceInput, type VoiceProgress, type VoiceUpdate } from '../src/voice-input';
 
 function fixture(samples = new Float32Array([0.1])) {
   let stopped = 0;
@@ -10,6 +10,7 @@ function fixture(samples = new Float32Array([0.1])) {
   const stream = { getTracks: () => [track] } as unknown as MediaStream;
   let recorder: FakeRecorder;
   let finish: (value: string) => void = () => {};
+  let progress: (value: VoiceProgress) => void = () => {};
   let cancelled = false;
   let languageUsed = '';
   class FakeRecorder {
@@ -28,15 +29,16 @@ function fixture(samples = new Float32Array([0.1])) {
     getStream: async () => stream,
     createRecorder: () => { recorder = new FakeRecorder(); return recorder as unknown as MediaRecorder; },
     decode: async () => samples,
-    transcribe: (_audio, language) => {
+    transcribe: (_audio, language, onProgress) => {
       languageUsed = language;
+      progress = onProgress;
       return {
         promise: new Promise<string>(resolve => { finish = resolve; }),
         cancel: () => { cancelled = true; },
       };
     },
   });
-  return { input, updates, transcripts, recorder: () => recorder, finish: (text: string) => finish(text), stopped: () => stopped, cancelled: () => cancelled, language: () => languageUsed };
+  return { input, updates, transcripts, recorder: () => recorder, finish: (text: string) => finish(text), progress: (value: VoiceProgress) => progress(value), stopped: () => stopped, cancelled: () => cancelled, language: () => languageUsed };
 }
 
 const tick = () => new Promise(resolve => setTimeout(resolve, 0));
@@ -53,7 +55,29 @@ test('requires explicit consent and returns editable text only after recording s
   f.finish('  A blue dinosaur  ');
   await tick();
   assert.deepEqual(f.transcripts, ['A blue dinosaur']);
-  assert.deepEqual(f.updates.map(update => update.state), ['requesting', 'recording', 'processing', 'idle']);
+  assert.deepEqual(f.updates.map(update => update.state), ['requesting', 'recording', 'processing', 'processing', 'idle']);
+});
+
+test('reports preparation, model download and inference without completing early or updating after cancel', async () => {
+  const f = fixture();
+  await f.input.start(true, 'en');
+  f.input.stop();
+  assert.deepEqual(f.updates.at(-1), { state: 'processing', progress: { stage: 'preparing' } });
+  await tick();
+  assert.deepEqual(f.updates.at(-1), { state: 'processing', progress: { stage: 'loading' } });
+  f.progress({ stage: 'downloading', loaded: 25, total: 100 });
+  assert.deepEqual(f.updates.at(-1), { state: 'processing', progress: { stage: 'downloading', loaded: 25, total: 100 } });
+  assert.deepEqual(f.transcripts, []);
+  f.progress({ stage: 'transcribing' });
+  assert.deepEqual(f.updates.at(-1), { state: 'processing', progress: { stage: 'transcribing' } });
+  f.input.cancel();
+  const count = f.updates.length;
+  f.progress({ stage: 'downloading', loaded: 100, total: 100 });
+  f.finish('late text');
+  await tick();
+  assert.equal(f.updates.length, count);
+  assert.deepEqual(f.updates.at(-1), { state: 'idle' });
+  assert.deepEqual(f.transcripts, []);
 });
 
 test('cancellation stops the microphone and discards late results', async () => {

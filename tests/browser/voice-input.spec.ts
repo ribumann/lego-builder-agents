@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import type { VoiceProgress } from '../../src/voice-input';
 
 type VoiceCalls = { microphone: number; tracksStopped: number; workers: number };
 
@@ -7,6 +8,9 @@ declare global {
     __voiceCalls: VoiceCalls;
     __mockTranscript: string;
     __denyMicrophone: boolean;
+    __holdTranscription: boolean;
+    __voiceProgress: (progress: VoiceProgress) => void;
+    __finishVoice: () => void;
   }
 }
 
@@ -23,6 +27,7 @@ async function prepareVoicePage(page: Page, open = true, hosted = false) {
     Object.defineProperty(window, '__voiceCalls', { configurable: true, value: calls });
     window.__mockTranscript = 'A blue dinosaur with a gold crest';
     window.__denyMicrophone = false;
+    window.__holdTranscription = false;
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
@@ -61,12 +66,14 @@ async function prepareVoicePage(page: Page, open = true, hosted = false) {
     Object.defineProperty(window, 'AudioContext', { configurable: true, writable: true, value: MockAudioContext });
     Object.defineProperty(window, 'OfflineAudioContext', { configurable: true, writable: true, value: MockOfflineAudioContext });
     class MockWorker {
-      onmessage: ((event: MessageEvent<{ text: string }>) => void) | null = null;
+      onmessage: ((event: MessageEvent<{ text?: string; progress?: VoiceProgress }>) => void) | null = null;
       onerror: (() => void) | null = null;
       constructor(_url: URL, _options: WorkerOptions) {}
       postMessage() {
         calls.workers++;
-        setTimeout(() => this.onmessage?.({ data: { text: window.__mockTranscript } } as MessageEvent<{ text: string }>), 0);
+        window.__voiceProgress = progress => this.onmessage?.({ data: { progress } } as MessageEvent<{ progress: VoiceProgress }>);
+        window.__finishVoice = () => this.onmessage?.({ data: { text: window.__mockTranscript } } as MessageEvent<{ text: string }>);
+        if (!window.__holdTranscription) setTimeout(window.__finishVoice, 0);
       }
       terminate() {}
     }
@@ -178,6 +185,66 @@ test('discloses voice processing before permission and keeps transcript separate
   await expect(page.locator('#voice-status')).toHaveText('Ready for voice input');
   await expect(page.locator('#brief')).toHaveValue('A blue dinosaur with a gold crest');
   await expect(page.locator('#voice-transcript')).toHaveValue('A blue dinosaur with a gold crest');
+});
+
+test('shows localized model-file progress and honest indeterminate local transcription without auto-applying', async ({ page }) => {
+  const { modelRequests, planRequests } = await prepareVoicePage(page);
+  await page.evaluate(() => { window.__holdTranscription = true; });
+  await page.locator('#brief').fill('Keep my typed brief');
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await page.locator('#voice-start').click();
+  await expect(page.locator('#voice-status')).toContainText('Recording');
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-status')).toContainText('Loading the speech model');
+  await expect(page.getByRole('progressbar', { name: 'Loading the speech model on this device' })).toBeVisible();
+  await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+  await expect(page.locator('#voice-cancel')).toBeEnabled();
+  await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 25, total: 100 }));
+  await expect(page.locator('#voice-progress')).toHaveAttribute('value', '0.25');
+  await expect(page.locator('#voice-progress-value')).toHaveText('25%');
+  await expect(page.locator('#voice-progress-help')).toContainText('current model file, not the whole transcription');
+  for (const [language, download, transcribing] of [
+    ['en', 'Downloading a speech model file', 'Transcribing on this device'],
+    ['de', 'Eine Sprachmodelldatei wird heruntergeladen', 'Transkription auf diesem Gerät'],
+    ['fr', 'Téléchargement d’un fichier du modèle vocal', 'Transcription sur cet appareil'],
+    ['it', 'Download di un file del modello vocale', 'Trascrizione su questo dispositivo'],
+    ['es', 'Descargando un archivo del modelo de voz', 'Transcribiendo en este dispositivo'],
+    ['pt', 'Baixando um arquivo do modelo de voz', 'Transcrevendo neste dispositivo'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 50, total: 100 }));
+    await expect(page.locator('#voice-status')).toHaveText(download);
+    await page.evaluate(() => window.__voiceProgress({ stage: 'transcribing' }));
+    await expect(page.locator('#voice-status')).toHaveText(transcribing);
+    await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+    await expect(page.locator('#voice-progress-value')).toBeEmpty();
+  }
+  await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 10, total: 0 }));
+  await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+  await page.evaluate(() => window.__finishVoice());
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await expect(page.locator('#voice-transcript')).toHaveValue('A blue dinosaur with a gold crest');
+  await expect(page.locator('#brief')).toHaveValue('Keep my typed brief');
+  await page.locator('#voice-apply').click();
+  await expect(page.locator('#brief')).toHaveValue('A blue dinosaur with a gold crest');
+  expect(modelRequests).toEqual([]);
+  expect(planRequests).toEqual([]);
+});
+
+test('cancelling model loading removes progress and ignores late worker activity', async ({ page }) => {
+  await prepareVoicePage(page);
+  await page.evaluate(() => { window.__holdTranscription = true; });
+  await page.locator('#voice-start').click();
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-activity')).toBeVisible();
+  await page.locator('#voice-cancel').click();
+  await page.evaluate(() => {
+    window.__voiceProgress({ stage: 'downloading', loaded: 100, total: 100 });
+    window.__finishVoice();
+  });
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await expect(page.locator('#voice-status')).toHaveText('Ready for voice input');
+  await expect(page.locator('#voice-transcript')).toHaveValue('');
 });
 
 test('preserves transcript edits made while recording and requires review before replacing them', async ({ page }) => {

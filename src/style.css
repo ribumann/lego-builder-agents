@@ -194,6 +194,14 @@ textarea { resize: vertical; border: 1px solid #d7e0e5; border-radius: 8px; padd
 .voice-controls { display: flex; flex-wrap: wrap; gap: 7px; margin: 10px 0 5px; }
 .voice-controls .button, .voice-panel .button, .voice-controls .text-button { min-height: 44px; padding: 9px 12px; font-size: 12px; }
 .voice-status { min-height: 1.6em; font-weight: 800; }
+.voice-activity { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px 10px; margin: 8px 0 12px; }
+.voice-activity progress { height: 6px; margin: 0; accent-color: var(--blue, #254f75); }
+.voice-activity progress::-webkit-progress-value { background: #254f75; }
+.voice-activity progress::-moz-progress-bar { background: #254f75; }
+.voice-activity progress:indeterminate { background: repeating-linear-gradient(90deg, #254f75 0 12px, #e9eef0 12px 24px); }
+.voice-activity progress:indeterminate::-webkit-progress-bar { background: transparent; }
+#voice-progress-value { color: #23384c; font-size: 12px; font-variant-numeric: tabular-nums; }
+#voice-progress-help { grid-column: 1 / -1; margin: 0; color: #405563; font-size: 12px; line-height: 1.6; }
 #voice-transcript-label { display: block; margin-top: 10px; font-size: 12px; font-weight: 850; }
 #voice-transcript { display: block; width: 100%; height: 82px; min-height: 64px; max-height: 220px; margin-top: 5px; background: #fff; font-size: 12px; }
 .voice-meta { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; }

@@ -133,6 +133,11 @@ app.innerHTML = `
             <button id="voice-cancel" class="text-button" type="button">Cancel voice input</button>
           </div>
           <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true">Ready for voice input</p>
+          <div id="voice-activity" class="voice-activity" hidden>
+            <progress id="voice-progress" aria-labelledby="voice-status" aria-describedby="voice-progress-help"></progress>
+            <span id="voice-progress-value" aria-hidden="true"></span>
+            <p id="voice-progress-help"></p>
+          </div>
           <div id="voice-review" hidden>
             <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
             <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
@@ -231,7 +236,23 @@ const refreshVoiceUI = () => {
   if ((start.hidden && focused === start) || (stop.hidden && focused === stop) || (entry.disabled && focused === entry))
     (voiceUpdate.state === 'recording' ? stop : $('#voice-cancel')).focus();
   apply.disabled = active || !transcript.value.trim() || tooLong;
-  $('#voice-status').textContent = `${labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
+  const progress = voiceUpdate.state === 'processing' ? voiceUpdate.progress : undefined;
+  const statusText = `${progress ? labels.progress[progress.stage] : labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
+  if ($('#voice-status').textContent !== statusText) $('#voice-status').textContent = statusText;
+  $('#voice-activity').hidden = voiceUpdate.state !== 'processing';
+  const progressBar = $<HTMLProgressElement>('#voice-progress');
+  const loaded = progress?.loaded;
+  const total = progress?.total;
+  const fraction = progress?.stage === 'downloading' && typeof loaded === 'number' && typeof total === 'number'
+    && Number.isFinite(loaded) && Number.isFinite(total) && total > 0 && loaded >= 0 && loaded <= total
+    ? loaded / total : undefined;
+  progressBar.max = 1;
+  if (fraction !== undefined) progressBar.value = fraction;
+  else progressBar.removeAttribute('value');
+  $('#voice-progress-value').textContent = fraction !== undefined
+    ? new Intl.NumberFormat(getLanguage(), { style: 'percent', maximumFractionDigits: 0 }).format(progressBar.value) : '';
+  $('#voice-progress-help').textContent = progress?.stage === 'downloading' ? labels.downloadHelp
+    : progress?.stage === 'loading' ? labels.loadingHelp : labels.processingHelp;
   $('#voice-count').textContent = labels.count.replace('{count}', String(transcript.value.length));
   const warning = $<HTMLParagraphElement>('#voice-length-warning');
   warning.textContent = tooLong ? labels.tooLong.replace('{count}', String(transcript.value.length)) : '';

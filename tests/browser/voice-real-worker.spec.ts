@@ -25,6 +25,11 @@ test('real MediaRecorder and Whisper accept a simulated microphone signal', asyn
         super(url, options);
         this.addEventListener('message', event => {
           if (event.data?.stage) document.documentElement.dataset.voiceFailureStage = event.data.stage;
+          if (event.data?.progress) {
+            const stages = new Set((document.documentElement.dataset.voiceProgressStages || '').split(','));
+            stages.add(event.data.progress.stage);
+            document.documentElement.dataset.voiceProgressStages = [...stages].join(',');
+          }
         });
       }
     };
@@ -56,10 +61,13 @@ test('real MediaRecorder and Whisper accept a simulated microphone signal', asyn
   await page.waitForTimeout(1200);
   await page.locator('#voice-stop').click();
   await expect.poll(async () => page.locator('#voice-status').textContent(), { timeout: 330_000 })
-    .not.toContain('Transcribing on this device');
+    .toMatch(/Ready for voice input|Voice input stopped/);
   const stage = await page.evaluate(() => document.documentElement.dataset.voiceFailureStage || 'not reported');
   expect(await page.locator('#voice-status').textContent(), `Failure stage: ${stage}; network failures: ${failedRequests.join(', ') || 'none observed'}`)
     .toMatch(/Ready for voice input|No speech was transcribed/);
   expect(workers, `Status: ${await page.locator('#voice-status').textContent()}`).toBeGreaterThan(0);
+  const stages = await page.evaluate(() => document.documentElement.dataset.voiceProgressStages || '');
+  expect(stages).toContain('loading');
+  expect(stages).toContain('transcribing');
   expect(modelRequests.every(method => method === 'GET' || method === 'HEAD')).toBe(true);
 });
