@@ -19,6 +19,7 @@ const icon = (name: string) => {
     pause: '<path d="M8 5v14M16 5v14"/>',
     fast: '<path d="m3 5 9 7-9 7zm10 0 9 7-9 7z"/>',
     reset: '<path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/>',
+    rotate: '<path d="M20 11a8 8 0 1 1-2.34-5.66L20 8"/><path d="M20 3v5h-5"/>',
     arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
     cube: '<path d="m12 3 9 5v9l-9 5-9-5V8zm0 10 9-5M12 13 3 8m9 5v9"/>',
@@ -79,6 +80,7 @@ app.innerHTML = `
           <button id="blueprint" class="tool-button" aria-label="Toggle blueprint" aria-pressed="true" title="Blueprint">${icon('scan')}</button>
           <button id="explode" class="tool-button" aria-label="Toggle exploded view" aria-pressed="false" title="Exploded view">${icon('cube')}</button>
           <button id="interior-view" class="tool-button" aria-label="Toggle cutaway view" aria-pressed="false" title="Cutaway view">${icon('cutaway')}</button>
+          <button id="flip-camera" class="tool-button" aria-label="Flip camera 180 degrees" aria-pressed="false" title="Flip camera 180 degrees">${icon('rotate')}</button>
           <button id="camera" class="tool-button" aria-label="Reset camera" title="Reset camera">${icon('reset')}</button>
         </div>
         <div class="scene-caption" id="scene-caption"><strong>A big idea starts with a small brief.</strong><span>The translucent bricks are a preview, not an agent-built result.</span></div>
@@ -866,7 +868,14 @@ $('#interior-view').addEventListener('click', () => {
   scene?.setInteriorView(interiorView);
   $('#interior-view').setAttribute('aria-pressed', String(interiorView));
 });
-$('#camera').addEventListener('click', () => scene?.resetCamera());
+$('#flip-camera').addEventListener('click', () => {
+  if (!scene) return;
+  $('#flip-camera').setAttribute('aria-pressed', String(scene.flipCamera()));
+});
+$('#camera').addEventListener('click', () => {
+  scene?.resetCamera();
+  $('#flip-camera').setAttribute('aria-pressed', 'false');
+});
 $('#damage').addEventListener('click', () => { replaying = false; team?.damage(); eventRevision++; render(); save(); });
 $('#repair').addEventListener('click', () => { replaying = false; team?.repair(); running = team?.status === 'building'; eventRevision++; render(); save(); });
 $('#replay').addEventListener('input', () => {

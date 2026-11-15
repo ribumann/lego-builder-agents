@@ -322,6 +322,7 @@ const catalog: Record<string, Translations> = {
     'Experimente a preferência de interior oco com o planejamento personalizado e use a vista em corte para examinar a seção transversal. É uma preferência, não uma garantia; as verificações de conexão não comprovam estabilidade física.',
   ],
   'Reset camera': ['Kamera zurücksetzen', 'Réinitialiser la caméra', 'Reimposta la fotocamera', 'Restablecer cámara', 'Redefinir câmera'],
+  'Flip camera 180 degrees': ['Kamera um 180° drehen', 'Tourner la caméra de 180°', 'Ruota la fotocamera di 180°', 'Girar la cámara 180°', 'Girar a câmera 180°'],
   'Your build crew': ['Dein Bauteam', 'Votre équipe', 'La tua squadra', 'Tu equipo', 'Sua equipe'],
   'Detail & support builder': ['Detail- und Stützbau', 'Détails et supports', 'Dettagli e supporti', 'Detalles y soportes', 'Detalhes e suportes'],
   'Mission: Jurassic': ['Mission: Jura', 'Mission : Jurassique', 'Missione: Giurassico', 'Misión: Jurásico', 'Missão: Jurássico'],

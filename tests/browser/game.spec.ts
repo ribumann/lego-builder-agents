@@ -40,6 +40,34 @@ test('keyboard navigation retains visible focus and starts offline work without 
   expect(plans).toBe(0);
 });
 
+test('camera flip is reversible, resettable and leaves the saved build unchanged', async ({ page }) => {
+  let plans = 0;
+  await page.route('**/api/plan', route => { plans++; return route.abort(); });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Load local space fleet' }).click();
+  await expect(page.locator('#scene-caption')).toContainText('Space fleet');
+  const savedBuild = await page.evaluate(() => localStorage.getItem('bricklab-space'));
+  expect(savedBuild).not.toBeNull();
+
+  const flip = page.getByRole('button', { name: 'Flip camera 180 degrees' });
+  await expect(flip).toHaveAttribute('aria-pressed', 'false');
+  await flip.focus();
+  await page.keyboard.press('Enter');
+  await expect(flip).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-space'))).toBe(savedBuild);
+  await page.keyboard.press('Space');
+  await expect(flip).toHaveAttribute('aria-pressed', 'false');
+  await flip.click();
+  await expect(flip).toHaveAttribute('aria-pressed', 'true');
+
+  await page.getByRole('button', { name: 'Reset camera' }).click();
+  await expect(flip).toHaveAttribute('aria-pressed', 'false');
+  await flip.click();
+  await expect(flip).toHaveAttribute('aria-pressed', 'true');
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-space'))).toBe(savedBuild);
+  expect(plans).toBe(0);
+});
+
 test('Jurassic build supports pause, step, repair, replay, download and restore', async ({ page }) => {
   const errors: string[] = [];
   page.on('pageerror', e => errors.push(e.message));

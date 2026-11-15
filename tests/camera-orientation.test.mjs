@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { planningPrompt } from '../planning-prompt.mjs';
-import { DEFAULT_CAMERA_OFFSET } from '../src/camera-view.mjs';
+import { cameraViewOffset, DEFAULT_CAMERA_OFFSET } from '../src/camera-view.mjs';
 import { allBricks, createPlan, parseBrief } from '../src/engine.ts';
 
 test('default camera faces the built-in asymmetric models from their +X front', () => {
@@ -18,6 +18,14 @@ test('default camera faces the built-in asymmetric models from their +X front', 
   const tail = dinosaur.filter(brick => brick.part === 'tail');
   assert.ok(head.length && tail.length);
   assert.ok(Math.min(...head.map(brick => brick.x)) > Math.max(...tail.map(brick => brick.x)));
+});
+
+test('opposite camera view is a reversible 180-degree azimuth flip', () => {
+  const front = cameraViewOffset(false);
+  const back = cameraViewOffset(true);
+  assert.deepEqual(front, DEFAULT_CAMERA_OFFSET);
+  assert.deepEqual(back, { x: -front.x, y: front.y, z: -front.z });
+  assert.deepEqual(cameraViewOffset(false), front);
 });
 
 test('custom planning aligns distinct fronts with the default camera without overriding explicit direction', () => {

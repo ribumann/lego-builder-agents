@@ -27,9 +27,9 @@ test('planning estimates stay provider-specific in every supported language', ()
   setLanguage('en');
 });
 
-test('mission navigation and guide disclosures have translations in all six languages', () => {
+test('mission navigation, view controls and guide disclosures have translations in all six languages', () => {
   const interfaceText = ['Mission steps', 'Planning choices and privacy', 'Timing and design limits',
-    'Imagine it', 'Meet the plan', 'Watch them build', 'Test & discover'];
+    'Imagine it', 'Meet the plan', 'Watch them build', 'Test & discover', 'Flip camera 180 degrees'];
   for (const language of languages.slice(1)) {
     setLanguage(language);
     for (const text of interfaceText) assert.notEqual(translate(text), text, `${language}: ${text}`);
