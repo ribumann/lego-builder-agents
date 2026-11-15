@@ -53,17 +53,18 @@ plan. The five visible roles are application logic, not five model calls.
 | --- | --- | --- |
 | Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | One prior Windows ARM64 candidate completed a real text request and a consented synthetic-image request. The current integrated source and reliable process cleanup are not yet confirmed; these samples are not a reliability claim. |
 | Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | The current live app is anonymous and serves static/offline use; its public Azure planner is off. The next hosted planner candidate is not live or release-verified. | The custom-domain/Front Door endpoint returned HTTPS 200 and a direct App Service request returned 403 under the existing Front Door-only origin rules. The last recorded package is `release-084cfb4b5ec7bed93c362ce8a50f29ae2ab76142.zip`; the exact live source revision and next package/rollback path are unverified. |
+| Azure-hosted app | The current live app is anonymous and serves static/offline use; its public Azure planner is off. The next hosted planner candidate is not packaged or deployed. | Azure owner confirms the live source/package revision is `084cfb4b5ec7bed93c362ce8a50f29ae2ab76142`. The custom-domain/Front Door endpoint returned HTTPS 200, `/api/status` reports hosted offline-only, and a direct App Service request returned 403 under the existing Front Door-only origin rules. The immutable rollback artifact was privately re-read and passed ZIP integrity; a restore has not been tested. |
 
 Read-only Azure inventory for the existing deployment: Front Door Standard
 with WAF Prevention and a 240-second profile origin-response timeout; Linux
 App Service B1 in Italy North; private Blob storage and an approved private
 endpoint in Sweden Central; and Azure OpenAI deployments for `gpt-4.1-mini`
-and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. The
-current app settings report `BRICKLAB_HOSTED=1` and
-`BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. A private
-VM runner is deallocated. These observations describe the existing site, not
-the next package.
+and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. Azure
+owner confirms the current app settings are `BRICKLAB_HOSTED=1` and
+`BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. The
+rollback artifact's ZIP integrity passed, but the restore path is not
+validated. A private VM runner is deallocated. These observations describe the
+existing site, not a new MVP candidate.
 
 ### Provisional hosted-planning contract
 
