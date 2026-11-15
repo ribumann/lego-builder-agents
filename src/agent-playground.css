@@ -18,7 +18,6 @@
 .agent-lab > summary strong { font-size: 19px; letter-spacing: -.025em; }
 .agent-lab > summary > :last-child { margin-left: auto; font-size: 20px; }
 .agent-lab[open] > summary > :last-child { transform: rotate(90deg); }
-.agent-lab .lab-summary-mark { display: grid; place-items: center; width: 30px; height: 30px; background: #ffd35a; font-weight: 900; }
 .agent-lab .lab-body { padding: 0 20px 20px; }
 .agent-lab .lab-intro { max-width: 76ch; margin: 0 0 20px; color: #596c7a; }
 .agent-lab button, .agent-lab select {
@@ -36,8 +35,9 @@
 .agent-lab .lab-toolbar { display: flex; flex-wrap: wrap; align-items: end; gap: 12px; }
 .agent-lab .lab-toolbar label { display: grid; gap: 5px; font-size: 11px; font-weight: 800; }
 .agent-lab .lab-toolbar select { max-width: 100%; font-size: 13px; font-weight: 400; }
-.agent-lab .lab-playback { display: flex; flex-wrap: wrap; gap: 8px; margin-left: auto; }
-.agent-lab .lab-status { min-height: 24px; margin: 18px 0; font-weight: 700; max-width: 100ch; }
+.agent-lab .lab-playback { display: flex; flex-wrap: wrap; gap: 8px; }
+.agent-lab .lab-status { min-height: 24px; margin: 18px 0 2px; font-weight: 700; max-width: 100ch; }
+.agent-lab .lab-next { margin: 0 0 18px; color: #435b6c; }
 .agent-lab .lab-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(250px, 1.25fr) minmax(260px, 1fr); gap: 0 24px; }
 .agent-lab :is(.lab-workshop, .lab-team, .lab-conversation, .lab-inspector) { min-width: 0; }
 .agent-lab h3 { margin: 0; font-size: 14px; letter-spacing: -.015em; }
@@ -53,7 +53,8 @@
 .agent-lab .lab-repaired rect { stroke: #236449; stroke-width: 5; }
 .agent-lab .lab-dependency { stroke: #254f75; stroke-width: 3; stroke-dasharray: 5 4; }
 .agent-lab .lab-stage-caption { text-align: center; font-weight: 800; margin: 5px 0 0; }
-.agent-lab .lab-intervention { display: grid; gap: 8px; padding-top: 12px; }
+.agent-lab .lab-intervention { display: flex; flex-wrap: wrap; gap: 8px; }
+.agent-lab .lab-intervention:empty { display: none; }
 .agent-lab .lab-intervention:not(:empty) button { background: #fff5d5; border-color: #ba913d; }
 .agent-lab .lab-team { grid-area: 2 / 1; padding-top: 20px; }
 .agent-lab .lab-agent-list { display: grid; grid-template-columns: 1fr 1fr; gap: 4px 10px; margin-top: 10px; }
@@ -113,7 +114,6 @@
   .agent-lab > summary { padding: 16px 14px; }
   .agent-lab .lab-toolbar { align-items: stretch; }
   .agent-lab .lab-toolbar label { width: 100%; }
-  .agent-lab .lab-playback { margin-left: 0; }
   .agent-lab .lab-grid { grid-template-columns: minmax(0, 1fr); gap: 24px; }
   .agent-lab .lab-workshop, .agent-lab .lab-team, .agent-lab .lab-conversation, .agent-lab .lab-inspector { grid-area: auto; padding: 0; border: 0; }
   .agent-lab .lab-team { order: 1; }

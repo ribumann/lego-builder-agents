@@ -265,3 +265,50 @@ const pt: PlaygroundCopy = {
 };
 
 export const PLAYGROUND_COPY: Record<PlaygroundLanguage, PlaygroundCopy> = { en, de, fr, it, es, pt };
+
+export const PLAYGROUND_GUIDANCE: Record<PlaygroundLanguage, {
+  switchScenario: string; blocked: string; complete: string; playing: string; continue: string;
+}> = {
+  en: {
+    switchScenario: 'Choose Build a new robot to start the selected challenge.',
+    blocked: 'Choose a challenge action above, then continue with Play or One step.',
+    complete: 'Choose a challenge and build a new robot to play again.',
+    playing: 'The team is playing automatically. Choose Pause to stop.',
+    continue: 'Choose Play to continue automatically, or One step to advance once.',
+  },
+  de: {
+    switchScenario: 'Wähle „Neuen Roboter bauen“, um die ausgewählte Herausforderung zu starten.',
+    blocked: 'Wähle oben eine Aktion und fahre dann mit „Abspielen“ oder „Ein Schritt“ fort.',
+    complete: 'Wähle eine Herausforderung und baue einen neuen Roboter, um erneut zu spielen.',
+    playing: 'Das Team spielt automatisch. Wähle „Pause“, um anzuhalten.',
+    continue: 'Wähle „Abspielen“ für den automatischen Ablauf oder „Ein Schritt“ für die nächste Aktion.',
+  },
+  fr: {
+    switchScenario: 'Choisissez « Construire un nouveau robot » pour lancer le défi sélectionné.',
+    blocked: 'Choisissez une action ci-dessus, puis continuez avec « Lecture » ou « Un pas ».',
+    complete: 'Choisissez un défi et construisez un nouveau robot pour rejouer.',
+    playing: 'L’équipe avance automatiquement. Choisissez « Pause » pour arrêter.',
+    continue: 'Choisissez « Lecture » pour continuer automatiquement ou « Un pas » pour avancer une fois.',
+  },
+  it: {
+    switchScenario: 'Scegli «Costruisci un nuovo robot» per avviare la sfida selezionata.',
+    blocked: 'Scegli un’azione qui sopra, poi continua con «Riproduci» o «Un passo».',
+    complete: 'Scegli una sfida e costruisci un nuovo robot per giocare ancora.',
+    playing: 'La squadra procede automaticamente. Scegli «Pausa» per fermarla.',
+    continue: 'Scegli «Riproduci» per continuare automaticamente o «Un passo» per avanzare una volta.',
+  },
+  es: {
+    switchScenario: 'Elige «Construir un nuevo robot» para iniciar el desafío seleccionado.',
+    blocked: 'Elige una acción arriba y continúa con «Reproducir» o «Un paso».',
+    complete: 'Elige un desafío y construye un nuevo robot para volver a jugar.',
+    playing: 'El equipo avanza automáticamente. Elige «Pausa» para detenerlo.',
+    continue: 'Elige «Reproducir» para continuar automáticamente o «Un paso» para avanzar una vez.',
+  },
+  pt: {
+    switchScenario: 'Escolha «Construir um novo robô» para iniciar o desafio selecionado.',
+    blocked: 'Escolha uma ação acima e continue com «Reproduzir» ou «Um passo».',
+    complete: 'Escolha um desafio e construa um novo robô para jogar novamente.',
+    playing: 'A equipe avança automaticamente. Escolha «Pausar» para parar.',
+    continue: 'Escolha «Reproduzir» para continuar automaticamente ou «Um passo» para avançar uma vez.',
+  },
+};

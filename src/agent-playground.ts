@@ -2,7 +2,7 @@ import {
   AgentPlayground, PLAYGROUND_AGENTS, PLAYGROUND_TOOLS, ROBOT_BLUEPRINT,
   type PlaygroundAgent, type PlaygroundEvent, type PlaygroundScenario,
 } from './agent-playground-engine';
-import { PLAYGROUND_COPY, type PlaygroundLanguage } from './agent-playground-copy';
+import { PLAYGROUND_COPY, PLAYGROUND_GUIDANCE, type PlaygroundLanguage } from './agent-playground-copy';
 import './agent-playground.css';
 
 const MEMORY_KEY = 'bricklab-agent-playground-memory-v1';
@@ -53,7 +53,7 @@ export function mountAgentPlayground(
 
   container.innerHTML = `
     <details class="agent-lab" data-agent-playground>
-      <summary><span class="lab-summary-mark" aria-hidden="true">6</span><strong data-copy="title"></strong><span aria-hidden="true">↗</span></summary>
+      <summary><strong data-copy="title"></strong><span aria-hidden="true">↗</span></summary>
       <div class="lab-body">
         <p class="lab-intro" data-copy="intro"></p>
         <div class="lab-toolbar">
@@ -61,17 +61,18 @@ export function mountAgentPlayground(
             <option value="robot"></option><option value="missing"></option><option value="dependency"></option>
           </select></label>
           <button type="button" class="lab-primary" data-lab-action="start" data-copy="start"></button>
+          <div class="lab-intervention"></div>
           <div class="lab-playback">
             <button type="button" data-lab-action="play"></button>
             <button type="button" data-lab-action="step" data-copy="step"></button>
           </div>
         </div>
         <p class="lab-status" role="status" aria-live="polite"></p>
+        <p class="lab-next"></p>
         <div class="lab-grid">
           <section class="lab-workshop" aria-labelledby="${prefix}-workshop">
             <div class="lab-section-heading"><h3 id="${prefix}-workshop" data-copy="workshop"></h3><span data-lab-progress></span></div>
             <div class="lab-stage"></div>
-            <div class="lab-intervention"></div>
           </section>
           <section class="lab-team" aria-labelledby="${prefix}-team">
             <h3 id="${prefix}-team" data-copy="team"></h3><div class="lab-agent-list"></div>
@@ -196,10 +197,15 @@ export function mountAgentPlayground(
     get('.lab-status').textContent = memoryError ? copy.memoryError : lab.phase === 'complete'
       ? lab.lessonApplied ? copy.completeLearned : savedLesson ? copy.saved : copy.complete
       : `${copy.phases[lab.phase]}${event && !replay ? ` · ${copy.results[event.result]}` : ''}`;
+    const guidance = PLAYGROUND_GUIDANCE[language];
+    get('.lab-next').textContent = nextScenario !== lab.scenario ? guidance.switchScenario
+      : lab.phase === 'blocked' ? guidance.blocked
+      : lab.phase === 'complete' ? guidance.complete
+      : timer !== undefined ? guidance.playing : guidance.continue;
     stage(event);
     get('.lab-intervention').innerHTML = `
       ${lab.canReplan ? `<button type="button" data-lab-action="replan">${escape(copy.replan)}</button>` : ''}
-      ${lab.scenario === 'missing' && lab.inventory.get('right-arm') === 0 && !lab.placed.has('right-arm')
+      ${lab.scenario === 'missing' && (lab.blocker === 'inventory' || lab.postponedTask) && lab.inventory.get('right-arm') === 0 && !lab.placed.has('right-arm')
         ? `<button type="button" data-lab-action="restock">${escape(copy.restock)}</button>` : ''}
       ${lab.blocker === 'dependency' ? `<button type="button" data-lab-action="revise">${escape(copy.revise)}</button>` : ''}
       ${lab.canRememberRepair() && !savedLesson && !memoryError ? `<button type="button" data-lab-action="remember">${escape(copy.remember)}</button>` : ''}`;
@@ -297,7 +303,9 @@ export function mountAgentPlayground(
           const result = button.dataset.labAction === 'replan' ? lab.replan()
             : button.dataset.labAction === 'restock' ? lab.restock() : lab.revisePlan();
           if (result) { selectedEvent = result.id; selectedAgent = result.agent; replay = false; }
-          break;
+          render();
+          if (result && lab.phase !== 'blocked') get<HTMLButtonElement>('[data-lab-action="play"]').focus({ preventScroll: true });
+          return;
         }
       }
     }
@@ -307,6 +315,7 @@ export function mountAgentPlayground(
   function change(event: Event) {
     if (event.target instanceof HTMLSelectElement && event.target.matches('[data-lab-scenario]')) {
       nextScenario = event.target.value as PlaygroundScenario;
+      render();
     }
   }
 
