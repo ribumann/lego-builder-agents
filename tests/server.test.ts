@@ -383,7 +383,9 @@ process.on('message', message => {
   reply();
 });
 `);
-  const server = await startServer(t, { BRICKLAB_COPILOT_BIN: process.execPath, ...env }, ['--import', pathToFileURL(preload).href]);
+  const executable = platform === 'win32' && process.platform !== 'win32'
+    ? join(bin, 'fixture-copilot.exe') : process.execPath;
+  const server = await startServer(t, { BRICKLAB_COPILOT_BIN: executable, ...env }, ['--import', pathToFileURL(preload).href]);
   const hostedOrigin = env.BRICKLAB_HOSTED_ORIGIN ?? 'https://bricklab.liberatetheinnerchild.net';
   const codespaceOrigin = `https://${env.CODESPACE_NAME}-${server.port}.app.github.dev`;
   const appPassword = server.output.match(/Temporary app password: ([a-f0-9]+)/)?.[1];
