@@ -11,7 +11,8 @@ test('scene targets use a single unambiguous brick count, otherwise the selected
   for (const brief of ['500 Steine', '500 briques', '500 mattoncini', '500 bloques', '500 blocos'])
     assert.deepEqual(resolveSceneSize(brief, 1000), { target: 500, source: 'brief' });
   for (const brief of ['3 towers with 500 bricks', 'between 20 and 100 bricks', 'up to 500 bricks',
-    'not 500 bricks', '1.5 bricks', '-20 bricks', '−20 bricks', '5000 studs', '500 bricks wide', '500 bricks each'])
+    'not 500 bricks', '1.5 bricks', '-20 bricks', '−20 bricks', '5000 studs',
+    '500 bricks wide', '500-brick-wide wall', '500-brick-tall tower', '500 bricks each'])
     assert.deepEqual(resolveSceneSize(brief, 1000), { target: 1000, source: 'selection' }, brief);
 });
 
