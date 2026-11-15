@@ -1,6 +1,7 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
+import { createHmac } from 'node:crypto';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { request, createServer as createHttpServer } from 'node:http';
@@ -59,12 +60,15 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
   });
   assert.ok(child.stdout);
   let output = '';
+  let errors = '';
+  child.stderr?.setEncoding('utf8');
+  child.stderr?.on('data', chunk => { errors = (errors + chunk).slice(-4000); });
   for await (const chunk of child.stdout.iterator({ destroyOnReturn: false })) {
     output += chunk;
     if (output.includes('Daily calls per process:') && (env.BRICKLAB_CODESPACES !== '1'
         || output.includes('Temporary app password:'))) break;
   }
-  assert.ok(output.includes('BrickLab:'), 'Server must start');
+  assert.ok(output.includes('BrickLab:'), `Server must start.\n${errors}`);
   const base = `http://127.0.0.1:${port}`;
   return { port, base, output, child };
 }
@@ -147,8 +151,20 @@ globalThis.azureBoundaries = {
     return { reserve: details => boundary('reserve', reservations, details) };
   },
   createAzureBudgetGate(config) {
-    azureConfig.push({ type: 'budget', ...config });
+    azureConfig.push({ type: 'budget', account: config.account, container: config.container,
+      endpoint: config.endpoint, deployment: config.deployment, resourceId: config.resourceId,
+      contentFilterPolicy: config.contentFilterPolicy, dailyCallLimit: config.dailyCallLimit,
+      requireClientKey: config.requireClientKey });
     return { reserve: details => boundary('reserve', reservations, details) };
+  },
+  createAzureAccessTokenVerifier(config) {
+    return async authorization => {
+      if (authorization === 'Bearer fixture-forbidden')
+        throw Object.assign(new Error('not authorized'), { statusCode: 403 });
+      if (authorization !== 'Bearer fixture-token')
+        throw Object.assign(new Error('invalid token'), { statusCode: 401 });
+      return { tenantId: config.tenantId, objectId: '44444444-4444-4444-8444-444444444444' };
+    };
   }
 };
 globalThis.windowsJobBoundary = {
@@ -164,17 +180,26 @@ registerHooks({
   resolve(specifier, context, next) {
     if (context.parentURL?.endsWith('/server.mjs') && specifier === './src/windows-copilot-job-runner.mjs')
       return { url: 'fixture:windows-job', shortCircuit: true };
-    if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs', './azure-budget.mjs'].includes(specifier))
+    if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs',
+      './azure-budget.mjs', './azure-auth.mjs'].includes(specifier))
       return { url: 'fixture:' + specifier, shortCircuit: true };
     return next(specifier, context);
   },
   load(url, context, next) {
     if (url === 'fixture:windows-job') return { format: 'module', shortCircuit: true, source:
       'export const createWindowsCopilotJobRunner = () => globalThis.windowsJobBoundary;' };
+    if (url === 'fixture:./azure-auth.mjs') return { format: 'module', shortCircuit: true, source:
+      'export const getAzureAuthConfig = (env = process.env) => ({ tenantId: env.BRICKLAB_ENTRA_TENANT_ID, ' +
+      'apiClientId: env.BRICKLAB_ENTRA_API_CLIENT_ID, spaClientId: env.BRICKLAB_ENTRA_SPA_CLIENT_ID, ' +
+      'requiredScope: env.BRICKLAB_ENTRA_REQUIRED_SCOPE, requiredRole: env.BRICKLAB_ENTRA_REQUIRED_ROLE });' +
+      'export const createAzureAccessTokenVerifier = config => globalThis.azureBoundaries.createAzureAccessTokenVerifier(config);' };
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
+      'import { createHmac } from "node:crypto";' +
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
       'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' +
-      'export const createAzureBudgetGate = config => globalThis.azureBoundaries.createAzureBudgetGate(config);' };
+      'export const createAzureBudgetGate = config => globalThis.azureBoundaries.createAzureBudgetGate(config);' +
+      'export const createAzurePrincipalKey = ({secret, tenantId, objectId}) => createHmac("sha256", secret)' +
+      '.update(tenantId.toLowerCase() + ":" + objectId.toLowerCase()).digest("hex");' };
     return next(url, context);
   }
 });
@@ -274,11 +299,12 @@ process.on('message', message => {
   const status = await statusResponse.json() as { sessionKey: string };
   const headers: Record<string, string> = { ...hostHeaders, Origin: env.BRICKLAB_HOSTED === '1'
     ? hostedOrigin : server.base, 'X-Bricklab-Key': status.sessionKey };
+  const azureHeaders = { ...headers, Authorization: 'Bearer fixture-token' };
   const body = JSON.stringify({ world: 'space', brief: 'A fixture sculpture' });
   const post = (extra: Record<string, string> = {}, payload = body) =>
     fetchWithHost(server.base + '/api/plan', { method: 'POST', headers: { ...headers, ...extra }, body: payload, stream: true });
   const azurePost = (extra: Record<string, string> = {}, payload = body) =>
-    fetchWithHost(server.base + '/api/azure-plan', { method: 'POST', headers: { ...headers, ...extra }, body: payload, stream: true });
+    fetchWithHost(server.base + '/api/azure-plan', { method: 'POST', headers: { ...azureHeaders, ...extra }, body: payload, stream: true });
   const get = (path = '/api/status', extra: Record<string, string> = {}) =>
     fetchWithHost(server.base + path, { headers: { ...hostHeaders, ...extra } });
   const disconnectablePost = (extra: Record<string, string> = {}, payload = body) => {
@@ -571,6 +597,12 @@ const azureFixtureEnv = {
   BRICKLAB_AZURE_USAGE_CONTAINER: 'fixture-usage',
   BRICKLAB_AZURE_DAILY_CALLS: '5',
   AZURE_OPENAI_RESOURCE_ID: '/subscriptions/00000000-0000-0000-0000-000000000000/resourceGroups/fixture/providers/Microsoft.CognitiveServices/accounts/fixture',
+  BRICKLAB_AZURE_CONTENT_FILTER_POLICY: 'bricklab-public-safe',
+  BRICKLAB_ENTRA_TENANT_ID: '11111111-1111-4111-8111-111111111111',
+  BRICKLAB_ENTRA_API_CLIENT_ID: '22222222-2222-4222-8222-222222222222',
+  BRICKLAB_ENTRA_SPA_CLIENT_ID: '33333333-3333-4333-8333-333333333333',
+  BRICKLAB_ENTRA_REQUIRED_SCOPE: 'BrickLab.Plan',
+  BRICKLAB_ENTRA_REQUIRED_ROLE: 'BrickLab.Planner',
 };
 
 test('Azure is off by default and status does not instantiate or contact Azure boundaries', { timeout: 10_000 }, async t => {
@@ -590,10 +622,18 @@ test('Azure reserves once before one provider call, shares the coordinator lock,
   assert.equal(status.azurePlanner.enabled, true);
   assert.equal(status.azurePlanner.state, 'configured');
   assert.match(status.azurePlanner.message, /not verified/);
+  assert.deepEqual(await (await get('/api/azure-auth-config')).json(), {
+    tenantId: azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID,
+    apiClientId: azureFixtureEnv.BRICKLAB_ENTRA_API_CLIENT_ID,
+    clientId: azureFixtureEnv.BRICKLAB_ENTRA_SPA_CLIENT_ID,
+    requiredScope: azureFixtureEnv.BRICKLAB_ENTRA_REQUIRED_SCOPE,
+    scope: `api://${azureFixtureEnv.BRICKLAB_ENTRA_API_CLIENT_ID}/${azureFixtureEnv.BRICKLAB_ENTRA_REQUIRED_SCOPE}`,
+  });
   let state = await command({ action: 'inspect' });
   assert.deepEqual(state.azureEvents, [], 'Status never reserves quota or sends a prompt');
   assert.deepEqual(state.azureConfig, [
-    { type: 'planner', endpoint: azureFixtureEnv.AZURE_OPENAI_ENDPOINT, deployment: azureFixtureEnv.AZURE_OPENAI_DEPLOYMENT },
+    { type: 'planner', endpoint: azureFixtureEnv.AZURE_OPENAI_ENDPOINT, deployment: azureFixtureEnv.AZURE_OPENAI_DEPLOYMENT,
+      contentFilterPolicy: azureFixtureEnv.BRICKLAB_AZURE_CONTENT_FILTER_POLICY },
     { type: 'usage', account: azureFixtureEnv.AZURE_STORAGE_ACCOUNT, container: azureFixtureEnv.BRICKLAB_AZURE_USAGE_CONTAINER, limit: 5 },
   ]);
   const brief = 'A café tower.\n"Quoted" details remain data.';
@@ -629,6 +669,9 @@ test('Azure auth, host, origin and input failures never reserve quota or call th
     [{ Origin: '' }, '{}', 403],
     [{ Origin: 'https://attacker.example' }, '{}', 403],
     [{ 'X-Bricklab-Key': '' }, '{}', 403],
+    [{ Authorization: '' }, 'not JSON', 401],
+    [{ Authorization: 'Bearer invalid-token' }, '{}', 401],
+    [{ Authorization: 'Bearer fixture-forbidden' }, '{}', 403],
     [{}, 'not JSON', 400], [{}, 'null', 400], [{}, '{}', 400],
     [{}, JSON.stringify({ world: 'space', brief: '' }), 400],
     [{}, JSON.stringify({ world: 'castle', brief: 'test' }), 400],
@@ -644,6 +687,26 @@ test('Azure auth, host, origin and input failures never reserve quota or call th
     await response.json();
   }
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents, []);
+});
+
+test('Azure budget fairness is keyed to the verified Entra principal, not forwarded IP', { timeout: 10_000 }, async t => {
+  const secret = 'fixture-only rate limit secret longer than thirty-two bytes';
+  const { azurePost, command } = await startLifecycleServer(t, 'linux', {
+    ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1',
+    BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+    BRICKLAB_AZURE_CLIENT_HASH_KEY: secret,
+  });
+  const pending = azurePost({ 'X-Forwarded-For': '198.51.100.9, 203.0.113.7' });
+  await command({ action: 'azure-started', type: 'reserve', count: 1 });
+  const state = await command({ action: 'inspect' });
+  const expectedKey = createHmac('sha256', secret)
+    .update(`${azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID}:${'44444444-4444-4444-8444-444444444444'}`).digest('hex');
+  assert.equal(state.azureEvents[0].clientKey, expectedKey);
+  assert.notEqual(state.azureEvents[0].clientKey, '203.0.113.7');
+  await command({ action: 'azure-reserve' });
+  await command({ action: 'azure-started', type: 'plan', count: 1 });
+  await command({ action: 'azure-complete', spec: lifecycleSpec });
+  assert.equal((await pending).status, 200);
 });
 
 test('Azure quota rejection fails closed before the model and never retries a reservation', { timeout: 10_000 }, async t => {
@@ -664,6 +727,7 @@ test('Azure quota rejection fails closed before the model and never retries a re
 test('Azure monetary budget is reserved before inference and fails closed without quota fallback', { timeout: 10_000 }, async t => {
   const { azurePost, command } = await startLifecycleServer(t, 'linux', {
     ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+    BRICKLAB_AZURE_CLIENT_HASH_KEY: 'fixture-only rate limit secret longer than thirty-two bytes',
   });
   let state = await command({ action: 'inspect' });
   assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner', 'budget']);

@@ -122,6 +122,91 @@ resource ai 'Microsoft.CognitiveServices/accounts@2023-05-01' = {
   }
 }
 
+resource contentFilter 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10-01' = {
+  parent: ai
+  name: 'bricklab-public-safe'
+  properties: {
+    basePolicyName: 'Microsoft.Default'
+    mode: 'Blocking'
+    contentFilters: [
+      {
+        name: 'Hate'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Prompt'
+      }
+      {
+        name: 'Hate'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Completion'
+      }
+      {
+        name: 'Sexual'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Prompt'
+      }
+      {
+        name: 'Sexual'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Completion'
+      }
+      {
+        name: 'Selfharm'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Prompt'
+      }
+      {
+        name: 'Selfharm'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Completion'
+      }
+      {
+        name: 'Violence'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Prompt'
+      }
+      {
+        name: 'Violence'
+        blocking: true
+        enabled: true
+        severityThreshold: 'Medium'
+        source: 'Completion'
+      }
+      {
+        name: 'Jailbreak'
+        blocking: true
+        enabled: true
+        source: 'Prompt'
+      }
+      {
+        name: 'Protected Material Text'
+        blocking: true
+        enabled: true
+        source: 'Completion'
+      }
+      {
+        name: 'Protected Material Code'
+        blocking: true
+        enabled: true
+        source: 'Completion'
+      }
+    ]
+  }
+}
+
 resource model 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
   parent: ai
   name: 'bricklab-planner-gpt54'
@@ -196,3 +281,4 @@ output packageContainerName string = packages.name
 output openAiAccountId string = ai.id
 output openAiEndpoint string = ai.properties.endpoint
 output openAiDeployment string = model.name
+output openAiContentFilterPolicy string = contentFilter.name

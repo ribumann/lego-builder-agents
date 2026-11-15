@@ -6,12 +6,16 @@ const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
 class AzurePlannerError extends Error {}
 
-export function createAzurePlanner({ endpoint, deployment, credential = new ManagedIdentityCredential(), fetchImpl = fetch }) {
+export function createAzurePlanner({ endpoint, deployment, contentFilterPolicy,
+  credential = new ManagedIdentityCredential(), fetchImpl = fetch }) {
   if (typeof endpoint !== 'string'
       || !/^https:\/\/[a-z0-9][a-z0-9-]{0,62}\.openai\.azure\.com\/?$/i.test(endpoint))
     throw new Error('Azure OpenAI endpoint must be an HTTPS resource endpoint in the public Azure cloud.');
   if (typeof deployment !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(deployment))
     throw new Error('Azure OpenAI deployment name is invalid.');
+  if (typeof contentFilterPolicy !== 'string'
+      || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(contentFilterPolicy))
+    throw new Error('Azure OpenAI content filter policy is invalid.');
   const url = `${endpoint.replace(/\/$/, '')}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=2024-10-21`;
 
   return async function planAzure({ prompt, signal }) {
@@ -26,7 +30,8 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
         method: 'POST',
         redirect: 'error',
         signal,
-        headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json' },
+        headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json',
+          'x-policy-id': contentFilterPolicy },
         body: JSON.stringify({
           messages: [{ role: 'user', content: prompt }],
           max_completion_tokens: 12000,
@@ -60,6 +65,13 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
       catch { throw new AzurePlannerError('Azure OpenAI returned a malformed or incomplete response.'); }
       const choice = envelope?.choices?.[0];
       const content = choice?.message?.content;
+      const promptBlocked = envelope?.prompt_filter_results?.some(result =>
+        hasBlockedFilter(result?.content_filter_results ?? result));
+      const completionBlocked = envelope?.choices?.some(result =>
+        result?.finish_reason === 'content_filter'
+          || hasBlockedFilter(result?.content_filter_results ?? result));
+      if (promptBlocked || completionBlocked)
+        throw new AzurePlannerError('Azure content safety filters blocked the planning request or response.');
       if (choice?.finish_reason !== 'stop' || typeof content !== 'string'
           || Buffer.byteLength(content) > MAX_CONTENT_BYTES)
         throw new AzurePlannerError('Azure OpenAI returned a malformed or incomplete response.');
@@ -73,11 +85,24 @@ export function createAzurePlanner({ endpoint, deployment, credential = new Mana
   };
 }
 
+function hasBlockedFilter(value) {
+  if (!value || typeof value !== 'object') return false;
+  const pending = [value];
+  while (pending.length) {
+    const current = pending.pop();
+    if (!current || typeof current !== 'object') continue;
+    if (current.filtered === true) return true;
+    pending.push(...Object.values(current).filter(item => item && typeof item === 'object'));
+  }
+  return false;
+}
+
 let planner;
 export function planAzure(request) {
   planner ??= createAzurePlanner({
     endpoint: process.env.AZURE_OPENAI_ENDPOINT,
     deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+    contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
   });
   return planner(request);
 }
