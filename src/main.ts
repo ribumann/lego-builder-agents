@@ -695,19 +695,21 @@ async function makePlan(demo = false) {
     let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
     if (mode !== 'local') {
+      const planningKey = await refreshStatus();
+      controller.signal.throwIfAborted();
+      if (!planningKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       const localAI = mode === 'local-ai';
       const azure = mode === 'azure';
       const compatible = mode === 'compatible';
       if (compatible ? !compatiblePlanner.enabled || compatiblePlanner.state !== 'configured' : azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
-      if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       const azureAccessToken = azure && azurePlanner.authentication !== 'anonymous' ? await acquireAzurePlanningToken() : undefined;
       controller.signal.throwIfAborted();
       if (image && azure && !azureImagesEnabled) throw new Error('Azure image planning is unavailable on this server.');
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey,
+        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': planningKey,
           ...(localAI ? {} : { Accept: 'application/x-ndjson' }),
           ...(azureAccessToken ? { Authorization: `Bearer ${azureAccessToken}` } : {}) },
         body: JSON.stringify({ world, brief: planningBrief,
@@ -1053,7 +1055,7 @@ function updateMode() {
 }
 async function refreshStatus(inDialog = false) {
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', { cache: 'no-store' });
     if (!response.ok) throw new Error(`Server status returned ${response.status}`);
     const data = await response.json();
     apiKey = typeof data.sessionKey === 'string' ? data.sessionKey : '';
@@ -1083,6 +1085,7 @@ async function refreshStatus(inDialog = false) {
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
+    apiKey = '';
     copilotEnabled = false;
     copilotImagesEnabled = false;
     azureImagesEnabled = false;
@@ -1101,6 +1104,7 @@ async function refreshStatus(inDialog = false) {
     const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
     if (compatibleStatus) compatibleStatus.textContent = translateActivity(compatiblePlanner.message);
   }
+  return apiKey;
 }
 updateMode();
 void refreshStatus();

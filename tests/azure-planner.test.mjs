@@ -28,6 +28,44 @@ test('Azure planner sends a bounded authenticated request and returns parsed JSO
   assert.equal(JSON.parse(request.options.body).max_tokens, undefined);
 });
 
+test('Azure requests strict custom-design output for the selected world without weakening local validation', async () => {
+  let requests = 0;
+  const plan = createPlanner({ endpoint, deployment: 'model', credential,
+    fetchImpl: async (_url, options) => {
+      requests++;
+      const format = JSON.parse(options.body).response_format;
+      assert.equal(format.type, 'json_schema');
+      assert.equal(format.json_schema.strict, true);
+      const schema = format.json_schema.schema;
+      assert.deepEqual(schema.properties.world.enum, ['space']);
+      assert.deepEqual(schema.properties.model.enum, ['custom']);
+      assert.deepEqual(schema.properties.longTail.enum, [false]);
+      assert.deepEqual(schema.properties.wideWings.enum, [false]);
+      assert.equal(schema.properties.budget.type, 'integer');
+      assert.ok(schema.properties.color.enum.includes('blue'));
+      const inspect = value => {
+        if (!value || typeof value !== 'object') return;
+        if (value.type === 'object') {
+          assert.equal(value.additionalProperties, false);
+          assert.deepEqual(value.required, Object.keys(value.properties));
+        }
+        for (const nested of Object.values(value)) inspect(nested);
+      };
+      inspect(schema);
+      return new Response(envelope(JSON.stringify({
+        world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 1,
+        design: { name: 'Unsafe fixture', bricks: [
+          { x: 63, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
+        ] },
+      })));
+    } });
+  const spec = await plan({ world: 'space', prompt: planningPrompt('space', 'Synthetic fixture') });
+  assert.throws(() => validateCustomSpec(spec), /bounds/);
+  assert.equal(requests, 1, 'Invalid output never triggers an adapter retry');
+  await assert.rejects(plan({ world: 'invalid', prompt: 'Synthetic fixture' }), /world is invalid/);
+  assert.equal(requests, 1);
+});
+
 test('expanded budget counts repeated and single bricks across all objects', async () => {
   const brick = (x, repeat) => ({
     x, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame',

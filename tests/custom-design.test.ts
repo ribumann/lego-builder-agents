@@ -54,6 +54,23 @@ test('custom input rejects overlaps, out-of-bounds, unsafe values and excessive 
   assert.throws(() => validateSpec(fixtures[0], 'jurassic'), /world/);
 });
 
+test('invalid custom metadata reports only failed field names without coercion or output values', () => {
+  for (const [field, values] of Object.entries({
+    world: ['private-model-output', undefined],
+    model: ['private-model-output', undefined],
+    color: ['private-model-output', undefined],
+    longTail: [true, 'false', undefined],
+    wideWings: [true, 'false', undefined],
+    budget: ['50', 0, 8193, undefined],
+  })) {
+    for (const value of values)
+      assert.throws(() => validateCustomSpec({ ...fixtures[0], [field]: value }),
+        { message: `Custom specification has invalid fields: ${field}.` });
+  }
+  assert.throws(() => validateCustomSpec({ ...fixtures[0], longTail: true, budget: 'private-model-output' }),
+    { message: 'Custom specification has invalid fields: longTail, budget.' });
+});
+
 test('expanded palette is accepted by custom geometry, rendered, and preserved through save and reload', () => {
   const colors: Color[] = ['black', 'yellow', 'gray', 'brown', 'pink'];
   const spec = validateCustomSpec({

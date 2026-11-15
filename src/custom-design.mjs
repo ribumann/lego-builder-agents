@@ -15,9 +15,16 @@ const integer = (value, min, max) => Number.isInteger(value) && value >= min && 
 export function validateCustomSpec(value) {
   if (!value || typeof value !== 'object' || Array.isArray(value)) throw new Error('Custom specification must be an object.');
   const s = value;
-  if (!['jurassic', 'space'].includes(s.world) || s.model !== 'custom' || !colors.includes(s.color)
-      || s.longTail !== false || s.wideWings !== false || !integer(s.budget, 1, 8192))
-    throw new Error('Custom specification has invalid world, color, flags, or budget.');
+  const invalidFields = [
+    !['jurassic', 'space'].includes(s.world) && 'world',
+    s.model !== 'custom' && 'model',
+    !colors.includes(s.color) && 'color',
+    s.longTail !== false && 'longTail',
+    s.wideWings !== false && 'wideWings',
+    !integer(s.budget, 1, 8192) && 'budget',
+  ].filter(Boolean);
+  if (invalidFields.length)
+    throw new Error(`Custom specification has invalid fields: ${invalidFields.join(', ')}.`);
   const d = s.design;
   if (!d || typeof d !== 'object' || Array.isArray(d) || typeof d.name !== 'string'
       || !d.name.trim() || d.name.length > 80 || /[\p{C}]/u.test(d.name))

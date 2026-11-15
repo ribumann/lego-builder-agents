@@ -1,11 +1,34 @@
 import { ManagedIdentityCredential } from '@azure/identity';
 import { validatePlanningImage } from './planning-image.mjs';
+import { COLOR_NAMES } from './src/brick-colors.mjs';
 
 const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_CONTENT_BYTES = 128_000;
 const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
 class AzurePlannerError extends Error {}
+
+const objectSchema = properties => ({
+  type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
+});
+const brickProperties = {
+  x: { type: 'integer' }, y: { type: 'integer' }, z: { type: 'integer' },
+  width: { type: 'integer' }, height: { type: 'integer' }, depth: { type: 'integer' },
+  color: { type: 'string', enum: COLOR_NAMES }, part: { type: 'string', enum: ['frame', 'detail'] },
+};
+const brickSchema = { anyOf: [
+  objectSchema(brickProperties),
+  objectSchema({ ...brickProperties, repeat: objectSchema({
+    count: { type: 'integer' }, dx: { type: 'integer' }, dy: { type: 'integer' }, dz: { type: 'integer' },
+  }) }),
+] };
+const bricksSchema = { type: 'array', items: brickSchema };
+const designSchema = { anyOf: [
+  objectSchema({ name: { type: 'string' }, bricks: bricksSchema }),
+  objectSchema({ name: { type: 'string' }, objects: {
+    type: 'array', items: objectSchema({ name: { type: 'string' }, bricks: bricksSchema }),
+  } }),
+] };
 
 export function createAzurePlanner({ endpoint, deployment,
   credential = new ManagedIdentityCredential(), fetchImpl = fetch }) {
@@ -16,9 +39,11 @@ export function createAzurePlanner({ endpoint, deployment,
     throw new Error('Azure OpenAI deployment name is invalid.');
   const url = `${endpoint.replace(/\/$/, '')}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=2024-10-21`;
 
-  return async function planAzure({ prompt, signal, image: rawImage, imageConsent }) {
+  return async function planAzure({ prompt, world, signal, image: rawImage, imageConsent }) {
     if (typeof prompt !== 'string' || !prompt || Buffer.byteLength(prompt) > 32_000)
       throw new Error('Azure planning prompt is invalid or too large.');
+    if (world !== undefined && !['jurassic', 'space'].includes(world))
+      throw new Error('Azure planning world is invalid.');
     const image = validatePlanningImage(rawImage, imageConsent);
     try {
       signal?.throwIfAborted();
@@ -38,7 +63,16 @@ export function createAzurePlanner({ endpoint, deployment,
               image_url: { url: `data:${image.mimeType};base64,${image.data}` } }]
             : prompt }],
           max_completion_tokens: 12000,
-          response_format: { type: 'json_object' },
+          response_format: { type: 'json_schema', json_schema: {
+            name: 'bricklab_custom_design', strict: true, schema: objectSchema({
+              world: { type: 'string', enum: world ? [world] : ['jurassic', 'space'] },
+              model: { type: 'string', enum: ['custom'] },
+              color: { type: 'string', enum: COLOR_NAMES },
+              longTail: { type: 'boolean', enum: [false] },
+              wideWings: { type: 'boolean', enum: [false] },
+              budget: { type: 'integer' }, design: designSchema,
+            }),
+          } },
         }),
       });
       if (!response.ok || !response.body) {

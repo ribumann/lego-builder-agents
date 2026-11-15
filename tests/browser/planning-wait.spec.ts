@@ -218,6 +218,48 @@ test('unavailable hosted planner never submits and offline templates remain avai
   expect(calls).toBe(0);
 });
 
+test('explicit planning refreshes a rotated server key without retrying the planning POST', async ({ page }) => {
+  let statusCalls = 0;
+  let calls = 0;
+  await page.route('**/api/status', route => {
+    statusCalls++;
+    return route.fulfill({ json: {
+      hosted: true, sessionKey: statusCalls === 1 ? 'before-restart' : 'after-restart',
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+    } });
+  });
+  await page.route('**/api/azure-plan', route => {
+    calls++;
+    expect(route.request().headers()['x-bricklab-key']).toBe('after-restart');
+    return route.fulfill({ status: 503, json: { error: 'Fixture model unavailable.' } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  expect(statusCalls).toBe(1);
+  expect(calls).toBe(0);
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Fixture model unavailable.');
+  expect(calls).toBe(1);
+});
+
+test('failed planning-session refresh does not reuse an old key or submit a brief', async ({ page }) => {
+  let statusCalls = 0;
+  let calls = 0;
+  await page.route('**/api/status', route => {
+    statusCalls++;
+    return statusCalls === 1 ? route.fulfill({ json: {
+      hosted: true, sessionKey: 'old-key',
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+    } }) : route.fulfill({ status: 503, json: { error: 'Fixture status unavailable.' } });
+  });
+  await page.route('**/api/azure-plan', route => { calls++; return route.abort(); });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('alert')).toContainText(/status.*(?:not ready|unavailable)/i);
+  expect(calls).toBe(0);
+});
+
 test('a configured private Azure planner requires sign-in before submitting', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {

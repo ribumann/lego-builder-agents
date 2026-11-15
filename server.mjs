@@ -548,7 +548,7 @@ const server = http.createServer(async (req, res) => {
               }
               // A reservation that completes after cancellation must never start a late model call.
               controller.signal.throwIfAborted();
-              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target),
+              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), world,
                 image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
               controller.signal.throwIfAborted();
               if (parsed?.model !== 'custom')

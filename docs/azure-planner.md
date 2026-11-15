@@ -16,7 +16,7 @@ Set `BRICKLAB_HOSTED=1`, production serving, the exact HTTPS
 | --- | --- |
 | `BRICKLAB_AZURE_AI` | Explicit opt-in `1`; otherwise Azure planning is off |
 | `AZURE_OPENAI_ENDPOINT` | HTTPS `*.openai.azure.com` endpoint |
-| `AZURE_OPENAI_DEPLOYMENT` | Deployment supporting JSON output and, for images, vision |
+| `AZURE_OPENAI_DEPLOYMENT` | Deployment supporting strict JSON-schema structured output and, for images, vision |
 | `AZURE_STORAGE_ACCOUNT` | Storage account holding the existing shared counter |
 | `BRICKLAB_AZURE_BUDGET_CONTAINER` | Migration alias: continue the existing `daily-budget.json` blob |
 | `BRICKLAB_AZURE_USAGE_CONTAINER` | Fresh-install container for `daily-usage.json`, when no migration alias is set |
@@ -89,6 +89,14 @@ not Azure Speech or a server audio upload.
 Prompts are capped at 32,000 bytes, provider envelopes at 1 MiB and final JSON at
 128,000 bytes; the request allows 12,000 completion tokens including reasoning.
 Geometry and selected world are validated locally before scene execution.
+Azure requests strict JSON-schema output for the selected world, supported colors,
+custom model, false template flags and integer metadata, using the existing
+single-design or named-object geometry shapes. Local geometry, overlap, volume
+and budget checks remain authoritative; schema output is not treated as trusted.
+Malformed metadata reports only failed field names, never raw model values.
+Before each explicit external Plan, the browser refreshes uncached server status
+and captures the current process token. A failed refresh sends no brief, and
+neither a token rejection nor invalid output automatically retries inference.
 At 300 seconds, the request AbortSignal cancels the upstream transport;
 disconnect cancels only that request. Capacity stays held until the adapter
 settles, and a late count admission cannot start cancelled inference. Transport

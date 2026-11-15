@@ -998,6 +998,26 @@ test('anonymous hosted route uses managed identity configuration with twenty iso
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
 });
 
+test('hosted stale-token rejection is uncounted while a separate invalid model result remains counted', async t => {
+  const server = await startLifecycleServer(t, 'linux', anonymousHostedEnv);
+  const rejected = await server.azurePost({ Authorization: '', 'X-Bricklab-Key': 'previous-process-key' });
+  assert.equal(rejected.status, 403);
+  assert.match((await rejected.json() as any).error, /exact origin and request token/);
+  let state = await server.command({});
+  assert.deepEqual(state.azureEvents, []);
+  assert.equal((await (await server.get()).json() as any).publicAllowance.remaining, 50);
+  const admitted = server.azurePost({ Authorization: '' });
+  await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+  await server.command({ action: 'azure-complete', spec: { ...lifecycleSpec, longTail: true } });
+  const response = await admitted;
+  assert.equal(response.status, 502);
+  assert.equal((await response.json() as any).error, 'Custom specification has invalid fields: longTail.');
+  state = await server.command({});
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 1);
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 1 });
+  assert.equal((await (await server.get()).json() as any).publicAllowance.remaining, 49);
+});
+
 test('anonymous hosted requests share an atomic fifty-call boundary and failed work is never refunded', async t => {
   const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
     TEST_BUDGET_STATE: JSON.stringify({ day: '2026-11-14', reservedMicros: 26_950_000, calls: 49, clientCalls: {} }),
