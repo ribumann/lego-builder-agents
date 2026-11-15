@@ -79,6 +79,7 @@ export interface Snapshot {
   tick: number;
   source: Plan['source'];
   taskOrder: string[];
+  assumptions?: string[];
 }
 export { COLORS };
 export const EXAMPLES: Record<World, string[]> = {
@@ -503,9 +504,11 @@ export class Team {
     this.status = 'building';
   }
   snapshot(prompt: string): Snapshot {
+    if (this.plan.assumptions.length > 256 || this.plan.assumptions.some(text => typeof text !== 'string' || text.length > 1200))
+      throw new Error('Saved plan assumptions exceed supported limits.');
     return { version: 1, world: this.plan.spec.world, prompt, spec: this.plan.spec,
       bricks: [...this.bricks.values()], status: this.status, events: this.events, tick: this.tick,
-      source: this.plan.source, taskOrder: this.plan.tasks.map(t => t.id) };
+      source: this.plan.source, taskOrder: this.plan.tasks.map(t => t.id), assumptions: [...this.plan.assumptions] };
   }
 }
 
@@ -590,7 +593,11 @@ export function restoreSnapshot(value: unknown): { team: Team; prompt: string } 
   const source = s.source === undefined ? 'local' : s.source;
   if (source !== 'local' && source !== 'copilot' && source !== 'local-ai' && source !== 'github-models' && source !== 'azure' && source !== 'compatible')
     throw new Error('Saved build has an invalid source.');
-  const plan = createPlan(spec, [], source);
+  const assumptions = s.assumptions === undefined ? [] : s.assumptions;
+  if (!Array.isArray(assumptions) || assumptions.length > 256
+      || assumptions.some(text => typeof text !== 'string' || text.length > 1200))
+    throw new Error('Saved plan assumptions exceed supported limits.');
+  const plan = createPlan(spec, assumptions, source);
   if (s.taskOrder !== undefined) {
     const order = compatibleTaskOrder(plan.tasks, s.taskOrder, spec.model === 'custom');
     if (!order) throw new Error('Saved task priority order is invalid.');

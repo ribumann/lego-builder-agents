@@ -126,7 +126,7 @@ test('Windows Copilot image capability discloses GitHub, requires consent, and r
   await page.route('**/api/plan', route => {
     requests++;
     const body = route.request().postDataJSON();
-    expect(body).toEqual({ world: 'jurassic', brief: 'A tiny observatory', hollowInterior: true,
+    expect(body).toEqual({ world: 'jurassic', brief: 'A tiny observatory', sceneSize: 1000, hollowInterior: true,
       imageConsent: true, image: { mimeType: 'image/jpeg', data: original.toString('base64') } });
     const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
       design: { name: 'Image fixture', bricks: [

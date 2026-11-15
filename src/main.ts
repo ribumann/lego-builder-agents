@@ -10,6 +10,7 @@ import { elapsedText, getLanguage, languages, planningDescription, setLanguage, 
 import { createVoiceInput, type VoiceUpdate } from './voice-input';
 import { voiceLabels } from './voice-labels';
 import { createPlanningImageInput } from './planning-image-input';
+import { resolveSceneSize } from './scene-size.mjs';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -105,6 +106,16 @@ app.innerHTML = `
       <form id="brief-form" class="brief-form" tabindex="-1">
         <div class="brief-label"><label for="brief">What shall we build?</label><button type="button" id="inspire" class="text-button">Try an idea ${icon('star')}</button></div>
         <fieldset class="scene-action"><legend>Plan destination</legend><label><input type="radio" name="scene-action" value="replace" checked> Replace scene</label><label><input type="radio" name="scene-action" value="add"> Add to scene</label></fieldset>
+        <div class="scene-size">
+          <label for="scene-size">Approximate size of new build</label>
+          <select id="scene-size" aria-describedby="scene-size-help scene-size-status">
+            <option value="100">100</option><option value="500">500</option><option value="1000" selected>1,000</option>
+            <option value="2000">2,000</option><option value="3000">3,000</option><option value="5000">5,000</option>
+            <option value="8192">Max (up to 8,192)</option>
+          </select>
+          <small id="scene-size-help">AI planning only. A rough target for this build or addition, not a guarantee. Large builds may be slow.</small>
+          <small id="scene-size-status" role="status"></small>
+        </div>
         <label class="interior-option"><input id="hollow-interior" type="checkbox" aria-describedby="interior-help"><span><strong>Try a hollow interior</strong><small id="interior-help">Custom planning only. It asks for an empty space and usable opening when the design supports it; geometry remains model-generated.</small></span></label>
         <div class="brief-input" id="brief-composer">
           <button id="image-choose" class="composer-tool" type="button" aria-label="Choose image">${icon('plus')}</button>
@@ -273,6 +284,7 @@ languageSelect.addEventListener('change', () => {
   try { localStorage.setItem('bricklab-language', selected); }
   catch { notice('Could not save your language on this device.'); }
   applyLanguage();
+  updateSceneSize();
   lastEventCount = -1;
   render();
 });
@@ -321,6 +333,22 @@ const playground = mountAgentPlayground($('#agent-playground-host'), { language:
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = translate(EXAMPLES.jurassic[0]);
+function updateSceneSize() {
+  const status = $('#scene-size-status');
+  if (mode === 'local') {
+    status.textContent = translate('Offline templates do not use this target.');
+    return;
+  }
+  try {
+    const result = resolveSceneSize(brief.value, Number($<HTMLSelectElement>('#scene-size').value));
+    const prefix = result.source === 'brief' ? 'Target from brief:' : 'Target from selection:';
+    status.textContent = `${translate(prefix)} ${new Intl.NumberFormat(getLanguage()).format(result.target)} ${translate('bricks')}`;
+  } catch {
+    status.textContent = translate('Requested brick count must be between 1 and 8192.');
+  }
+}
+brief.addEventListener('input', updateSceneSize);
+$<HTMLSelectElement>('#scene-size').addEventListener('change', updateSceneSize);
 imageInput = createPlanningImageInput({
   container: $('#image-input'), chooser: $<HTMLButtonElement>('#image-choose'), privacy: $('#image-privacy'),
   target: () => hosted ? 'hosted' : mode, copilotImages: () => copilotImagesEnabled,
@@ -369,6 +397,7 @@ $('#voice-discard-pending').addEventListener('click', () => {
 $('#voice-apply').addEventListener('click', () => {
   if (!voiceTranscript.value.trim() || voiceTranscript.value.length > 1000) return;
   brief.value = voiceTranscript.value;
+  updateSceneSize();
   voicePanelOpen = false;
   refreshVoiceUI();
   brief.focus();
@@ -420,6 +449,7 @@ function preview() {
   } catch (error) { notice(`Could not create preview: ${error instanceof Error ? error.message : String(error)}`); }
 }
 function render() {
+  updateSceneSize();
   const total = team ? allBricks(team.plan).length : 0;
   const count = team?.bricks.size ?? 0;
   const percent = total ? Math.round(count / total * 100) : 0;
@@ -443,6 +473,7 @@ function render() {
   setButton('#space', planning);
   document.querySelectorAll<HTMLInputElement>('input[name="scene-action"]').forEach(input => { input.disabled = planning; });
   $<HTMLInputElement>('#hollow-interior').disabled = planning || mode === 'local';
+  $<HTMLSelectElement>('#scene-size').disabled = planning || mode === 'local';
   $('#run').innerHTML = running ? `${icon('pause')} Pause build` : `${icon('play')} ${team && count ? 'Continue build' : 'Start building'}`;
   $('#task-count').textContent = team ? `${team.completedTasks}/${team.plan.tasks.length}` : '0';
   $('#transport-note').textContent = planning ? 'One bounded planning request. No template fallback; the crew executes locally.'
@@ -651,6 +682,8 @@ async function makePlan(demo = false) {
   try {
     if (!planningBrief.trim() || planningBrief.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
+    const selectedSize = Number($<HTMLSelectElement>('#scene-size').value);
+    const planningSize = mode !== 'local' ? resolveSceneSize(planningBrief, selectedSize) : undefined;
     planning = true; render();
     const image = demo ? undefined : await imageInput?.take();
     controller.signal.throwIfAborted();
@@ -669,6 +702,7 @@ async function makePlan(demo = false) {
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
         body: JSON.stringify({ world, brief: planningBrief,
+          sceneSize: selectedSize,
           ...($<HTMLInputElement>('#hollow-interior').checked ? { hollowInterior: true } : {}),
           ...(image ? { image, imageConsent: true } : {}) }), signal: controller.signal });
       const data = await planningResponse(response);
@@ -681,6 +715,7 @@ async function makePlan(demo = false) {
       if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
       source = compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
       assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
+      assumptions.push(`${translate('Approximate planning target:')} ${planningSize!.target} ${translate('bricks')}; ${translate('Selected size:')} ${selectedSize}. ${translate('A rough target, not an exact output guarantee.')}`);
     } else {
       const parsed = parseBrief(world, planningBrief);
       spec = parsed.spec;
@@ -777,7 +812,7 @@ function switchWorld(next: World) {
 $('#brief-form').addEventListener('submit', event => { event.preventDefault(); void makePlan(); });
 $('#jurassic').addEventListener('click', () => switchWorld('jurassic'));
 $('#space').addEventListener('click', () => switchWorld('space'));
-$('#inspire').addEventListener('click', () => { brief.value = translate(EXAMPLES[world][++examples % EXAMPLES[world].length]); brief.focus(); });
+$('#inspire').addEventListener('click', () => { brief.value = translate(EXAMPLES[world][++examples % EXAMPLES[world].length]); updateSceneSize(); brief.focus(); });
 $('#demo').addEventListener('click', () => { mode = 'local'; modeChosen = true; updateMode(); brief.value = translate(EXAMPLES[world][0]); void makePlan(true); });
 $('#run').addEventListener('click', () => {
   if (!team) return;
@@ -984,6 +1019,8 @@ restore();
 render();
 function updateMode() {
   $<HTMLInputElement>('#hollow-interior').disabled = planning || mode === 'local';
+  $<HTMLSelectElement>('#scene-size').disabled = planning || mode === 'local';
+  updateSceneSize();
   imageInput?.refresh(true);
   $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'

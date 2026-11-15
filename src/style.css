@@ -148,6 +148,11 @@ h2 { font-size: 16px; font-weight: 900; margin: 0; letter-spacing: -.02em; }
 .scene-action { display: flex; flex-wrap: wrap; gap: 8px 18px; border: 0; padding: 0; margin: 0 0 10px; font-size: 12px; }
 .scene-action legend { float: left; margin-right: 14px; font-weight: 900; }
 .scene-action label { display: inline-flex; align-items: center; gap: 5px; }
+.scene-size { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin: 0 0 10px; }
+.scene-size label { font-size: 12px; font-weight: 900; }
+.scene-size select { min-height: 44px; max-width: 100%; padding: 6px 10px; border: 1px solid #bdcbd3; border-radius: 6px; background: #fff; color: var(--ink); font: inherit; }
+.scene-size small { color: #4d6170; font-size: 11px; line-height: 1.4; }
+.scene-size select:disabled { opacity: .65; cursor: not-allowed; }
 .interior-option { display: flex; align-items: flex-start; gap: 8px; max-width: 62ch; margin: 0 0 10px; cursor: pointer; }
 .interior-option input { margin-top: 3px; accent-color: var(--blue); }
 .interior-option span { display: grid; gap: 2px; }

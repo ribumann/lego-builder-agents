@@ -28,7 +28,7 @@ test('hollow preference is explicit and cutaway never changes saved geometry', a
   await page.locator('#brief').fill(brief);
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#scene-caption')).toContainText('Hollow room fixture');
-  expect(requests).toEqual([{ world: 'jurassic', brief, hollowInterior: true }]);
+  expect(requests).toEqual([{ world: 'jurassic', brief, sceneSize: 1000, hollowInterior: true }]);
   await page.locator('#run').click();
   await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 20_000 });
   const before = await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!));
