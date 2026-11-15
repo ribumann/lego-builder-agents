@@ -8,6 +8,7 @@ import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
 import { validateCustomSpec } from './src/custom-design.mjs';
 import { planningPrompt } from './planning-prompt.mjs';
+import { resolveSceneSize } from './src/scene-size.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
 import { createLocalPlanner } from './local-planner.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
@@ -211,9 +212,9 @@ const copilotArguments = prompt => ['-p', prompt, '--output-format=json', '--str
   '--available-tools=', '--disable-builtin-mcps', '--no-custom-instructions',
   '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'];
 
-function askCopilot(world, brief, signal, hollowInterior) {
+function askCopilot(world, brief, signal, hollowInterior, target) {
   const workdir = resolve(root, '.agent-home');
-  const prompt = planningPrompt(world, brief, hollowInterior);
+  const prompt = planningPrompt(world, brief, hollowInterior, target);
   let release;
   const finished = new Promise(resolvePromise => { release = resolvePromise; });
   const result = new Promise((resolvePromise, reject) => {
@@ -391,10 +392,15 @@ const server = http.createServer(async (req, res) => {
     catch (error) { return send(res, 400, { error: safePlanningError(error) }); }
     if (compatibleAI && image && !compatibleVisionEnabled)
       return send(res, 403, { error: 'Compatible AI image input requires the separate BRICKLAB_COMPATIBLE_VISION=1 opt-in.' });
-    const { world, brief, hollowInterior = false } = body;
+    const { world, brief, hollowInterior = false, sceneSize } = body;
     if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
         || typeof hollowInterior !== 'boolean')
       return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
+    let target;
+    if (sceneSize !== undefined) {
+      try { target = resolveSceneSize(brief, sceneSize).target; }
+      catch (error) { return send(res, 400, { error: error.message }); }
+    }
     if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
       return send(res, 403, { error: azureAI ? azurePlannerStatus.message
         : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
@@ -427,7 +433,7 @@ const server = http.createServer(async (req, res) => {
       if (res.destroyed || controller.signal.aborted) return;
       if (copilotAI) calls++;
       let spec;
-      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior), {
+      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior, target), {
         image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
       }), 'Local AI');
       else {
@@ -472,7 +478,7 @@ const server = http.createServer(async (req, res) => {
             }
             // A reservation that completes after cancellation must never start a late model call.
             controller.signal.throwIfAborted();
-            const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior), signal: controller.signal });
+            const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), signal: controller.signal });
             controller.signal.throwIfAborted();
             if (parsed?.model !== 'custom')
               throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
@@ -483,7 +489,7 @@ const server = http.createServer(async (req, res) => {
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else if (compatibleAI) {
           const work = (async () => {
-            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior),
+            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior, target),
               image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
             controller.signal.throwIfAborted();
             if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
@@ -500,7 +506,7 @@ const server = http.createServer(async (req, res) => {
             try {
               output = await windowsCopilotRunner.run({
                 executable: copilotExecutable,
-                args: copilotArguments(planningPrompt(world, brief, hollowInterior)),
+                args: copilotArguments(planningPrompt(world, brief, hollowInterior, target)),
                 cwd: workdir, image: body.image, imageConsent: body.imageConsent,
                 signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
               });
@@ -528,7 +534,7 @@ const server = http.createServer(async (req, res) => {
           finished = work.then(() => {}, () => {});
           spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
         } else {
-          const invocation = askCopilot(world, brief, controller.signal, hollowInterior);
+          const invocation = askCopilot(world, brief, controller.signal, hollowInterior, target);
           finished = invocation.finished;
           spec = await invocation.result;
         }

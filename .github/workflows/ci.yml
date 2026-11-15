@@ -19,6 +19,16 @@ jobs:
       - run: npm run check
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
+      - name: Record build provenance
+        run: |
+          node -e "const fs=require('fs'), cp=require('child_process'); fs.writeFileSync('dist-build-metadata.json', JSON.stringify({checkout:cp.execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(), node:process.version, vite:require('vite/package.json').version}, null, 2)+'\n')"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: bricklab-dist-${{ github.sha }}
+          path: |
+            dist/
+            dist-build-metadata.json
+          retention-days: 7
       - uses: actions/upload-artifact@v4
         if: failure()
         with:
