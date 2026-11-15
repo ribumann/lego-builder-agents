@@ -1,5 +1,6 @@
 import json
 from pathlib import Path
+import random
 import sys
 import subprocess
 import tempfile
@@ -82,6 +83,18 @@ class PackageAzureReleaseTests(unittest.TestCase):
         with self.assertRaisesRegex(PackageError, "Refusing to overwrite"):
             build_package(self.root, "b" * 40, output, verify_npm=False)
         self.assertEqual(output.read_bytes(), existing_contents)
+
+    def test_archive_larger_than_former_25_mb_guard_succeeds(self):
+        asset = self.root / "dist" / "assets" / "large.bin"
+        asset.write_bytes(random.Random(42).randbytes(26_000_000))
+        output = Path(self.temporary.name) / "large-release.zip"
+
+        result = build_package(self.root, "b" * 40, output, verify_npm=False)
+
+        self.assertGreater(result["archiveBytes"], 25_000_000)
+        self.assertEqual(result["archiveBytes"], output.stat().st_size)
+        with zipfile.ZipFile(output) as archive:
+            self.assertIn("dist/assets/large.bin", archive.namelist())
 
     def test_output_must_be_outside_release_source(self):
         with self.assertRaisesRegex(PackageError, "outside the repository"):

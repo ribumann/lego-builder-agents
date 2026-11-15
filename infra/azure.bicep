@@ -66,10 +66,6 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
           value: '0'
         }
         {
-          name: 'BRICKLAB_AZURE_CONTENT_FILTER_POLICY'
-          value: contentFilter.name
-        }
-        {
           name: 'BRICKLAB_AZURE_DAILY_CALLS'
           value: string(azureDailyCalls)
         }

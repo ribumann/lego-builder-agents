@@ -1,7 +1,7 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { createHmac, generateKeyPairSync } from 'node:crypto';
+import { generateKeyPairSync } from 'node:crypto';
 import { SignJWT } from 'jose';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
@@ -111,7 +111,7 @@ import { basename, dirname } from 'node:path';
 import { Readable } from 'node:stream';
 import { createPublicKey } from 'node:crypto';
 import { createPlanningQuota } from ${JSON.stringify(new URL('../planning-quota.mjs', import.meta.url).href)};
-import { createAzureBudgetGate, createAzurePrincipalKey } from ${JSON.stringify(new URL('../azure-budget.mjs', import.meta.url).href)};
+import { createAzureUsageGate } from ${JSON.stringify(new URL('../azure-usage.mjs', import.meta.url).href)};
 import { createAzureAccessTokenVerifier } from ${JSON.stringify(new URL('../azure-auth.mjs', import.meta.url).href)};
 import { createAzurePlanner } from ${JSON.stringify(new URL('../azure-planner.mjs', import.meta.url).href)};
 import { createWindowsCopilotJobRunner } from ${JSON.stringify(new URL('../src/windows-copilot-job-runner.mjs', import.meta.url).href)};
@@ -148,7 +148,7 @@ const azurePlans = [];
 const jobEvents = [];
 const jobs = [];
 let budgetState = process.env.TEST_BUDGET_STATE
-  ? JSON.parse(process.env.TEST_BUDGET_STATE) : { day: '2026-11-14', reservedMicros: 0, calls: 0, clientCalls: {} };
+  ? JSON.parse(process.env.TEST_BUDGET_STATE) : { day: '2026-11-14', count: 0 };
 let budgetVersion = 0;
 let budgetReads = 0;
 let budgetConflicts = 0;
@@ -205,17 +205,9 @@ globalThis.azureBoundaries = {
   },
   createAzureUsageGate(config) {
     azureConfig.push({ type: 'usage', ...config });
-    return { reserve: details => boundary('reserve', reservations, details) };
-  },
-  createAzureBudgetGate(config) {
-    azureConfig.push({ type: 'budget', account: config.account, container: config.container,
-      endpoint: config.endpoint, deployment: config.deployment, resourceId: config.resourceId,
-      contentFilterPolicy: config.contentFilterPolicy, dailyCallLimit: config.dailyCallLimit,
-      dailyClientLimit: config.dailyClientLimit, enforceDailyCallQuota: config.enforceDailyCallQuota,
-      requireClientKey: config.requireClientKey });
     if (process.env.TEST_REAL_AZURE_BUDGET === '1') {
-      const gate = createAzureBudgetGate({ ...config, blobClient: budgetBlob,
-        now: () => new Date('2026-11-14T12:00:00Z'), verifyPrices: async () => {}, verifyConfig: async () => {} });
+      const gate = createAzureUsageGate({ ...config, blobClient: budgetBlob,
+        now: () => new Date('2026-11-14T12:00:00Z') });
       return { status: () => gate.status(), reserve(details) {
         azureEvents.push({ type: 'reserve', ...details });
         const work = gate.reserve(details);
@@ -223,7 +215,7 @@ globalThis.azureBoundaries = {
         return work;
       } };
     }
-    return { status: async () => ({ available: false, remaining: null, limit: config.dailyCallLimit }),
+    return { status: async () => ({ available: false, remaining: null, limit: config.limit }),
       reserve: details => boundary('reserve', reservations, details) };
   },
   createAzureAccessTokenVerifier(config) {
@@ -261,7 +253,7 @@ registerHooks({
     if (context.parentURL?.endsWith('/server.mjs') && specifier === './src/windows-copilot-job-runner.mjs')
       return { url: 'fixture:windows-job', shortCircuit: true };
     if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs',
-      './azure-budget.mjs', './azure-auth.mjs', './planning-quota.mjs'].includes(specifier))
+      './azure-auth.mjs', './planning-quota.mjs'].includes(specifier))
       return { url: 'fixture:' + specifier, shortCircuit: true };
     return next(specifier, context);
   },
@@ -277,9 +269,7 @@ registerHooks({
       'export const createAzureAccessTokenVerifier = config => globalThis.azureBoundaries.createAzureAccessTokenVerifier(config);' };
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
-      'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' +
-      'export const createAzureBudgetGate = config => globalThis.azureBoundaries.createAzureBudgetGate(config);' +
-      'export const createAzurePrincipalKey = options => globalThis.fixturePrincipalKey(options);' };
+      'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' };
     return next(url, context);
   }
 });
@@ -287,7 +277,6 @@ registerHooks({
 // hosted paid-activation guard is never bypassed or changed.
 globalThis.fixturePlanningQuota = options => createPlanningQuota(process.env.TEST_PUBLIC_QUOTA === '1'
   ? { ...options, hosted: true } : options);
-globalThis.fixturePrincipalKey = createAzurePrincipalKey;
 const streamingResponses = new Set();
 let heartbeatWrites = 0;
 const actualWrite = http.ServerResponse.prototype.write;
@@ -541,16 +530,15 @@ const defaultCapacity = { BRICKLAB_PLANNING_CONCURRENCY: undefined, BRICKLAB_PRO
 
 test('daily quota policy is public-only, deployment-configurable and rejects unsafe public settings', () => {
   assert.deepEqual(createPlanningQuota({ hosted: true, env: {} }),
-    { enabled: true, dailyCallLimit: 50, dailyClientLimit: 3 });
+    { enabled: true, dailyCallLimit: 50, dailyClientLimit: null });
   assert.deepEqual(createPlanningQuota({ hosted: true, env: {
     BRICKLAB_AZURE_DAILY_CALLS: '7', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '2',
-  } }), { enabled: true, dailyCallLimit: 7, dailyClientLimit: 2 });
+  } }), { enabled: true, dailyCallLimit: 7, dailyClientLimit: null });
   for (const env of [
     { BRICKLAB_AZURE_DAILY_CALLS: '0' }, { BRICKLAB_AZURE_DAILY_CALLS: '101' },
     { BRICKLAB_AZURE_DAILY_CALLS: '2.5' }, { BRICKLAB_AZURE_DAILY_CALLS: '' },
-    { BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '0' }, { BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '4' },
   ]) {
-    assert.throws(() => createPlanningQuota({ hosted: true, env }), /Public Azure daily quotas/);
+    assert.throws(() => createPlanningQuota({ hosted: true, env }), /Public Azure daily quota/);
     assert.deepEqual(createPlanningQuota({ hosted: false, env: { ...env, BRICKLAB_CODESPACES: '1' } }),
       { enabled: false, dailyCallLimit: null, dailyClientLimit: null });
   }
@@ -988,9 +976,7 @@ test('anonymous hosted route uses managed identity configuration with twenty iso
   }
   assert.equal((await server.azurePost({ Authorization: '' })).status, 429);
   let state = await server.command({});
-  assert.equal(state.budgetState.calls, 20, 'Capacity rejection does not consume an attempt');
-  assert.equal(state.budgetState.reservedMicros, 11_000_000);
-  assert.deepEqual(state.budgetState.clientCalls, {}, 'Anonymous callers are not represented as verified identities');
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 20 }, 'Count-only state; capacity rejection consumes no call');
   status = await (await server.get()).json() as any;
   assert.equal(status.planningCapacity.active, 20, 'All twenty plans overlap before any is completed');
   assert.equal(status.publicAllowance.remaining, 30);
@@ -1016,8 +1002,7 @@ test('anonymous hosted requests share an atomic fifty-call boundary and failed w
   const responses = await Promise.all(pending);
   assert.deepEqual(responses.map(response => response.status).sort(), [429, 502]);
   const state = await server.command({});
-  assert.equal(state.budgetState.calls, 50);
-  assert.equal(state.budgetState.reservedMicros, 27_500_000);
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 50 }, 'Legacy count is preserved without a dollar ledger');
   assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 1);
   const status = await (await server.get()).json() as any;
   assert.deepEqual(status.publicAllowance, { available: true, day: '2026-11-14', used: 50, limit: 50, remaining: 0 });
@@ -1043,7 +1028,7 @@ test('anonymous hosted deadline aborts upstream, retains its slot through cleanu
   await server.command({ action: 'azure-complete', index: 1, spec: lifecycleSpec });
   assert.equal((await second).status, 200);
   state = await server.command({});
-  assert.equal(state.budgetState.calls, 2);
+  assert.equal(state.budgetState.count, 2);
 });
 
 test('anonymous hosted route fails closed when global durable reservation is unavailable', async t => {
@@ -1052,6 +1037,28 @@ test('anonymous hosted route fails closed when global durable reservation is una
   assert.deepEqual(status.publicAllowance, { available: false, limit: 50, remaining: null });
   assert.equal((await server.azurePost({ Authorization: '' })).status, 503);
   assert.deepEqual((await server.command({})).azureEvents.map((event: any) => event.type), ['reserve']);
+});
+
+test('hosted Azure image and text calls overlap after consent validation with one shared counter', async t => {
+  const server = await startLifecycleServer(t, 'linux', anonymousHostedEnv);
+  const status = await (await server.get()).json() as any;
+  assert.equal(status.azureImages, true);
+  const payload = { world: 'space', brief: 'A fixture lighthouse', image: consentedTestImage };
+  assert.equal((await server.azurePost({ Authorization: '' }, JSON.stringify(payload))).status, 400);
+  assert.equal((await server.command({})).budgetState.count, 0);
+  const first = server.azurePost({ Authorization: '' }, JSON.stringify({ ...payload, imageConsent: true }));
+  await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+  const second = server.azurePost({ Authorization: '' });
+  const state = await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 2 });
+  const events = state.azureEvents.filter((event: any) => event.type === 'plan');
+  assert.deepEqual(events[0].image, consentedTestImage);
+  assert.equal(events[0].imageConsent, true);
+  assert.equal(events[1].image, undefined);
+  await server.command({ action: 'azure-complete', index: 1, spec: lifecycleSpec });
+  assert.equal((await second).status, 200);
+  await server.command({ action: 'azure-complete', index: 0, spec: lifecycleSpec });
+  assert.equal((await first).status, 200);
 });
 
 async function startSignedBudgetServer(t: TestContext, env: NodeJS.ProcessEnv = {}) {
@@ -1072,9 +1079,7 @@ async function startSignedBudgetServer(t: TestContext, env: NodeJS.ProcessEnv = 
     .setAudience(azureFixtureEnv.BRICKLAB_ENTRA_API_CLIENT_ID)
     .setIssuedAt().setExpirationTime('5m').sign(privateKey);
   const principal = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
-  const key = (index: number) => createHmac('sha256', 'fixture principal hashing secret longer than thirty-two bytes')
-    .update(`${azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID}:${principal(index)}`).digest('hex');
-  return { ...server, token, principal, key };
+  return { ...server, token, principal };
 }
 
 test('signed distinct principals overlap on the public quota policy route with isolated abort and committed CAS reservations', { timeout: 15_000 }, async t => {
@@ -1087,9 +1092,7 @@ test('signed distinct principals overlap on the public quota policy route with i
     JSON.stringify({ world: 'space', brief: 'Second signed plan' }));
   let state = await server.command({ action: 'azure-started', type: 'plan', count: 2 });
   assert.ok(state.budgetConflicts >= 1, 'Both reservations read the same ETag and the loser retries CAS');
-  assert.deepEqual(state.budgetState.clientCalls, { [server.key(1)]: 1, [server.key(2)]: 1 });
-  assert.equal(state.budgetState.calls, 2);
-  assert.equal(state.budgetState.reservedMicros, 1_100_000);
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 2 });
   const denied = await server.azurePost({ Authorization: '' }, 'not JSON');
   assert.equal(denied.status, 401, 'Auth is checked before capacity and body while both slots are active');
   const wrongRole = await server.token(server.principal(3), { roles: [] });
@@ -1107,63 +1110,51 @@ test('signed distinct principals overlap on the public quota policy route with i
   assert.equal(state.azureEvents.filter((event: any) => event.type === 'reserve').length, 2, 'Auth failures reserve nothing');
   const other = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Independent signed result' } };
   await server.command({ action: 'azure-complete', index: 1, spec: other });
-  assert.deepEqual(await (await second).json(), { spec: other, source: 'azure' });
+  assert.deepEqual(await (await second).json(), { spec: other, calls: 2, limit: 5, source: 'azure' });
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 1, 'Abort does not release unsettled work');
   await server.command({ action: 'azure-complete', index: 0, spec: lifecycleSpec });
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
   state = await server.command({});
-  assert.equal(state.budgetState.calls, 2, 'Aborted/late calls are never refunded');
-  assert.equal(state.budgetState.reservedMicros, 1_100_000);
+  assert.equal(state.budgetState.count, 2, 'Cancelled calls cannot bypass the shared counter');
 });
 
-test('signed same-principal burst obeys atomic public per-principal quota without blocking another principal', { timeout: 15_000 }, async t => {
+test('signed callers share only the global count, with no per-principal quota', { timeout: 15_000 }, async t => {
   const server = await startSignedBudgetServer(t, {
     BRICKLAB_PROVIDER_CONCURRENCY: '4', TEST_BUDGET_SYNCHRONIZED_READS: '4',
     BRICKLAB_AZURE_DAILY_CALLS: '12',
   });
   const token = await server.token(server.principal(1));
   const pending = Array.from({ length: 4 }, () => server.azurePost({ Authorization: `Bearer ${token}` }));
-  let state = await server.command({ action: 'azure-started', type: 'plan', count: 3 });
-  assert.equal(state.budgetState.calls, 3);
-  assert.equal(state.budgetState.clientCalls[server.key(1)], 3);
+  let state = await server.command({ action: 'azure-started', type: 'plan', count: 4 });
+  assert.equal(state.budgetState.count, 4);
   assert.ok(state.budgetConflicts >= 3);
-  for (let index = 0; index < 3; index++) await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
+  for (let index = 0; index < 4; index++) await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
   const responses = await Promise.all(pending);
-  assert.deepEqual(responses.map(response => response.status).sort(), [200, 200, 200, 429]);
-  const error = responses.find(response => response.status === 429)!;
-  assert.match((await error.json() as any).error, /This client.*daily planning limit/);
+  assert.deepEqual(responses.map(response => response.status), [200, 200, 200, 200]);
   const otherToken = await server.token(server.principal(2));
   const other = server.azurePost({ Authorization: `Bearer ${otherToken}` });
-  await server.command({ action: 'azure-started', type: 'plan', count: 4 });
-  await server.command({ action: 'azure-complete', index: 3, spec: lifecycleSpec });
+  await server.command({ action: 'azure-started', type: 'plan', count: 5 });
+  await server.command({ action: 'azure-complete', index: 4, spec: lifecycleSpec });
   assert.equal((await other).status, 200);
   state = await server.command({});
-  assert.equal(state.budgetState.clientCalls[server.key(2)], 1);
+  assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 5 });
 });
 
-test('signed concurrent public requests respect configured global, principal and dollar CAS boundaries before inference', { timeout: 20_000 }, async t => {
-  for (const mode of ['calls', 'client', 'dollars']) await t.test(mode, async t => {
+test('signed concurrent requests respect only the global call CAS boundary before inference', { timeout: 20_000 }, async t => {
     const server = await startSignedBudgetServer(t, {
       TEST_BUDGET_SYNCHRONIZED_READS: '2',
-      BRICKLAB_AZURE_DAILY_CALLS: mode === 'calls' ? '1' : '100',
-      BRICKLAB_AZURE_DAILY_CLIENT_CALLS: mode === 'client' ? '1' : '3',
-      ...(mode === 'dollars' ? { TEST_BUDGET_STATE: JSON.stringify({
-        day: '2026-11-14', reservedMicros: 49_450_000, calls: 89, clientCalls: {},
-      }) } : {}),
+      BRICKLAB_AZURE_DAILY_CALLS: '1',
     });
-    const tokens = await Promise.all([1, mode === 'client' ? 1 : 2].map(index => server.token(server.principal(index))));
+    const tokens = await Promise.all([1, 2].map(index => server.token(server.principal(index))));
     const pending = tokens.map(token => server.azurePost({ Authorization: `Bearer ${token}` }));
     const state = await server.command({ action: 'azure-started', type: 'plan', count: 1 });
     assert.ok(state.budgetConflicts >= 1);
-    assert.equal(state.budgetState.calls, mode === 'dollars' ? 90 : 1);
-    assert.equal(state.budgetState.reservedMicros, mode === 'dollars' ? 50_000_000 : 550_000);
+    assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 1 });
     await server.command({ action: 'azure-complete', spec: lifecycleSpec });
     const replies = await Promise.all(pending);
     assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 429]);
-    assert.match((await replies.find(reply => reply.status === 429)!.json() as any).error,
-      mode === 'calls' ? /daily planning request limit/ : mode === 'client' ? /This client.*daily planning limit/ : /daily inference budget/);
+    assert.match((await replies.find(reply => reply.status === 429)!.json() as any).error, /daily planning limit/);
     assert.equal((await server.command({})).azureEvents.filter((event: any) => event.type === 'plan').length, 1);
-  });
 });
 
 test('private Azure routes do not apply public daily quota settings or contact quota storage', { timeout: 15_000 }, async t => {
@@ -1202,7 +1193,7 @@ test('private Codespace route has no daily request quota and keeps independent a
   assert.equal((await (await server.get()).json() as any).calls, 2);
 });
 
-test('private Azure spend-budget opt-in retains CAS dollar protection but no public call or client quota', { timeout: 15_000 }, async t => {
+test('obsolete private spend-budget settings add no monetary or daily gate', { timeout: 15_000 }, async t => {
   const server = await startSignedBudgetServer(t, {
     TEST_PUBLIC_QUOTA: '0', BRICKLAB_AZURE_DAILY_CALLS: '1', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '1',
     TEST_BUDGET_STATE: JSON.stringify({ day: '2026-11-14', reservedMicros: 48_900_000, calls: 12, clientCalls: {} }),
@@ -1214,14 +1205,9 @@ test('private Azure spend-budget opt-in retains CAS dollar protection but no pub
     await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
     assert.equal((await pending).status, 200);
   }
-  const denied = await server.azurePost({ Authorization: `Bearer ${token}` });
-  assert.equal(denied.status, 429);
-  assert.match((await denied.json() as any).error, /daily inference budget/);
   const state = await server.command({});
-  assert.equal(state.budgetState.calls, 14, 'Default 12-call cap is not enforced on private spend-budget mode');
-  assert.deepEqual(state.budgetState.clientCalls, {});
-  assert.equal(state.budgetState.reservedMicros, 50_000_000);
-  assert.equal(state.azureConfig[1].enforceDailyCallQuota, false);
+  assert.equal(state.budgetState.calls, 12, 'Private routes do not contact obsolete monetary storage');
+  assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner']);
 });
 
 test('300-second deadline actually closes Azure and compatible mock HTTP transports without aborting another request', { timeout: 25_000 }, async t => {
@@ -1286,7 +1272,7 @@ test('300-second deadline actually closes Azure and compatible mock HTTP transpo
     assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
     if (adapter.startsWith('azure')) {
       const state = await server.command({});
-      assert.equal(state.budgetState.calls, 2);
+      if (adapter === 'azure-public') assert.equal(state.budgetState.count, 2);
       assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted),
         [true, false]);
     }
@@ -1374,7 +1360,7 @@ test('Azure reserves once before one provider call, shares the coordinator lock,
   const status = await (await get()).json() as any;
   assert.equal(status.azurePlanner.enabled, true);
   assert.equal(status.azurePlanner.state, 'configured');
-  assert.match(status.azurePlanner.message, /not verified/);
+  assert.match(status.azurePlanner.message, /managed identity.*Entra sign-in/);
   assert.deepEqual(await (await get('/api/azure-auth-config')).json(), {
     tenantId: azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID,
     apiClientId: azureFixtureEnv.BRICKLAB_ENTRA_API_CLIENT_ID,
@@ -1385,8 +1371,7 @@ test('Azure reserves once before one provider call, shares the coordinator lock,
   let state = await command({ action: 'inspect' });
   assert.deepEqual(state.azureEvents, [], 'Status never reserves quota or sends a prompt');
   assert.deepEqual(state.azureConfig, [
-    { type: 'planner', endpoint: azureFixtureEnv.AZURE_OPENAI_ENDPOINT, deployment: azureFixtureEnv.AZURE_OPENAI_DEPLOYMENT,
-      contentFilterPolicy: azureFixtureEnv.BRICKLAB_AZURE_CONTENT_FILTER_POLICY },
+    { type: 'planner', endpoint: azureFixtureEnv.AZURE_OPENAI_ENDPOINT, deployment: azureFixtureEnv.AZURE_OPENAI_DEPLOYMENT },
     { type: 'usage', account: azureFixtureEnv.AZURE_STORAGE_ACCOUNT, container: azureFixtureEnv.BRICKLAB_AZURE_USAGE_CONTAINER, limit: 5 },
   ]);
   const brief = 'A café tower.\n"Quoted" details remain data.';
@@ -1429,7 +1414,7 @@ test('Azure auth, host, origin and input failures never reserve quota or call th
     [{}, JSON.stringify({ world: 'space', brief: '' }), 400],
     [{}, JSON.stringify({ world: 'castle', brief: 'test' }), 400],
     [{}, JSON.stringify({ world: 'space', brief: 'x'.repeat(1001) }), 400],
-    [{}, JSON.stringify({ world: 'space', brief: 'A sculpture', image: consentedTestImage, imageConsent: true }), 400],
+    [{}, JSON.stringify({ world: 'space', brief: 'A sculpture', image: consentedTestImage, imageConsent: false }), 400],
     [{}, JSON.stringify({ image: consentedTestImage, imageConsent: true }), 400],
     [{}, '{"world":"space","image":', 400],
     [{}, 'x'.repeat(4097), 413],
@@ -1440,26 +1425,6 @@ test('Azure auth, host, origin and input failures never reserve quota or call th
     await response.json();
   }
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents, []);
-});
-
-test('Azure budget fairness is keyed to the verified Entra principal, not forwarded IP', { timeout: 10_000 }, async t => {
-  const secret = 'fixture-only rate limit secret longer than thirty-two bytes';
-  const { azurePost, command } = await startLifecycleServer(t, 'linux', {
-    ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1',
-    BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
-    BRICKLAB_AZURE_CLIENT_HASH_KEY: secret,
-  });
-  const pending = azurePost({ 'X-Forwarded-For': '198.51.100.9, 203.0.113.7' });
-  await command({ action: 'azure-started', type: 'reserve', count: 1 });
-  const state = await command({ action: 'inspect' });
-  const expectedKey = createHmac('sha256', secret)
-    .update(`${azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID}:${'44444444-4444-4444-8444-444444444444'}`).digest('hex');
-  assert.equal(state.azureEvents[0].clientKey, expectedKey);
-  assert.notEqual(state.azureEvents[0].clientKey, '203.0.113.7');
-  await command({ action: 'azure-reserve' });
-  await command({ action: 'azure-started', type: 'plan', count: 1 });
-  await command({ action: 'azure-complete', spec: lifecycleSpec });
-  assert.equal((await pending).status, 200);
 });
 
 test('Azure quota rejection fails closed before the model and never retries a reservation', { timeout: 10_000 }, async t => {
@@ -1475,43 +1440,6 @@ test('Azure quota rejection fails closed before the model and never retries a re
     assert.equal(body.error.includes('private'), false);
   }
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents.map((event: any) => event.type), ['reserve', 'reserve']);
-});
-
-test('Azure monetary budget is reserved before inference and fails closed without quota fallback', { timeout: 10_000 }, async t => {
-  const { azurePost, command } = await startLifecycleServer(t, 'linux', {
-    ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
-    BRICKLAB_AZURE_CLIENT_HASH_KEY: 'fixture-only rate limit secret longer than thirty-two bytes',
-  });
-  let state = await command({ action: 'inspect' });
-  assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner', 'budget']);
-  assert.equal(state.azureConfig[1].resourceId, azureFixtureEnv.AZURE_OPENAI_RESOURCE_ID);
-  const failures = [
-    ['BUDGET_EXHAUSTED', 429, /daily inference budget is exhausted/],
-    ['BUDGET_WINDOW_CLOSED', 503, /UTC day boundary/],
-    ['BUDGET_UNAVAILABLE', 503, /budget or pricing could not be verified/],
-    ['unexpected', 503, /budget or pricing could not be verified/],
-  ] as const;
-  for (const [index, [code, status, message]] of failures.entries()) {
-    const stream = index === 2;
-    const pending = azurePost(stream ? ndjson : {});
-    const streamResponse = stream ? await pending : null;
-    await command({ action: 'azure-started', type: 'reserve', count: index + 1 });
-    await command({ action: 'azure-refuse', index, code, error: 'private details' });
-    const response = streamResponse ?? await pending;
-    assert.equal(response.status, stream ? 200 : status);
-    const body = stream ? streamEvents(await response.text()).at(-1) : await response.json() as { error: string };
-    assert.match(body.error, message);
-    assert.doesNotMatch(body.error, /private details/);
-  }
-  const pending = azurePost();
-  await command({ action: 'azure-started', type: 'reserve', count: 5 });
-  await command({ action: 'azure-reserve', index: 4, usage: { reservedMicros: 550000, dailyLimitMicros: 50000000 } });
-  await command({ action: 'azure-started', type: 'plan', count: 1 });
-  await command({ action: 'azure-complete', spec: lifecycleSpec });
-  const response = await pending;
-  assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'azure' });
-  state = await command({ action: 'inspect' });
-  assert.deepEqual(state.azureEvents.map((event: any) => event.type), ['reserve', 'reserve', 'reserve', 'reserve', 'reserve', 'plan']);
 });
 
 test('Azure validation and model failures consume their reservation with no retry or refund', { timeout: 10_000 }, async t => {
@@ -1657,10 +1585,8 @@ test('hosted paid planning defaults off and unsafe/incomplete public configurati
       'https://lab.example.org:8443', 'https://user@lab.example.org', 'https://lab.example.org?x=1',
       'https://127.0.0.1', 'https://localhost', 'https://LAB.example.org', 'https://lab.example.org.']
       .map((origin): [NodeJS.ProcessEnv, string[]] => [{ BRICKLAB_HOSTED: '1', BRICKLAB_HOSTED_ORIGIN: origin }, ['--production']]),
-    [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
-      BRICKLAB_AZURE_CONTENT_FILTER_POLICY: '' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget', AZURE_OPENAI_RESOURCE_ID: '' }, ['--production']],
+    [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1', BRICKLAB_AZURE_USAGE_CONTAINER: '',
+      BRICKLAB_AZURE_BUDGET_CONTAINER: '' }, ['--production']],
     [{ ...azureFixtureEnv }, []],
     [{ ...azureFixtureEnv, AZURE_OPENAI_ENDPOINT: 'http://localhost' }, ['--production']],
     [{ ...azureFixtureEnv, AZURE_OPENAI_DEPLOYMENT: '' }, ['--production']],

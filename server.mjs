@@ -16,7 +16,6 @@ import { createPlanningQuota } from './planning-quota.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureAccessTokenVerifier, getAzureAuthConfig } from './azure-auth.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
-import { createAzureBudgetGate, createAzurePrincipalKey } from './azure-budget.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
 import { MAX_IMAGE_BYTES, validatePlanningImage } from './planning-image.mjs';
 import { createWindowsCopilotJobRunner } from './src/windows-copilot-job-runner.mjs';
@@ -51,7 +50,6 @@ const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COM
     vision: compatibleVisionEnabled }
   : {});
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
-const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
 const planningQuota = createPlanningQuota({ hosted });
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
 const azureAuthConfig = azureEnabled && !hosted ? getAzureAuthConfig() : null;
@@ -59,29 +57,16 @@ const verifyAzureAccessToken = azureAuthConfig
   ? createAzureAccessTokenVerifier(azureAuthConfig) : null;
 const planAzure = azureEnabled ? createAzurePlanner({
   endpoint: process.env.AZURE_OPENAI_ENDPOINT, deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
-  contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
 }) : null;
-const azureUsage = azureEnabled && planningQuota.enabled && !azureMonetaryBudget ? createAzureUsageGate({
+const azureUsage = azureEnabled && planningQuota.enabled ? createAzureUsageGate({
   account: process.env.AZURE_STORAGE_ACCOUNT,
-  container: process.env.BRICKLAB_AZURE_USAGE_CONTAINER,
+  container: process.env.BRICKLAB_AZURE_BUDGET_CONTAINER || process.env.BRICKLAB_AZURE_USAGE_CONTAINER,
+  ...(process.env.BRICKLAB_AZURE_BUDGET_CONTAINER ? { blobName: 'daily-budget.json' } : {}),
   limit: planningQuota.dailyCallLimit,
-}) : null;
-const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate({
-  account: process.env.AZURE_STORAGE_ACCOUNT,
-  container: process.env.BRICKLAB_AZURE_BUDGET_CONTAINER,
-  endpoint: process.env.AZURE_OPENAI_ENDPOINT,
-  deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
-  resourceId: process.env.AZURE_OPENAI_RESOURCE_ID,
-  contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
-  ...(planningQuota.enabled ? { dailyCallLimit: planningQuota.dailyCallLimit,
-    dailyClientLimit: planningQuota.dailyClientLimit } : {}),
-  enforceDailyCallQuota: planningQuota.enabled,
-  clientHashSecret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
-  requireClientKey: planningQuota.enabled && !hosted,
 }) : null;
 const azurePlannerStatus = azureEnabled
   ? { enabled: true, state: 'configured', authentication: hosted ? 'anonymous' : 'entra',
-    message: `Azure planning is configured, not verified, and uses the server managed identity.${hosted ? ' No visitor sign-in is required.' : ' Private Azure planning requires Entra sign-in.'} ${azureMonetaryBudget ? 'Explicit requests reserve the estimated-spend budget before inference; no refunds.' : 'No application daily request quota applies on this private server.'} Only an explicit planning request sends a brief. No retries.` }
+    message: `Azure planning uses the server managed identity.${hosted ? ' No visitor sign-in is required. Shared daily request limits apply.' : ' Private Azure planning requires Entra sign-in.'} Only an explicit planning request sends a brief or consented image. No retries.` }
   : { enabled: false, state: 'off', message: hosted
     ? 'Azure planning is off; only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
@@ -156,15 +141,6 @@ const sameSecret = (value, expected) => typeof value === 'string'
   && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 const sameToken = token => sameSecret(token, sessionKey);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-
-function azureClientKey(principal) {
-  try {
-    return createAzurePrincipalKey({ secret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
-      tenantId: principal.tenantId, objectId: principal.objectId });
-  } catch {
-    return null;
-  }
-}
 
 async function readPlanningBody(req) {
   const declared = req.headers['content-length'];
@@ -402,7 +378,8 @@ const server = http.createServer(async (req, res) => {
         azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
         planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
         planningQuota: hosted ? { ...planningQuota, dailyClientLimit: null } : planningQuota,
-        ...(hosted && azureBudget ? { publicAllowance: await azureBudget.status() } : {}),
+        ...(hosted && azureUsage ? { publicAllowance: await azureUsage.status() } : {}),
+        azureImages: azureEnabled,
         copilotImages: copilotImagesEnabled && !planningQuarantined });
     }
     if (req.method === 'GET' && url.pathname === '/api/azure-auth-config') {
@@ -427,10 +404,9 @@ const server = http.createServer(async (req, res) => {
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
     if (azureAI && !azureEnabled) return send(res, 403, { error: azurePlannerStatus.message });
-    let azurePrincipal;
     if (azureAI && !hosted) {
       if (!verifyAzureAccessToken) return send(res, 503, { error: 'Azure sign-in is not configured; no model request was sent.' });
-      try { azurePrincipal = await verifyAzureAccessToken(req.headers.authorization); }
+      try { await verifyAzureAccessToken(req.headers.authorization); }
       catch (error) {
         const statusCode = error?.statusCode === 403 ? 403 : 401;
         if (statusCode === 401)
@@ -462,10 +438,8 @@ const server = http.createServer(async (req, res) => {
         return send(res, 400, { error: 'Could not read the planning request.' });
       }
       const imageRequested = Object.hasOwn(body, 'image') || body.imageConsent === true;
-      if (hosted && imageRequested)
+      if (hosted && imageRequested && !azureAI)
         return send(res, 403, { error: 'Image planning is unavailable in hosted mode.' });
-      if (azureAI && imageRequested)
-        return send(res, 400, { error: 'Image input is not supported by Azure planning.' });
       let image;
       try { image = validatePlanningImage(body.image, body.imageConsent); }
       catch (error) { return send(res, 400, { error: safePlanningError(error) }); }
@@ -484,9 +458,6 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, { error: azureAI ? azurePlannerStatus.message
           : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
-      const azureClient = azureAI && !hosted && planningQuota.enabled && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
-      if (azureAI && !hosted && planningQuota.enabled && azureMonetaryBudget && !azureClient)
-        return send(res, 503, { error: 'Azure planning rate limits could not be verified; no model request was sent.' });
       if (copilotAI && image && !copilotImagesEnabled)
         return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
       if (copilotAI && process.platform === 'win32' && !windowsCopilotRunner)
@@ -545,25 +516,11 @@ const server = http.createServer(async (req, res) => {
             const work = (async () => {
               controller.signal.throwIfAborted();
               try {
-                if (azureMonetaryBudget || planningQuota.enabled)
-                  azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({
-                    signal: controller.signal, ...(azureClient ? { clientKey: azureClient } : {}),
-                  });
+                if (planningQuota.enabled)
+                  azureReservation = await azureUsage.reserve({ signal: controller.signal });
               }
               catch (error) {
                 controller.signal.throwIfAborted();
-                if (azureMonetaryBudget) {
-                  const exhausted = error?.code === 'BUDGET_EXHAUSTED';
-                  const requestLimit = error?.code === 'BUDGET_CALL_LIMIT';
-                  const clientLimit = error?.code === 'BUDGET_CLIENT_LIMIT';
-                  const windowClosed = error?.code === 'BUDGET_WINDOW_CLOSED';
-                  throw Object.assign(new Error(exhausted ? 'The Azure daily inference budget is exhausted.'
-                    : requestLimit ? 'The Azure daily planning request limit is exhausted.'
-                    : clientLimit ? 'This client has reached the Azure daily planning limit.'
-                    : windowClosed ? 'Azure planning is unavailable near the UTC day boundary.'
-                    : 'Azure inference budget or pricing could not be verified; no model request was sent.'),
-                  { statusCode: exhausted || requestLimit || clientLimit ? 429 : 503 });
-                }
                 const exhausted = error?.message === 'Azure daily planning limit reached.';
                 throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
                   : 'Azure planning usage could not be reserved; no model request was sent.'),
@@ -571,7 +528,8 @@ const server = http.createServer(async (req, res) => {
               }
               // A reservation that completes after cancellation must never start a late model call.
               controller.signal.throwIfAborted();
-              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), signal: controller.signal });
+              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target),
+                image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
               controller.signal.throwIfAborted();
               if (parsed?.model !== 'custom')
                 throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
@@ -636,8 +594,7 @@ const server = http.createServer(async (req, res) => {
         }
         controller.signal.throwIfAborted();
         if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-        respond(200, { spec, ...(hosted && azureAI ? { calls: azureReservation.calls, limit: azureReservation.dailyCallLimit } : {}),
-        ...((azureAI && (azureMonetaryBudget || !planningQuota.enabled)) || compatibleAI ? {}
+        respond(200, { spec, ...((azureAI && !planningQuota.enabled) || compatibleAI ? {}
           : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
         source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
       } catch (error) {
@@ -677,7 +634,7 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'} | Local AI: ${localPlanner.status().state}`);
-  if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with mandatory shared estimated-spend/call reservations' : 'static/offline only; Azure planning is off'}. Deployment and platform protections have NOT been verified by this server. Keep one worker until a distributed in-flight bound is verified.`);
+  if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with a shared daily request allowance' : 'static/offline only; Azure planning is off'}.`);
   if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(); vite?.close().then(() => process.exit(0)); });

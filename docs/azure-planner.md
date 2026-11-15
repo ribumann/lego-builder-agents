@@ -1,107 +1,100 @@
 # Azure Foundry planner
 
-The Azure OpenAI adapter makes one managed-identity-authenticated HTTP request
-to the configured Foundry model deployment. It needs no Copilot CLI, agent
-runtime, client API key or preliminary model call. The five visible game agents
-execute and check the returned geometry locally; they are not five model calls.
+The adapter sends one managed-identity-authenticated HTTP request to the
+configured Azure OpenAI model deployment. It needs no Copilot CLI, client API
+key, retail-price lookup or preliminary model call. The five visible game
+agents execute and check the returned geometry locally, not as five model calls.
+This describes the source contract; deployment is verified separately.
 
-## Anonymous public deployment
+## Anonymous hosted preview
 
 Set `BRICKLAB_HOSTED=1`, production serving, the exact HTTPS
 `BRICKLAB_HOSTED_ORIGIN`, and the settings below. Infrastructure defaults to
-`BRICKLAB_AZURE_AI=0`: do not enable paid inference until deployment verification
-is complete. Code/fixture verification is not a claim of live availability.
+`BRICKLAB_AZURE_AI=0`; enabling the paid provider remains an explicit operation.
 
 | Setting | Contract |
 | --- | --- |
 | `BRICKLAB_AZURE_AI` | Explicit opt-in `1`; otherwise Azure planning is off |
 | `AZURE_OPENAI_ENDPOINT` | HTTPS `*.openai.azure.com` endpoint |
-| `AZURE_OPENAI_DEPLOYMENT` | Reviewed model deployment name |
-| `AZURE_OPENAI_RESOURCE_ID` | Matching Azure OpenAI account ARM ID |
-| `AZURE_STORAGE_ACCOUNT` | Private reservation-state storage account |
-| `BRICKLAB_AZURE_BUDGET_CONTAINER` | Private container containing `daily-budget.json` |
-| `BRICKLAB_AZURE_CONTENT_FILTER_POLICY` | Verified policy actually attached to the model |
+| `AZURE_OPENAI_DEPLOYMENT` | Deployment supporting JSON output and, for images, vision |
+| `AZURE_STORAGE_ACCOUNT` | Storage account holding the existing shared counter |
+| `BRICKLAB_AZURE_BUDGET_CONTAINER` | Migration alias: continue the existing `daily-budget.json` blob |
+| `BRICKLAB_AZURE_USAGE_CONTAINER` | Fresh-install container for `daily-usage.json`, when no migration alias is set |
 | `BRICKLAB_AZURE_DAILY_CALLS` | Shared UTC-day call limit; default **50**, integer 1-100 |
 | `BRICKLAB_PLANNING_CONCURRENCY` | Hosted default **20**, integer 1-20 |
 | `BRICKLAB_PROVIDER_CONCURRENCY` | Hosted default **20**, integer 1-20, not above total |
 
-No visitor Entra sign-in or client-hash secret is required for the public site.
-The host's managed identity authenticates to Azure services. Grant it
-Cognitive Services OpenAI User on the dedicated account, sufficient read-only
-account/deployment/policy access, and Storage Blob Data Contributor on the
-reservation container. Pre-provision `daily-budget.json` with
-`{"day":"2000-01-01","reservedMicros":0}`; never delete/reset it to fix a failure.
+No visitor sign-in or client-hash secret is required. The server managed
+identity needs Cognitive Services OpenAI User and Storage Blob Data Contributor
+on the counter container. Runtime admission needs no ARM policy/model/region
+verification or pricing-reader permission.
 
-Every valid admitted request must atomically reserve a call and **$0.55 of
-estimated inference spend** before inference. Global calls and the **$50/UTC-day
-estimated-spend ceiling** share one Blob ETag conditional update across app
-instances. Missing/corrupt/inaccessible state, failed verification or unresolved
-CAS contention denies inference. Reservations are never refunded on validation
-failure, provider failure, cancellation or disconnect. There are no automatic
-model retries or hidden fallback.
+Every valid admitted provider call increments a shared count using a Blob ETag
+conditional write. There is no monetary ledger, estimated-cost reservation,
+per-visitor limit or midnight blackout. Failed/cancelled admitted calls remain
+counted so cancellation cannot bypass the 50-call allowance. Invalid input,
+missing consent and capacity rejection do not count. Missing/corrupt state or
+unresolved bounded CAS contention returns an explicit unavailable error before
+inference. There are no model retries or hidden fallback.
 
-The page displays the global remaining allowance from a bounded read-only
-status operation. It is a snapshot, not a held reservation; other visitors can
-consume it. Unavailable state is reported explicitly, never as unused quota.
-Anonymous users have no verified per-client identity; legacy principal-limit
-settings do not establish public fairness. WAF throttles, if deployed, are
-best-effort abuse mitigation, not the global spend/call accounting mechanism.
+Keep one App Service worker and one Node server process for a whole-app
+20-request upper bound: in-flight capacity is process-local, not distributed.
+HTTP 429 explains that capacity is shared by all clients, not necessarily
+occupied in the current tab. Provider-side limits can independently return 429.
+Existing Host/Origin/session-token checks, identity, network restrictions and
+WAF abuse protection remain in place.
 
-Keep **one App Service worker and one Node server process** for a whole-app
-20-request in-flight upper bound. Capacity is process-local, not a distributed
-semaphore. Provider quotas may permit less throughput. Capacity exhaustion
-returns explicit shared-server HTTP 429 without queuing or reserving a call.
-Front Door is optional for the model API; an existing edge/WAF must be verified
-with the actual NDJSON transport rather than assumed reliable.
+## Preserve the existing daily count
 
-## Model, safety and monetary limits
+Do not delete, reset or switch away from the existing usage blob. With the
+legacy container setting, read `daily-budget.json` in place and CAS-write
+`{"day":"YYYY-MM-DD","count":N}`. Existing `calls` is retained; dollar and
+principal fields are omitted on the next successful count update.
 
-The current monetary verifier pins Sweden Central, OpenAI GPT-5.4 version
-`2026-03-05`, DataZoneStandard and identity-only account authentication.
-It checks model deployment configuration and requires `properties.raiPolicyName`
-to match the configured policy, then reads that policy's blocking filters.
-An existing but unattached custom policy is insufficient. A different/default
-attached policy is not assumed unfiltered, but is rejected unless it matches
-the reviewed configuration; do not silently relabel `Microsoft.DefaultV2`.
-The Bicep deployment explicitly attaches `bricklab-public-safe`.
+A valid prior-day ledger rolls over normally. A current-day legacy ledger with
+nonzero `reservedMicros` but no call count cannot reveal its actual usage and is
+reported unavailable, never silently zeroed. Wait for normal UTC rollover
+instead of resetting it. Fresh installs may pre-provision an old-day
+`{"day":"2000-01-01","count":0}` at the chosen new counter location.
 
-The reviewed policy blocks medium/high prompt/completion violence, hate,
-sexual and self-harm content, direct jailbreak prompts and protected text/code
-completions. Filtered/incomplete outputs are rejected, not retried. Azure image
-requests are rejected before reservation/inference; text-only checks do not
-establish image safety.
+`/api/status` exposes `publicAllowance: {available,day,used,limit,remaining}`.
+Unavailable state omits `day`/`used` and returns `remaining:null`. This read-only
+snapshot is not a held call; another visitor may consume it.
 
-Retail verification permits up to $2.75 input and $16.50 output per million
-tokens for the pinned deployment. The reservation assumes 128,000 input tokens
-and 12,000 completion tokens, including reasoning, despite the smaller actual
-prompt. Contract pricing, billing timing, later configuration changes and
-other callers can differ. This is **not a hard cap on the Azure bill**:
-hosting, storage, network, tax and other usage are excluded. Subscription-wide
-governance and spend analysis remain the operator's responsibility.
+## Images, safety and request contract
+
+The approved native Azure content filter remains attached by Bicep to the
+deployment. It blocks medium/high prompt/completion violence, hate, sexual and
+self-harm content, direct jailbreak prompts and protected text/code completions.
+The adapter rejects blocked prompt/completion annotations and incomplete
+outputs. A custom HTTP policy header does not select this native policy.
+
+Hosted clients use the exact Origin, `X-Bricklab-Key` from status and
+`Content-Type: application/json`, optionally `Accept: application/x-ndjson`;
+no visitor bearer token. POST `/api/azure-plan` accepts
+`{world,brief,hollowInterior?,sceneSize?,image?,imageConsent?}` with the same
+world/brief validation as text planning. `azureImages` in status reports the
+enabled Azure image capability.
+
+Images require explicit `imageConsent:true`, with
+`image:{mimeType,data}` containing PNG/JPEG/WebP base64. Validation checks actual
+type, at most 1,000,000 decoded bytes, dimensions at most 4096 each and at most
+8 million pixels before counting or inference. The adapter sends one user
+message containing text plus an `image_url` data URL. There are no Azure image
+temporary files. Voice is browser-local Whisper with explicit review/apply,
+not Azure Speech or a server audio upload.
 
 ## Lifecycle and output
 
-The adapter caps prompts at 32,000 bytes, provider envelopes at 1 MiB and final
-JSON at 128,000 bytes, requesting at most 12,000 completion tokens. Geometry and
-selected world are validated locally before a scene can start.
+Prompts are capped at 32,000 bytes, provider envelopes at 1 MiB and final JSON at
+128,000 bytes; the request allows 12,000 completion tokens including reasoning.
+Geometry and selected world are validated locally before scene execution.
+At 300 seconds, the request AbortSignal cancels the upstream transport;
+disconnect cancels only that request. Capacity stays held until the adapter
+settles, and a late count admission cannot start cancelled inference. Transport
+cancellation does not prove that the remote service stops computing or billing.
 
-At 300 seconds the request AbortSignal cancels the real upstream transport;
-client disconnect cancels only that request. Its slot stays held until the
-adapter settles. Late completion cannot create a scene or refund a reservation.
-Transport cancellation does not prove that the remote service stops computing
-or billing. Calls are denied within six minutes of UTC midnight to avoid
-unaccounted cross-day work. Actual proxy delivery/timeouts need live validation.
-
-## Local servers and private Codespaces
-
-There is **no application daily call or client cap** locally or in Codespaces,
-including obsolete `BRICKLAB_DAILY_CALLS`. Private Azure retains its separately
-configured Entra verifier/MSAL flow and exact Host/Origin/session-token checks.
-Configure `BRICKLAB_ENTRA_TENANT_ID`, `BRICKLAB_ENTRA_API_CLIENT_ID`,
-`BRICKLAB_ENTRA_SPA_CLIENT_ID`, scope and role for that private option.
-
-Ordinary private Azure does not contact quota storage. Explicit
-`BRICKLAB_AZURE_BUDGET=1` retains atomic estimated-spend protection without
-daily request/principal caps. Local/Codespace capacity defaults remain 8 total
-and 2 per provider. No real tenant, paid inference, live Azure deployment or
-parked Ollama/BYO provider was exercised by these fixture tests.
+Private local/Codespaces Azure keeps its Entra verifier and exact request
+protections, without a daily counter or obsolete spend-budget opt-in. Local
+capacity remains 8 total / 2 per provider. No live paid inference, real parked
+provider or UAT deployment is implied by mock/unit checks.

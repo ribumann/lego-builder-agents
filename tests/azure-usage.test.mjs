@@ -36,9 +36,42 @@ test('rolls over only from a valid prior UTC day, and never creates missing stat
   const blob = fakeBlob('{"day":"2026-11-13","count":12}');
   assert.deepEqual(await createAzureUsageGate({ blobClient: blob, limit: 3, now }).reserve(), { used: 1, limit: 3 });
   assert.deepEqual(blob.state(), { day: '2026-11-14', count: 1 });
-  for (const body of [undefined, '{}', '{"day":"2026-11-15","count":0}', '{"day":"2026-02-31","count":0}', 'x'.repeat(257)]) {
+  for (const body of [undefined, '{}', '{"day":"2026-11-15","count":0}', '{"day":"2026-02-31","count":0}', 'x'.repeat(16_385)]) {
     await assert.rejects(createAzureUsageGate({ blobClient: fakeBlob(body), limit: 3, now }).reserve(), /no model request was sent/);
   }
+});
+
+test('migrates the same legacy ledger atomically without losing calls or retaining monetary fields', async () => {
+  const blob = fakeBlob(JSON.stringify({ day: '2026-11-14', calls: 49, reservedMicros: 27_000_000, clientCalls: {} }));
+  const gate = () => createAzureUsageGate({ blobClient: blob, now });
+  assert.equal((await gate().status()).remaining, 1);
+  const results = await Promise.allSettled([gate().reserve(), gate().reserve()]);
+  assert.equal(results.filter(result => result.status === 'fulfilled').length, 1);
+  assert.deepEqual(blob.state(), { day: '2026-11-14', count: 50 });
+  assert.equal((await gate().status()).remaining, 0);
+  const ambiguous = createAzureUsageGate({ blobClient: fakeBlob(
+    '{"day":"2026-11-14","reservedMicros":2766667}'), now });
+  await assert.rejects(ambiguous.reserve(), /no model request was sent/);
+  assert.equal((await ambiguous.status()).available, false);
+  const priorDay = fakeBlob('{"day":"2026-11-13","reservedMicros":2766667}');
+  await createAzureUsageGate({ blobClient: priorDay, now }).reserve();
+  assert.deepEqual(priorDay.state(), { day: '2026-11-14', count: 1 });
+});
+
+test('admits near UTC midnight and never refunds a committed cancelled call', async () => {
+  const blob = fakeBlob('{"day":"2026-11-14","count":0}');
+  const nearMidnight = () => new Date('2026-11-14T23:59:59Z');
+  const gate = createAzureUsageGate({ blobClient: blob, now: nearMidnight });
+  await gate.reserve();
+  assert.equal(blob.state().count, 1, 'No budget blackout');
+  const controller = new AbortController();
+  const upload = blob.upload;
+  blob.upload = async (...args) => { await upload(...args); controller.abort(); };
+  await assert.rejects(gate.reserve({ signal: controller.signal }), /cancelled/);
+  assert.equal(blob.state().count, 2, 'An already admitted call stays counted');
+  const readOnly = JSON.stringify(blob.state());
+  assert.equal((await gate.status()).remaining, 48);
+  assert.equal(JSON.stringify(blob.state()), readOnly);
 });
 
 test('fails closed on storage failure, conflict exhaustion, or cancellation', async () => {

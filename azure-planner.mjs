@@ -1,4 +1,5 @@
 import { ManagedIdentityCredential } from '@azure/identity';
+import { validatePlanningImage } from './planning-image.mjs';
 
 const MAX_RESPONSE_BYTES = 1_048_576;
 const MAX_CONTENT_BYTES = 128_000;
@@ -6,21 +7,19 @@ const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
 class AzurePlannerError extends Error {}
 
-export function createAzurePlanner({ endpoint, deployment, contentFilterPolicy,
+export function createAzurePlanner({ endpoint, deployment,
   credential = new ManagedIdentityCredential(), fetchImpl = fetch }) {
   if (typeof endpoint !== 'string'
       || !/^https:\/\/[a-z0-9][a-z0-9-]{0,62}\.openai\.azure\.com\/?$/i.test(endpoint))
     throw new Error('Azure OpenAI endpoint must be an HTTPS resource endpoint in the public Azure cloud.');
   if (typeof deployment !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(deployment))
     throw new Error('Azure OpenAI deployment name is invalid.');
-  if (typeof contentFilterPolicy !== 'string'
-      || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(contentFilterPolicy))
-    throw new Error('Azure OpenAI content filter policy is invalid.');
   const url = `${endpoint.replace(/\/$/, '')}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=2024-10-21`;
 
-  return async function planAzure({ prompt, signal }) {
+  return async function planAzure({ prompt, signal, image: rawImage, imageConsent }) {
     if (typeof prompt !== 'string' || !prompt || Buffer.byteLength(prompt) > 32_000)
       throw new Error('Azure planning prompt is invalid or too large.');
+    const image = validatePlanningImage(rawImage, imageConsent);
     try {
       let token;
       try { token = await credential.getToken(SCOPE, { abortSignal: signal }); }
@@ -30,10 +29,12 @@ export function createAzurePlanner({ endpoint, deployment, contentFilterPolicy,
         method: 'POST',
         redirect: 'error',
         signal,
-        headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json',
-          'x-policy-id': contentFilterPolicy },
+        headers: { Authorization: `Bearer ${token.token}`, 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          messages: [{ role: 'user', content: prompt }],
+          messages: [{ role: 'user', content: image
+            ? [{ type: 'text', text: prompt }, { type: 'image_url',
+              image_url: { url: `data:${image.mimeType};base64,${image.data}` } }]
+            : prompt }],
           max_completion_tokens: 12000,
           response_format: { type: 'json_object' },
         }),
@@ -102,7 +103,6 @@ export function planAzure(request) {
   planner ??= createAzurePlanner({
     endpoint: process.env.AZURE_OPENAI_ENDPOINT,
     deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
-    contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
   });
   return planner(request);
 }

@@ -6,8 +6,8 @@ have provisioned the individual resources. One staging deployment loaded a
 private Blob package with managed identity, and a non-paid synthetic stream
 completed after 271.6 seconds; an earlier stream closed early. Full
 reproducibility, reliable streaming, edge protections and hosted model
-generation have not been verified. The current code supports an anonymous
-managed-identity Azure wrapper with mandatory global reservations; deployment
+generation have not been verified. The simplified preview uses an anonymous
+managed-identity Azure wrapper with a mandatory shared call count; deployment
 defaults keep paid planning off until the real configuration is verified.
 Until these checks and the application integration are complete, this is a
 staging guide, not a production recipe.
@@ -31,11 +31,10 @@ use your own Azure subscription, a dedicated resource group, and a DNS name
 you control. You need permission to create resources and role assignments,
 Azure CLI with Bicep, Node.js 24 and npm, Python 3, Git, and a Linux build
 environment.
-Azure OpenAI GPT-5.4 version `2026-03-05`, DataZoneStandard capacity, and
-Linux App Service B1 must be available in the chosen subscription. These
-templates use Sweden Central for storage and the model and Italy North for
-the web app; other regions may be chosen for the web app, but the budget
-verifier currently accepts only the specified model and Sweden Central.
+An Azure OpenAI model deployment and Linux App Service B1 must be available in
+the chosen subscription. These templates currently use Sweden Central for
+storage and the model and Italy North for the web app; the preview contract
+does not pin a model version or region.
 Check quota, regional availability and organizational policies before
 provisioning. Do not use another application's identity, storage, model or
 developer credentials.
@@ -55,32 +54,19 @@ See [App Service retail prices](https://prices.azure.com/api/retail/prices?%24fi
 [Private Link](https://azure.microsoft.com/pricing/details/private-link/)
 and [DNS](https://azure.microsoft.com/pricing/details/dns/).
 
-For inference, the current gate verifies the
-[Sweden Central GPT-5.4 Data Zone retail meters](https://prices.azure.com/api/retail/prices?%24filter=productName%20eq%20%27Azure%20OpenAI%20GPT5%27%20and%20armRegionName%20eq%20%27swedencentral%27%20and%20%28skuName%20eq%20%275.4%20inp%20Dz%27%20or%20skuName%20eq%20%275.4%20opt%20Dz%27%29)
-before every call and reserves $0.55 against a $50 UTC-day budget. The default
-application limit is 50 calls per day (at most $27.50 of estimated reservations).
-Daily request caps apply
-only to the public hosted deployment; local servers and Codespaces have no
-daily request quota. Explicit private spend-budget mode retains its monetary
-ceiling without request/client daily caps. The global call and dollar counters and
-optional legacy principal counters share the same private Blob state and use ETag
-conditional writes, so concurrent reservations from separate app instances
-cannot exceed global limits. Legacy dollar-only state is read conservatively
-and is never reset. Public users are anonymous; no reliable per-client fairness
-or identity is claimed. No visitor Entra registration or client-hash secret is
-required. The page shows a read-only global remaining-allowance snapshot.
+The preview requires a shared, count-only limit of 50 Azure calls per UTC day,
+backed by private Blob state and conditional writes across app instances.
+It also limits hosted planning to 20 in-flight requests. Keep one worker and
+one Node process unless a shared in-flight semaphore is added and verified.
+Public visitors are anonymous; no per-client fairness or identity is claimed.
+No visitor Entra registration or client-hash secret is required.
 
-The $50 daily dollar reservation is a second backstop, not a hard cap on your
-Azure bill or a guarantee of actual charges: contract prices, later price or
-deployment changes, billing timing and tokenization can differ. Other callers,
-hosting, storage, network and tax are outside the gate. Azure Cost Management
-budgets alert rather than stop spending; configure alerts separately. The
-Front Door WAF rate rule is also approximate, not authentication or a global
-spend limit. Do not scale the App Service above one worker without adding and
-verifying a shared in-flight semaphore; hosted bounded capacity (20 total,
-20 per provider by default) is per process, not guaranteed model throughput.
-Local/Codespace defaults remain 8 total and 2 per provider.
-See [budget limitations](azure-planner.md).
+There is no dollar ledger, per-call pricing verification, or six-minute
+pricing blackout. The call limit is not a cap on the Azure bill: hosting,
+storage, network, other callers and model charges still apply. Azure Cost
+Management budgets alert rather than stop spending; configure alerts separately.
+The Front Door WAF rate rule is approximate, not authentication or a global
+spend limit.
 
 ## Provision isolated resources
 
@@ -88,7 +74,7 @@ Use explicit subscription selection on every command. The following variables
 are examples for a Bash shell; replace every placeholder, and run from the
 repository root. The uploader must be a Microsoft Entra **user object ID**
 with private network access to Blob Storage; the templates grant that user
-access to the dedicated package and budget containers. Role assignments
+access to the dedicated package and usage containers. Role assignments
 may take time to propagate.
 
 ```bash
@@ -114,7 +100,7 @@ endpoint, DNS zone and App Service VNet integration. Its `10.91.0.0/24`
 address space is fixed: review for overlap with your networks before
 connecting them. You need a policy-approved operator machine with network
 connectivity and DNS resolution to the private endpoint to initialize the
-budget and upload releases. Do not enable public Blob access or shared keys
+usage state and upload releases. Do not enable public Blob access or shared keys
 to work around a blocked connection.
 
 ```bash
@@ -123,17 +109,23 @@ az deployment group create --subscription "$SUBSCRIPTION" --resource-group "$RG"
   --parameters webAppName="$WEB" storageAccountName="$STORAGE"
 ```
 
-`WEB` and `STORAGE` must be set to the corresponding outputs first. On the
-connected machine, initialize the budget **once**. This conditional create
-fails if it already exists; do not overwrite or reset existing state.
+`WEB` and `STORAGE` must be set to the corresponding outputs first. For a new
+deployment, on the connected machine, initialize the count-only usage state
+**once**. This conditional create fails if it already exists; do not overwrite
+or reset existing state, and do not delete older budget artifacts.
 
 ```bash
-printf '%s' '{"day":"2000-01-01","reservedMicros":0}' > budget-initial.json
+printf '%s' '{"day":"2000-01-01","count":0}' > usage-initial.json
 az storage blob upload --subscription "$SUBSCRIPTION" --auth-mode login \
-  --account-name "$STORAGE" --container-name usage --name daily-budget.json \
-  --file budget-initial.json --if-none-match '*' --overwrite false
-rm budget-initial.json
+  --account-name "$STORAGE" --container-name usage --name daily-usage.json \
+  --file usage-initial.json --if-none-match '*' --overwrite false
+rm usage-initial.json
 ```
+
+For an existing deployment using `BRICKLAB_AZURE_BUDGET_CONTAINER`, keep its
+existing `daily-budget.json` state instead of creating a separate counter.
+The usage gate migrates supported existing state in place without resetting
+the current call count. Verify the migration before enabling inference.
 
 ## Edge, DNS and HTTPS
 
@@ -224,12 +216,11 @@ the application, browser voice worker and WebAssembly assets into `dist`.
 Keep those built assets, but do not ship unused browser libraries or Node/ONNX
 inference dependencies with the server. Azure Identity, Azure Blob Storage
 and JOSE remain server runtime dependencies.
-The existing 25 MB archive guard remains unchanged. Create the
-release using the repository packager, which verifies the runtime module
+Create the release using the repository packager, which verifies the runtime module
 closure, production dependency tree, required worker/runtime assets and
 Windows helper, and writes a per-file SHA-256 manifest. The archive is
-deterministic, refuses to overwrite an existing artifact, and retains the
-existing 25,000,000-byte size guard:
+deterministic and refuses to overwrite an existing artifact. It requires the
+exact checked-out revision and a clean source tree:
 
 ```bash
 REVISION=$(git rev-parse HEAD)
@@ -253,18 +244,17 @@ The hosted app settings are `HOST=0.0.0.0`, `BRICKLAB_HOSTED=1`, and the
 exact `BRICKLAB_HOSTED_ORIGIN`. Azure injects `PORT`. For the currently
 opt-in paid planner the additional settings are
 `BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`,
-`AZURE_OPENAI_RESOURCE_ID`, `AZURE_STORAGE_ACCOUNT`, and
-`BRICKLAB_AZURE_BUDGET_CONTAINER=usage`,
+`AZURE_STORAGE_ACCOUNT`,
+`BRICKLAB_AZURE_USAGE_CONTAINER=usage` for a new deployment,
 `BRICKLAB_AZURE_CONTENT_FILTER_POLICY=bricklab-public-safe`,
-`BRICKLAB_AZURE_DAILY_CALLS` (default 50; integer 1-100),
+`BRICKLAB_AZURE_DAILY_CALLS=50`,
 `BRICKLAB_PLANNING_CONCURRENCY=20` and `BRICKLAB_PROVIDER_CONCURRENCY=20`.
 The Bicep parameter `azureDailyCalls` wires the global daily allowance
-into the web app while leaving `BRICKLAB_AZURE_AI=0`.
-Changing a quota does not enable paid planning. Invalid public quota settings
-fail startup; private local/Codespace settings are ignored. No deployment was
+into the web app while leaving `BRICKLAB_AZURE_AI=0`; use 50 for this preview.
+Changing a quota does not enable paid planning. No deployment was
 performed to validate these settings on the live app. Resource identifiers and the content-filter policy name are
 not secrets. Public visitors do not sign in; the server's managed identity
-authenticates to model, configuration and storage APIs. No model credential
+authenticates to model and storage APIs. No model credential
 is sent to the browser. The Entra/MSAL option remains for separately configured
 private Azure servers, not the anonymous public lab.
 
@@ -272,32 +262,25 @@ The base Bicep template creates the named policy with
 blocking filters for medium/high violence, hate, sexual and self-harm input
 and output, direct jailbreak detection, and protected-text/code output
 detection. The model deployment explicitly sets `raiPolicyName` to that policy.
-The app verifies both the attachment and exact policy through Azure Resource
-Manager before reserving budget; merely creating an unattached policy is not
-sufficient. Live deployments reporting `Microsoft.DefaultV2` do not satisfy
-this configured-policy check; inspect/attach the reviewed policy before activation.
-The adapter also sends `x-policy-id` on every model call; filtered
-or annotated-blocked responses are rejected without retries. If the read-back
-is missing, denied, or has weaker settings, the request fails before inference.
-The identity may need a narrowly scoped read-only role on the dedicated
-Cognitive Services account if its current role cannot read the policy.
-Azure image input is explicitly rejected before budget reservation and
-provider invocation; text-only filter verification does not establish safe
-image handling.
+Use an approved native Azure content policy and verify it is attached to the
+deployment; merely creating an unattached policy is not sufficient. Retain
+managed identity and the network protections described above. Azure image
+input requires user consent and validation of image type and size before
+provider invocation.
 
 These settings are **not authorization to enable the paid route**. Do not
 enable Copilot, Codespaces, or local-model modes on the public instance. The
 hosted setting defaults to `BRICKLAB_AZURE_AI=0`. The origin/session-token check
 is not user authentication: a public visitor can obtain the browser token.
-Global durable reservations provide the application spending/call boundary;
+The durable shared count provides the application call boundary;
 WAF throttling is only approximate defense in depth. Anonymous visitors may
 exhaust the shared allowance, so no per-client fairness guarantee is made.
 The static/offline lab remains available without inference.
 
 Before any public paid deployment, verify the managed-identity model/storage
 access and actually attached blocking policy. Verify exact Host and Origin
-handling, direct-origin denial, WAF association, durable shared request and
-dollar reservations under concurrent requests from separate instances.
+handling, direct-origin denial, WAF association, the durable shared call count
+under concurrent requests from separate instances, and the 20 in-flight limit.
 Keep the plan at one worker and one Node server process unless a shared
 in-flight semaphore is added. Use a
 non-paid synthetic heartbeat stream through the actual edge to test beyond
@@ -309,15 +292,15 @@ status endpoint alone is not evidence that inference or controls work.
 
 ## Operations and teardown
 
-Monitor availability, application errors, WAF blocks, usage reservations,
-actual Azure costs, pricing and model configuration. Restrict permission to
-change the deployment, model or storage state. Investigate budget failures
+Monitor availability, application errors, WAF blocks, usage counts,
+actual Azure costs and model configuration. Restrict permission to
+change the deployment, model or storage state. Investigate usage-state failures
 without deleting the state, and redeploy immutable reviewed packages rather
 than replacing an active ZIP. Backup and incident procedures should preserve
-the reservation state; never restore an older state while inference can run.
+the usage state; never restore an older state while inference can run.
 
 To retire an isolated deployment, remove only its DNS records after confirming
 they are no longer in use, then delete the dedicated resource group with
 `az group delete --subscription "$SUBSCRIPTION" --name "$RG"`. This deletes
-the group's application, model, networking and budget data. Check for any
+the group's application, model, networking and usage data. Check for any
 resources, DNS zones or charges outside that group separately.

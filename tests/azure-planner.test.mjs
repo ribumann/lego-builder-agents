@@ -23,7 +23,7 @@ test('Azure planner sends a bounded authenticated request and returns parsed JSO
   assert.match(request.url, /\/deployments\/small-model\/chat\/completions\?/);
   assert.equal(request.options.redirect, 'error');
   assert.equal(request.options.headers.Authorization, 'Bearer test-token');
-  assert.equal(request.options.headers['x-policy-id'], contentFilterPolicy);
+  assert.equal(request.options.headers['x-policy-id'], undefined, 'Native deployment policy is not selected by a custom header');
   assert.equal(JSON.parse(request.options.body).max_completion_tokens, 12000);
   assert.equal(JSON.parse(request.options.body).max_tokens, undefined);
 });
@@ -95,8 +95,7 @@ test('Azure planner forwards cancellation and never exposes provider errors', as
   await assert.rejects(rejected({ prompt: 'brief' }), error => !error.message.includes('sensitive'));
 });
 
-test('Azure planner requires the pinned filter and rejects blocked prompt or completion annotations', async () => {
-  assert.throws(() => createAzurePlanner({ endpoint, deployment: 'model', credential }), /content filter policy/);
+test('Azure planner rejects native blocked prompt or completion annotations', async () => {
   const blockedResponses = [
     { prompt_filter_results: [{ filtered: true }],
       choices: [{ finish_reason: 'stop', message: { content: '{"model":"custom"}' } }] },
@@ -111,6 +110,29 @@ test('Azure planner requires the pinned filter and rejects blocked prompt or com
       fetchImpl: async () => new Response(JSON.stringify(body)) });
     await assert.rejects(plan({ prompt: 'brief' }), /content safety filters blocked/);
   }
+});
+
+test('Azure image input requires consent and sends one supported multimodal request', async () => {
+  const image = { mimeType: 'image/png',
+    data: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC' };
+  const requests = [];
+  const plan = createAzurePlanner({ endpoint, deployment: 'any-supported-vision-model', credential,
+    fetchImpl: async (_url, options) => {
+      requests.push(JSON.parse(options.body));
+      return new Response(envelope('{"model":"custom"}'));
+    } });
+  for (const request of [
+    { image }, { image, imageConsent: false },
+    { image: { ...image, mimeType: 'image/jpeg' }, imageConsent: true },
+    { image: { ...image, data: 'invalid' }, imageConsent: true },
+  ]) await assert.rejects(plan({ prompt: 'A lighthouse', ...request }));
+  assert.equal(requests.length, 0);
+  assert.deepEqual(await plan({ prompt: 'A lighthouse', image, imageConsent: true }), { model: 'custom' });
+  assert.equal(requests.length, 1);
+  assert.deepEqual(requests[0].messages, [{ role: 'user', content: [
+    { type: 'text', text: 'A lighthouse' },
+    { type: 'image_url', image_url: { url: `data:image/png;base64,${image.data}` } },
+  ] }]);
 });
 
 test('Azure planner exposes sanitized distinct identity, access, quota and service failures', async () => {

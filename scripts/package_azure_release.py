@@ -24,7 +24,6 @@ REQUIRED_RUNTIME_FILES = (
     Path("scripts/windows-copilot-job-host.ps1"),
 )
 OMIT_DIRECTORY_PARTS = {".bin"}
-MAX_ARCHIVE_BYTES = 25_000_000
 
 
 class PackageError(Exception):
@@ -160,11 +159,6 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
         raise
 
     archive_bytes = output.stat().st_size
-    if archive_bytes > MAX_ARCHIVE_BYTES:
-        output.unlink()
-        raise PackageError(
-            f"Release archive is {archive_bytes} bytes, above the existing {MAX_ARCHIVE_BYTES}-byte guard."
-        )
     suffix_bytes = {}
     for entry in entries:
         suffix = Path(entry["path"]).suffix or "[no extension]"

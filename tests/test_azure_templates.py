@@ -45,11 +45,10 @@ class AzureTemplateTests(unittest.TestCase):
         self.assertIn("defaultHostName", origin["hostName"])
         self.assertTrue(origin["enforceCertificateNameCheck"])
 
-    def test_application_verifies_the_attached_policy_without_enabling_paid_planning(self):
+    def test_native_model_policy_is_attached_without_enabling_paid_planning(self):
         web = self.resource("azure", "Microsoft.Web/sites")["properties"]
         settings = {item["name"]: item["value"] for item in web["siteConfig"]["appSettings"]}
         model = self.resource("azure", "Microsoft.CognitiveServices/accounts/deployments")["properties"]
-        self.assertEqual(settings["BRICKLAB_AZURE_CONTENT_FILTER_POLICY"], model["raiPolicyName"])
         self.assertIn("bricklab-public-safe", model["raiPolicyName"])
         self.assertEqual(settings["BRICKLAB_AZURE_AI"], "0")
 
