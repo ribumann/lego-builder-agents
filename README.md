@@ -1,6 +1,28 @@
 # BrickLab
 
-A LEGO-style game with **cloud-first, open-ended planning** and visible **agentic teamwork for ages 11-15**. Give a brief and watch five agents coordinate: BuildBot delegates, PlanBot checks the blueprint, FrameBot and DetailBot build, and CheckBot inspects the result. Optional Local AI and explicit offline presets are separate choices.
+A LEGO-style game with **cloud-first, open-ended planning** and visible **agentic teamwork for ages 11-15**. Give a brief and watch five deterministic application agents coordinate: BuildBot delegates, PlanBot checks the blueprint, FrameBot and DetailBot build, and CheckBot inspects the result. Custom planning is an explicit opt-in; offline templates need no model.
+
+## MVP scope and release status
+
+This is the release target, not a claim that every provider or deployment has
+passed manual acceptance.
+
+| Area | MVP disposition | Current boundary |
+| --- | --- | --- |
+| Local server | In scope | Offline templates need no provider. Copilot planning requires an explicit submission and separate server-side CLI setup. One earlier local candidate completed real text and consented synthetic-image requests. Final backend candidate `eb858843f3b86eb384f1e96ad64c749f855935a5` passes automated checks, including Windows timeout/cleanup cases; current-candidate manual UAT and general provider reliability are not established. |
+| Private Codespaces | In scope | Keep the forwarded port private and use the production server. Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. |
+| Azure deployment | In scope, constrained | The current anonymous HTTPS Front Door app is offline-only with Azure planning off. Backend candidate `eb858843f3b86eb384f1e96ad64c749f855935a5` implements anonymous hosted planning via backend managed identity and passed automated checks, but has not been packaged or deployed; live planner availability is not claimed. |
+| Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
+| Planning optimization | In candidate | Bounded shared capacity and request cleanup are implemented in the final backend candidate and pass its automated checks. No 2x speed or throughput gain is measured or promised. |
+| Voice | Stretch | Opt-in browser-local transcription uses manual start/stop with a 30-second cap. Automatic onset/silence handling is not implemented, and real-microphone usability has not been accepted. See [voice limitations](docs/voice-integration.md) and #15. |
+| Refactoring | Stretch | Refactor only where needed for MVP correctness or reliability. |
+| Custom LLM and Ollama | Backlog | The compatible-provider and local-model adapters/setup notes are not MVP support commitments. |
+
+See [architecture and deployment boundaries](docs/architecture.md) and
+[software design](docs/software-design.md) for the trust model, data flow, and
+release verification gaps. Subscription-wide governance and cross-solution
+spend analysis remain operator responsibilities; application reservations are
+estimates, not invoice caps.
 
 The interface offers English, German, French, Italian, Spanish and Portuguese,
 with the selection saved on this device. Offline templates recognize the
@@ -87,7 +109,7 @@ There is no API unlock or automatic quarantine expiry. Restarting also resets
 the informational process-local Copilot counter, but cannot reset public Azure's
 durable quota/spend reservations.
 
-### Optional OpenAI-compatible provider (private server only)
+### Backlog: OpenAI-compatible provider (not MVP support)
 
 Set `BRICKLAB_COMPATIBLE_AI=1`, `BRICKLAB_COMPATIBLE_ENDPOINT` to the full
 chat-completions URL, and `BRICKLAB_COMPATIBLE_MODEL` to its model identifier.
@@ -110,8 +132,8 @@ budget. Use only a trusted private server and provider.
 
 Allow 30–45 minutes for pairs. Start with offline templates, so the first activity
 needs no model account or model calls. Ask learners not to include names or other
-personal information in briefs. Cloud planning sends the submitted brief to
-GitHub; Local AI sends it to the configured model service on the server host.
+personal information in briefs. Copilot planning sends the submitted brief to
+GitHub; provider adapters outside the MVP are described as backlog below.
 
 1. **Imagine and plan:** choose a world and offline templates. Try “a purple
    brachiosaurus with a tall neck.” Open **Task board** and predict which jobs
@@ -150,9 +172,10 @@ imported model attribution is genuine.
 
 The separate **Azure Foundry** adapter uses a managed identity, not a personal
 Copilot credential. Public hosted mode currently serves the anonymous lab and
-offline templates only; paid hosted planning is deliberately disabled until
-edge abuse controls and the long-request transport have been verified.
-Azure service usage can incur charges. See [Azure planner setup](docs/azure-planner.md).
+offline templates only; paid hosted planning remains disabled. The backend
+candidate has passed automated checks, but real tenant/storage/policy and
+public-edge/long-request verification, packaging, and deployment remain
+outstanding. Azure service usage can incur charges. See [Azure planner setup](docs/azure-planner.md).
 
 ## Run in a private GitHub Codespace
 
@@ -202,7 +225,7 @@ Do not make the port public to troubleshoot. If the private URL or visibility ve
 - **Real-time controls:** start, pause, single-step, and cycle **1x / 4x / 16x fast-forward**. Guided demo uses 4x.
 - **Explainable actions:** task ownership, dependency waits, turn numbers, observations and completion messages. Messages describe application decisions, not hidden model chain-of-thought.
 - **Special experiments:** blueprint overlay, exploded view, cutaway view, tap-to-inspect bricks, timeline replay, and a missing-brick challenge that agents detect and repair.
-- **Hollow interiors:** select **Try a hollow interior** before a custom planning request (Copilot, Local AI, compatible AI or Azure when available). Try “A small blue room with an open doorway and an orange chair.” The preference asks for a real empty cavity, not a solid block; it does not guarantee model compliance. **Cutaway view** clips the right half of the scene to reveal its cross-section without changing bricks, inspection, saves or repair. It works on existing scenes too, but cannot create a cavity in a solid design. Offline templates ignore this preference and disable its checkbox. FrameBot and DetailBot retain their actual assigned structure/support/detail tasks; labels do not imply that every scene has interior work. Connectivity is not physical stability.
+- **Hollow interiors:** select **Try a hollow interior** before a Copilot custom-planning request. Try “A small blue room with an open doorway and an orange chair.” The preference asks for a real empty cavity, not a solid block; it does not guarantee model compliance. **Cutaway view** clips the right half of the scene to reveal its cross-section without changing bricks, inspection, saves or repair. It works on existing scenes too, but cannot create a cavity in a solid design. Offline templates ignore this preference and disable its checkbox. FrameBot and DetailBot retain their actual assigned structure/support/detail tasks; labels do not imply that every scene has interior work. Connectivity is not physical stability.
 - **Learning loop:** ask the crew about roles, plans, cost or repair, then answer a short reflection question.
 - **Local saves:** independent saved builds per world, automatic resume after refresh, downloadable versioned JSON.
 - **Accessible alternatives:** keyboard controls, reduced motion and a text task board/inspection when WebGL is unavailable.
@@ -295,7 +318,7 @@ The server invokes `copilot -p` without shell interpolation, with an empty avail
 
 The bridge uses the CLI's scripting mode, `--output-format=json`, not terminal-rendered `--silent` text. It reads the final completed `assistant.message` content only, requires a successful terminal `result`, and rejects malformed, failed or incomplete streams. Metadata, user echoes and partial message deltas are not treated as designs or logged. The final assistant content must still be valid JSON and pass the geometry schema; the app never joins wrapped strings, strips arbitrary control characters, repairs malformed model output, or automatically launches another planning invocation. JSONL support requires a recent standalone CLI. An isolated local fake-provider run with the actual Linux CLI verified the event handling without external model calls; a later bounded real Windows ARM64 API request verified the small custom-planning path. Neither establishes Codespaces integration or successful large-scene model generation.
 
-### Optional open-ended Local AI (Ollama)
+### Backlog: Local AI / Ollama (not MVP support)
 
 Local AI is a separate, explicitly selected planner, not the offline template engine. It runs on the **BrickLab Node server's host**. In a Codespace, that means the remote Codespace, not the browser's Windows/Mac/mobile device. No runtime, model or infrastructure is installed or downloaded by BrickLab.
 
@@ -319,7 +342,7 @@ Choose **Change mode -> Use Local AI**, then **Plan with Local AI**. Status and 
 
 The default endpoint is `http://127.0.0.1:11434`; optional `BRICKLAB_LOCAL_URL` accepts only an HTTP numeric loopback address (`127.0.0.1` or `[::1]`), without userinfo, paths, query or fragment. Hostnames (including `localhost`), external addresses and redirects are rejected. Transport does not use environment proxies. Model metadata identifying a remote/cloud model is rejected **before transmitting the brief**. **Loopback alone does not prove offline operation:** use `OLLAMA_NO_CLOUD=1`, a genuinely local downloaded model and a trusted service. Metadata cannot prove what a modified or misconfigured service does internally.
 
-Local AI shares Host/Origin/authentication checks, the per-process request token and custom geometry validation with Copilot, but has independent bounded provider slots. It has a 90-second deadline, 1 MiB provider-envelope limit and 128,000-byte final-content limit, with bounded output tokens. Its cancellable dialog shows elapsed time and the separate 90-second maximum, not Copilot's measured estimates or 300-second deadline. It uses no Copilot quota, but server/Codespace compute charges may apply. Keep children's identifying/sensitive information out of briefs.
+Local AI shares Host/Origin/authentication checks, the per-process request token, custom geometry validation, and the server's bounded capacity with Copilot. It has an independent provider limit (2 concurrent requests by default), a 90-second deadline, 1 MiB provider-envelope limit and 128,000-byte final-content limit, with bounded output tokens. Its cancellable dialog shows elapsed time and the separate 90-second maximum, not Copilot's measured estimates or 300-second deadline. It uses no Copilot quota, but server/Codespace compute charges may apply. Keep children's identifying/sensitive information out of briefs.
 
 Fake local-provider and browser tests cover success, failures, explicit mode separation and remote-model rejection. No Ollama executable/listener was observed on the checked Linux server or Windows ARM64 host, so **real local-model inference remains unverified**. No model was installed/downloaded or live local-model success inferred from fixtures.
 
@@ -331,7 +354,11 @@ This removes the four-template subject restriction **for AI-planned designs**, n
 
 The shared custom contract supports legacy `design.bricks` or named groups in `design.objects`, with **1-256 compact brick records in total**, optional `repeat: {count, dx, dy, dz}`, up to **32 objects**, **8,192 expanded bricks** and **262,144 occupied cells**. Each brick has integer dimensions **1-8** per axis; every occupied cell must stay within **x/z -64..63 and y 0..63**. Colors are allowlisted and overlaps are rejected, including between objects. Separate objects may be apart; PlanBot and CheckBot check face connectivity within each object. Missing-brick repair cannot fix a fundamentally disconnected blueprint. Invalid output fails explicitly, without automatic paid retries. Old template and single-object custom saves remain supported; new saves retain validated object geometry. A novel design's semantic quality and large-scene live model reliability remain unverified.
 
-Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with two concurrent invocations by default. The planning dialog shows actual elapsed time and a rough, sample-based estimate, not model progress; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. At 300 seconds the server actually aborts and terminates the process tree, then awaits confirmed cleanup before releasing that request's slot; an HTTP timeout alone does not release it. Unconfirmed termination permanently quarantines planning with operator recovery instructions. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Local servers and Codespaces have **no application daily request quota**; `BRICKLAB_DAILY_CALLS` no longer applies. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
+Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with two concurrent invocations allowed by default. The planning dialog shows actual elapsed time and a rough, sample-based estimate, not model progress; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. The deadline still applies without a response. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit.
+
+Private local servers and Codespaces default to **8 total planning slots and 2 per provider**. `BRICKLAB_PLANNING_CONCURRENCY` and `BRICKLAB_PROVIDER_CONCURRENCY` can set each limit from 1 to 20, with the provider limit no higher than total. A 20-slot hosted deployment requires one worker and one Node process; none of these bounds guarantees upstream throughput. Slots cover request-body reading, provider work, and cleanup. Full shared capacity returns HTTP 429 rather than queuing work, and application requests are not retried or sent to a fallback provider. Cancellation and timeout do not release a slot until cleanup is confirmed; ambiguous Copilot process cleanup locks all planning until an operator verifies before restarting.
+
+Local servers and Codespaces have **no application daily request quota**, even if the obsolete `BRICKLAB_DAILY_CALLS` setting is supplied. Copilot `calls` is informational and `limit` is null. Public hosted Azure has a separate `BRICKLAB_AZURE_DAILY_CALLS` limit (default 50, configurable 1-100) and estimated-spend reservation; see [architecture and deployment boundaries](docs/architecture.md). Copilot service costs and quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
 
 The estimate compares an unambiguous numeric brick target in the brief with a small study of 20 sequential Windows Copilot CLI requests on November 14, 2026, using the then-default model. Four synthetic lighthouse, dinosaur, spacecraft and garden briefs per target took: 20 bricks, 21.67–25.56 s; 100, 32.88–46.95 s; 500, 57.08–172.20 s; 2,000, 79.63–123.88 s; and 8,000, 119.91–182.94 s. Ranges shown are rounded outward; sizes between targets use the wider bracket of adjacent observations. Without a clear supported target, the estimate is unknown and displays the broad observed 20–183 s range. This is not a deadline or guarantee: conditions, prompts, models and actual generated brick counts vary, and the sample only checked schema, bounds and overlap—not connectivity, artistic quality or physical stability. No extra inference call is made for an estimate. Azure Foundry and Local AI are not calibrated by this Copilot study.
 
@@ -380,11 +407,15 @@ Local runs retain Playwright's default worker count; use `--workers=1` to reprod
 Coverage includes scene growth and provenance, deterministic damage and repair,
 planner consent and failure handling, fake-clock 300-second limits, subprocess
 cancellation and browser journeys. The IPv6 loopback test may be skipped on
-hosts without IPv6 loopback support. The production build reports a large-bundle
-advisory. Windows tree termination uses simulated tests; the current changes,
-real Codespaces forwarding and real Ollama inference remain unverified there.
-Proxy buffering or hosting request limits may prevent a hosted connection from
-remaining open for 300 seconds; local tests do not establish hosted behavior.
+hosts without IPv6 loopback support. The final backend candidate
+`eb858843f3b86eb384f1e96ad64c749f855935a5` passed its reported full automated
+suite (272 pass, 4 skipped, no failures), TypeScript/build/package, and Bicep
+compilation checks. Native Windows text/image tests cover contained descendant
+cleanup, timeout, cancellation, and host-loss failure; manual UAT of this
+candidate, real Codespaces forwarding, and real Ollama inference remain
+unverified. Proxy buffering or hosting request limits may prevent a hosted
+connection from remaining open for 300 seconds; local tests do not establish
+hosted behavior.
 
 Architecture: `src/engine.ts` (typed specs, task graph, five-agent loop, inspection and saves), `src/scene.ts` (Three.js original brick geometry and habitats), `src/main.ts` (workshop UI), `server.mjs` (local serving and optional bounded CLI bridge), `copilot-output.mjs` (strict CLI event decoding).
 
