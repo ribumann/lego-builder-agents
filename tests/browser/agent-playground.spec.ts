@@ -189,6 +189,7 @@ test('pause, disclosure close and disposal stop playback; tabs support keyboard 
   await expect(lab.getByRole('tab', { name: 'Context', exact: true })).toBeFocused();
   await expect(lab.getByRole('tab', { name: 'Context', exact: true })).toHaveAttribute('aria-selected', 'true');
   await lab.locator('[data-lab-action="play"]').click();
+  await expect(lab.locator('.lab-event')).toHaveCount(3);
   await lab.locator(':scope > summary').click();
   await page.clock.runFor(5000);
   await expect(lab.locator('.lab-event')).toHaveCount(3);

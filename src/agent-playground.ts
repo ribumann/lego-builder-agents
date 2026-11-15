@@ -260,6 +260,10 @@ export function mountAgentPlayground(
   }
 
   function click(event: MouseEvent) {
+    if (event.target instanceof Element && event.target.closest('summary') === root.querySelector(':scope > summary')) {
+      if (root.open) { pause(); render(); }
+      return;
+    }
     const button = event.target instanceof Element ? event.target.closest<HTMLButtonElement>('button') : null;
     if (!button || !root.contains(button) || button.disabled) return;
     if (button.dataset.labAgent) {
