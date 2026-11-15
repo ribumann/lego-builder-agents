@@ -241,6 +241,7 @@ globalThis.azureBoundaries = {
 };
 globalThis.windowsJobBoundary = {
   run(details) {
+    details.signal.addEventListener('abort', notify, { once: true });
     if (process.env.TEST_NATIVE_WINDOWS_JOB === '1') {
       jobEvents.push(details);
       notify();
@@ -346,6 +347,9 @@ process.on('message', message => {
   }
   if (message.action === 'job-started' && jobEvents.length < message.count) {
     waiters.push({ ready: () => jobEvents.length >= message.count, reply }); return;
+  }
+  if (message.action === 'job-aborted' && !jobEvents[message.index ?? 0]?.signal.aborted) {
+    waiters.push({ ready: () => jobEvents[message.index ?? 0]?.signal.aborted, reply }); return;
   }
   if (message.action === 'azure-started' && azureEvents.filter(event => event.type === message.type).length < message.count) {
     waiters.push({ ready: () => azureEvents.filter(event => event.type === message.type).length >= message.count, reply }); return;
@@ -836,7 +840,7 @@ test('Windows text jobs overlap with isolated abort, late cleanup and independen
   assert.equal(state.jobEvents.length, 2, 'Both native jobs start before either completes');
   assert.equal((await server.post()).status, 429);
   await first.body!.cancel();
-  state = await server.command({});
+  state = await server.command({ action: 'job-aborted', index: 0 });
   assert.deepEqual(state.jobEvents.map((event: { aborted: boolean }) => event.aborted), [true, false]);
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 2);
   await server.command({ action: 'job-fail', index: 0, cleanupConfirmed: true });
