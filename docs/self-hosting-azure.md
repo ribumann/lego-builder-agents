@@ -75,6 +75,48 @@ and application settings. Pass `plannerCapacity=200` on subsequent base-template
 deployments; do not restore the former capacity of 1. Wait at least one rate
 window after a change before a separately approved bounded inference check.
 
+### Optional GPT-6.1 Terra deployment
+
+The user-authorized default-model test on 2026-11-15 uses
+`bricklab-planner-terra`: `gpt-6.1-terra` version `2026-10-26`,
+`GlobalStandard`, capacity **40**, with `bricklab-public-safe` and automatic
+version upgrades disabled. Azure accepted this deployment in the dedicated
+Sweden Central account and reports 40 requests/minute and 40,000 tokens/minute.
+Global Standard is not restricted to EU processing. GPT-5.4's existing
+200-unit allocation remains unchanged; there is no automatic model fallback.
+Terra public unit prices were not returned by the queried Azure Retail API;
+do not infer an invoice price from another model.
+
+`infra/terra-planner.bicep` creates only this deployment under an existing
+dedicated account and existing content policy. It does not change the app,
+other deployments, quota limits, identities, or the usage ledger. Confirm the
+exact model/version/SKU and unallocated quota in your account before using it:
+
+```powershell
+az deployment group create --subscription $Subscription --resource-group $Group `
+  --template-file infra\terra-planner.bicep --parameters accountName=$AI capacity=40
+```
+
+To select it, first verify `/api/status` reports no active planning request,
+then update only `AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra` on the existing
+app and restart. Preserve every other setting, the private package pointer,
+the shared 50-submission daily ledger and 20/20 concurrency controls. The base
+template still describes the retained GPT-5.4 deployment; do not redeploy the
+whole base stack to switch a model. After restart verify the intended package,
+an available allowance snapshot and one separately authorized guarded
+submission. A configured status or successful ARM deployment is not proof of
+inference, valid geometry, or a completed local build. One submission may
+make at most two model requests under the bounded correction flow; never
+retry transport, authentication or 429 failures automatically.
+
+To remove only this test deployment after deliberately selecting another
+model and waiting for active requests to finish:
+
+```powershell
+az cognitiveservices account deployment delete --subscription $Subscription `
+  --resource-group $Group --name $AI --deployment-name bricklab-planner-terra
+```
+
 Costs start when resources are provisioned even if the origin is disabled.
 Estimate using your subscription's
 [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/).
