@@ -69,7 +69,7 @@ test('local planning keeps its separate 90-second deadline without Copilot estim
 test('planning estimates use only the explicit brief and only the measured provider', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
-    azurePlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
   } }));
   await page.addInitScript(() => {
     const original = window.fetch;
@@ -168,12 +168,19 @@ test('compatible AI is explicit, localized and preserves attribution', async ({ 
 
 test('hosted Azure planning is separate, explicit, and preserves attribution', async ({ page }) => {
   let calls = 0;
+  let signIns = 0;
+  await page.route('**/api/azure-auth-config', route => {
+    signIns++;
+    return route.fulfill({ status: 503, json: { error: 'Unexpected visitor sign-in' } });
+  });
   await page.route('**/api/status', route => route.fulfill({ json: {
     hosted: true, sessionKey: 'fixture', copilot: false,
-    azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+    publicAllowance: { available: true, remaining: 43, limit: 50 },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Fixture Azure planner ready.' },
   } }));
   await page.route('**/api/azure-plan', route => {
     calls++;
+    expect(route.request().headers().authorization).toBeUndefined();
     expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon', sceneSize: 1000 });
     const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
       design: { name: 'Beacon', bricks: [{ x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' }] } };
@@ -181,11 +188,13 @@ test('hosted Azure planning is separate, explicit, and preserves attribution', a
   });
   await page.goto('/');
   await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  await expect(page.locator('#brief-help')).toContainText('43 of 50 shared planning attempts remain today');
   expect(calls).toBe(0);
   await page.getByLabel('What shall we build?').fill('A blue beacon');
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
   await expect(page.locator('#stage-status')).toContainText('Plan ready');
   expect(calls).toBe(1);
+  expect(signIns).toBe(0);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!));
   expect(saved.source).toBe('azure');
 });
@@ -209,12 +218,14 @@ test('unavailable hosted planner never submits and offline templates remain avai
   expect(calls).toBe(0);
 });
 
-test('a configured local Azure planner is an explicit separate choice', async ({ page }) => {
+test('a configured private Azure planner requires sign-in before submitting', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
     hosted: false, sessionKey: 'fixture', copilot: false,
-    azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'entra', message: 'Fixture Azure planner ready.' },
   } }));
+  await page.route('**/api/azure-auth-config', route =>
+    route.fulfill({ status: 503, json: { error: 'Fixture sign-in unavailable.' } }));
   await page.route('**/api/azure-plan', route => {
     calls++;
     return route.fulfill({ status: 503, json: { error: 'Fixture unavailable.' } });
@@ -225,8 +236,8 @@ test('a configured local Azure planner is an explicit separate choice', async ({
   await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
   expect(calls).toBe(0);
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
-  await expect(page.getByRole('alert')).toContainText('Fixture unavailable');
-  expect(calls).toBe(1);
+  await expect(page.getByRole('alert')).toContainText('Azure sign-in is not configured. No planning request was sent.');
+  expect(calls).toBe(0);
 });
 
 for (const [description, status, contentType, body, message] of [
@@ -237,7 +248,7 @@ for (const [description, status, contentType, body, message] of [
     let calls = 0;
     await page.route('**/api/status', route => route.fulfill({ json: {
       hosted: true, sessionKey: 'fixture', copilot: false,
-      azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Fixture Azure planner ready.' },
     } }));
     await page.route('**/api/azure-plan', route => {
       calls++;
