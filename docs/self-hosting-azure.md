@@ -164,11 +164,15 @@ hostname while its HTTP Host is the custom domain.
 
 The base template's `frontDoorId` is the edge deployment's **Front Door ID**,
 not the profile resource ID. Its origin restriction allows only the Azure
-Front Door backend service tag with that exact ID; SCM is deny-by-default.
-Apply it before opening the origin and verify that direct-origin and wrong-ID
+Front Door backend service tag with that exact ID, followed by an explicit
+catch-all deny; SCM has independent deny-all rules. The App Service public
+network endpoint is enabled because `edge.bicep` uses a public hostname origin,
+not Private Link. With an empty `frontDoorId`, all origin requests are denied.
+Verify that direct-origin and wrong-ID
 requests are denied, and that WAF is associated with both active domains.
-For a fresh deployment, obtain the Front Door ID and install the restriction
-before enabling public origin access. Inspect the returned restrictions and
+For a fresh deployment, obtain the Front Door ID and pass it to the base
+template, or install the same restriction on an existing app as below.
+Inspect the returned restrictions and
 confirm both origin and SCM defaults are `Deny`:
 
 ```bash
@@ -184,13 +188,22 @@ az webapp config access-restriction show --subscription "$SUBSCRIPTION" \
   --resource-group "$RG" --name "$WEB"
 ```
 
-After confirming the restriction and configuring the private package and
-hosted settings below, enable origin access:
+For an older app whose public network endpoint is still disabled, only after
+confirming the restriction and configuring the private package and hosted
+settings below, enable restricted origin access:
 
 ```bash
 az webapp update --subscription "$SUBSCRIPTION" --resource-group "$RG" \
   --name "$WEB" --set publicNetworkAccess=Enabled
 ```
+
+The offline template regression checks compile both Bicep templates and verify
+the bound Front Door-only origin rules, SCM deny-all, attached content-policy
+setting and paid-off default:
+`python -B -m unittest discover -s tests -p test_azure_templates.py`.
+They require Azure CLI with Bicep installed, but do not deploy resources.
+Do not reapply the entire base template to an existing production environment
+as a package rollout; reconcile its resource/settings differences separately.
 
 Verify direct access is denied even when a client supplies the Front Door ID.
 The WAF custom rule limits the paid route per client IP and per edge location;

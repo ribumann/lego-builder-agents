@@ -50,7 +50,7 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
   properties: {
     serverFarmId: plan.id
     httpsOnly: true
-    publicNetworkAccess: 'Disabled'
+    publicNetworkAccess: 'Enabled'
     siteConfig: {
       linuxFxVersion: 'NODE|24-lts'
       minTlsVersion: '1.2'
@@ -84,7 +84,7 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
       ]
       ipSecurityRestrictionsDefaultAction: 'Deny'
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
-      ipSecurityRestrictions: empty(frontDoorId) ? [] : [
+      ipSecurityRestrictions: concat(empty(frontDoorId) ? [] : [
         {
           name: 'frontdoor-only'
           action: 'Allow'
@@ -96,6 +96,22 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
               frontDoorId
             ]
           }
+        }
+      ], [
+        {
+          name: 'deny-all'
+          action: 'Deny'
+          priority: 2147483647
+          ipAddress: 'Any'
+        }
+      ])
+      scmIpSecurityRestrictionsUseMain: false
+      scmIpSecurityRestrictions: [
+        {
+          name: 'deny-all'
+          action: 'Deny'
+          priority: 2147483647
+          ipAddress: 'Any'
         }
       ]
     }
