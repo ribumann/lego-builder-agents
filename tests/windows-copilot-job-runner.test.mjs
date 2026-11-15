@@ -157,6 +157,61 @@ test('Windows job timeout kills its descendants and removes the attachment', { s
   assert.deepEqual((await readdir(tempRoot)).filter(name => name !== 'timeout-child.pid'), []);
 });
 
+test('concurrent Windows jobs isolate attachments and cancellation from another active job',
+  { skip: windowsOnly, timeout: 20_000 }, async t => {
+    const { tempRoot, run } = await createRunner(t);
+    const marker = id => join(tempRoot, `${id}.json`);
+    const gate = join(tempRoot, 'release-second');
+    const script = id => `
+      const fs = require('node:fs');
+      const attachment = process.argv[process.argv.indexOf('--attachment') + 1];
+      fs.writeFileSync(${JSON.stringify(marker(id))}, JSON.stringify({
+        pid: process.pid, attachment, data: fs.readFileSync(attachment).toString('base64')
+      }));
+      const timer = setInterval(() => {
+        if (fs.existsSync(${JSON.stringify(gate)})) {
+          clearInterval(timer);
+          process.stdout.write(${JSON.stringify(id)});
+        }
+      }, 20);
+    `;
+    const controller = new AbortController();
+    // Observe the rejection immediately so a failed fixture cannot leave an unhandled promise.
+    const first = run(['-e', script('first'), '--'], { signal: controller.signal });
+    const firstFailure = assert.rejects(first, /cancelled; attachment cleanup is confirmed/);
+    const second = run(['-e', script('second'), '--']);
+    const readMarker = async id => {
+      for (let attempt = 0; attempt < 250; attempt++) {
+        try { return JSON.parse(await readFile(marker(id), 'utf8')); }
+        catch (error) {
+          if (error.code !== 'ENOENT') throw error;
+          await delay(20);
+        }
+      }
+      assert.fail('Both jobs must start before either is released.');
+    };
+    const [one, two] = await Promise.all([readMarker('first'), readMarker('second')]);
+    assert.notEqual(one.attachment, two.attachment);
+    assert.equal(one.data, image.data);
+    assert.equal(two.data, image.data);
+    controller.abort();
+    await firstFailure;
+    await assertProcessExited(one.pid);
+    await assert.rejects(readFile(one.attachment), error => error.code === 'ENOENT');
+    assert.equal((await readFile(two.attachment)).toString('base64'), image.data,
+      'First cleanup cannot remove the other job attachment');
+    process.kill(two.pid, 0);
+    await writeFile(gate, 'release fixture');
+    const result = await second;
+    assert.equal(result.stdout, 'second');
+    assert.equal(result.cleanupConfirmed, true);
+    assert.equal(result.privateAclVerified, true);
+    await rm(marker('first'));
+    await rm(marker('second'));
+    await rm(gate);
+    await assertEmpty(tempRoot);
+  });
+
 test('Windows job enforces aggregate output limits and confirms cleanup', { skip: windowsOnly }, async t => {
   const { tempRoot, run } = await createRunner(t);
   const script = "process.stdout.write(Buffer.alloc(2 * 1024 * 1024, 65));";

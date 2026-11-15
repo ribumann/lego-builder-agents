@@ -353,14 +353,14 @@ test('raw body accepts exactly 1 MiB at both stages', async t => {
   assert.equal(await createLocalPlanner({ enabled: true, model, url: service.url }).plan('boundary'), answer.response);
 });
 
-test('one request per adapter; concurrency rejection sends nothing and completion releases the lock', async t => {
+test('two requests per adapter overlap; capacity rejection sends nothing and completion releases slots', async t => {
   let release!: () => void;
   let started!: () => void;
   const received = new Promise<void>(resolve => { started = resolve; });
   const gate = new Promise<void>(resolve => { release = resolve; });
   const service = await fakeOllama(t, async (req, res) => {
     if (req.url === '/api/tags') {
-      started();
+      if (service.calls.length === 2) started();
       await gate;
       res.end(JSON.stringify(localTags));
     } else res.end(JSON.stringify(answer));
@@ -368,13 +368,18 @@ test('one request per adapter; concurrency rejection sends nothing and completio
 
   const planner = createLocalPlanner({ enabled: true, model, url: service.url });
   const first = planner.plan('first');
+  const second = planner.plan('second');
   await received;
-  await assert.rejects(planner.plan(privateText), /already in progress/);
-  assert.equal(service.calls.length, 1);
+  await assert.rejects(planner.plan(privateText), error => {
+    assert.equal((error as Error & { statusCode: number }).statusCode, 429);
+    return assertPrivate(error, /capacity is exhausted/);
+  });
+  assert.equal(service.calls.length, 2);
   release();
   assert.equal(await first, answer.response);
+  assert.equal(await second, answer.response);
   assert.equal(await planner.plan('next'), answer.response);
-  assert.equal(service.calls.length, 4);
+  assert.equal(service.calls.length, 6);
 });
 
 test('failed preflight releases the adapter lock without retrying', async t => {

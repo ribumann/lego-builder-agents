@@ -11,6 +11,7 @@ import { planningPrompt } from './planning-prompt.mjs';
 import { resolveSceneSize } from './src/scene-size.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
 import { createLocalPlanner } from './local-planner.mjs';
+import { createPlanningCapacity } from './planning-capacity.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
 import { createAzureBudgetGate } from './azure-budget.mjs';
@@ -75,10 +76,17 @@ const azurePlannerStatus = azureEnabled
     ? 'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
 const liveEnabled = !hosted && process.env.BRICKLAB_COPILOT === '1';
+const planningCapacity = createPlanningCapacity({
+  total: process.env.BRICKLAB_PLANNING_CONCURRENCY === undefined
+    ? 8 : Number(process.env.BRICKLAB_PLANNING_CONCURRENCY),
+  perProvider: process.env.BRICKLAB_PROVIDER_CONCURRENCY === undefined
+    ? 2 : Number(process.env.BRICKLAB_PROVIDER_CONCURRENCY),
+});
 const localPlanner = createLocalPlanner({
   enabled: !hosted && process.env.BRICKLAB_LOCAL_AI === '1',
   model: process.env.BRICKLAB_LOCAL_MODEL || '',
   url: process.env.BRICKLAB_LOCAL_URL,
+  concurrency: planningCapacity.status().perProvider,
 });
 const copilotExecutable = process.env.BRICKLAB_COPILOT_BIN || 'copilot';
 if (process.env.BRICKLAB_COPILOT_BIN
@@ -88,8 +96,20 @@ const copilotImagesEnabled = liveEnabled && process.platform === 'win32'
   && process.env.BRICKLAB_COPILOT_IMAGES === '1'
   && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable);
 const windowsCopilotRunner = copilotImagesEnabled ? createWindowsCopilotJobRunner() : null;
-let copilotImageQuarantined = false;
+let planningQuarantined = false;
 const copilotImageLockMessage = 'Copilot image cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.';
+let planningQuarantineMessage = copilotImageLockMessage;
+const activeControllers = new Set();
+function quarantinePlanning(message = copilotImageLockMessage) {
+  if (planningQuarantined) return;
+  planningQuarantined = true;
+  planningQuarantineMessage = message;
+  console.error(message);
+  // Quarantine is independent of slot release; no late completion may unlock it
+  // or send a new provider call after an ambiguous image cleanup.
+  for (const controller of activeControllers)
+    controller.abort(new Error(message));
+}
 const codespaces = process.env.BRICKLAB_CODESPACES === '1';
 const codespaceName = process.env.CODESPACE_NAME;
 if (codespaces && (!production || process.env.CODESPACES !== 'true'
@@ -110,7 +130,6 @@ const MAX_REQUEST_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 16_384;
 const sessionKey = randomBytes(24).toString('hex');
 let day = new Date().toISOString().slice(0, 10);
 let calls = 0;
-let busy = false;
 let plannerFailure = null;
 const vite = production ? null : await (await import('vite')).createServer({
   root, server: { middlewareMode: true }, appType: 'spa',
@@ -182,7 +201,7 @@ async function verifyPrivatePort() {
 const missingCliOutput = /not installed|not found|install (?:the )?(?:github )?copilot cli/i;
 const missingCliStatus = { state: 'missing-cli', message: 'Copilot CLI is not installed or this command is only a shim. VS Code/app sign-in is separate. Run npm install -g @github/copilot and copilot login in the server terminal, then retry server status. On Windows, BRICKLAB_COPILOT_BIN can select the full native .exe path instead of a shim.' };
 async function plannerStatus() {
-  if (copilotImageQuarantined) return { state: 'unavailable', message: copilotImageLockMessage };
+  if (planningQuarantined) return { state: 'unavailable', message: planningQuarantineMessage };
   if (!liveEnabled) return { state: 'off', message: hosted ? 'Copilot CLI is disabled in hosted mode.'
     : 'Copilot is off. Install with npm install -g @github/copilot, run copilot login in the server terminal, then restart with BRICKLAB_COPILOT=1 (and BRICKLAB_CODESPACES=1 for the private Codespace browser URL).' };
   try {
@@ -243,7 +262,10 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
           // taskkill is the native tree-termination primitive; never use a shell or PATH lookup.
           execFile(resolve(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'),
             ['/PID', String(child.pid), '/T', '/F'], { timeout: 5000, windowsHide: true }, error => {
-              if (error) { console.error('Could not terminate Copilot process tree.'); return; }
+              if (error) {
+                quarantinePlanning('Copilot process-tree termination could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
+                return;
+              }
               treeStopped = true;
               cleanup();
             });
@@ -254,6 +276,7 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
             catch (error) {
               if (error.code === 'ESRCH') return true;
               console.error('Could not terminate Copilot process group.');
+              quarantinePlanning('Copilot process-tree termination could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
               return false;
             }
           };
@@ -318,7 +341,7 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
       });
     }).catch(error => { finish(error); cleanup(); });
   });
-  // The HTTP result may finish at the deadline, but the coordinator remains locked until cleanup.
+  // The HTTP result may finish at the deadline, but this slot remains held until cleanup.
   return { result, finished };
 }
 
@@ -359,7 +382,8 @@ const server = http.createServer(async (req, res) => {
       return send(res, 200, { copilot: liveEnabled && !['missing-cli', 'unavailable'].includes(planner.state),
         calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
         azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
-        copilotImages: copilotImagesEnabled && !copilotImageQuarantined });
+        planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
+        copilotImages: copilotImagesEnabled && !planningQuarantined });
     }
     const localAI = url.pathname === '/api/local-plan';
     const azureAI = url.pathname === '/api/azure-plan';
@@ -370,197 +394,207 @@ const server = http.createServer(async (req, res) => {
     if (!origin || !allowedOrigins.has(origin)
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
-    if (busy) {
+    if (planningQuarantined) {
       req.resume();
-      return send(res, 429, { error: 'The coordinator is already planning. Wait for that request to finish.' });
+      return send(res, 429, { error: planningQuarantineMessage });
     }
-    let body;
-    try { body = await readPlanningBody(req); }
-    catch (error) {
-      if (error instanceof SyntaxError) return send(res, 400, { error: 'Request body must be valid JSON.' });
-      if (error instanceof Error && error.message === 'Request too large.')
-        return send(res, 413, { error: 'Request too large.' });
-      return send(res, 400, { error: 'Could not read the planning request.' });
+    const provider = azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local' : 'copilot';
+    const releaseCapacity = planningCapacity.acquire(provider);
+    if (!releaseCapacity) {
+      req.resume();
+      return send(res, 429, { error: 'Planning capacity is shared across all clients of this server. This provider or the server is at capacity; wait for an active request to finish and retry.' });
     }
-    const imageRequested = Object.hasOwn(body, 'image') || body.imageConsent === true;
-    if (hosted && imageRequested)
-      return send(res, 403, { error: 'Image planning is unavailable in hosted mode.' });
-    if (azureAI && imageRequested)
-      return send(res, 400, { error: 'Image input is not supported by Azure planning.' });
-    let image;
-    try { image = validatePlanningImage(body.image, body.imageConsent); }
-    catch (error) { return send(res, 400, { error: safePlanningError(error) }); }
-    if (compatibleAI && image && !compatibleVisionEnabled)
-      return send(res, 403, { error: 'Compatible AI image input requires the separate BRICKLAB_COMPATIBLE_VISION=1 opt-in.' });
-    const { world, brief, hollowInterior = false, sceneSize } = body;
-    if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
-        || typeof hollowInterior !== 'boolean')
-      return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
-    let target;
-    if (sceneSize !== undefined) {
-      try { target = resolveSceneSize(brief, sceneSize).target; }
-      catch (error) { return send(res, 400, { error: error.message }); }
-    }
-    if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
-      return send(res, 403, { error: azureAI ? azurePlannerStatus.message
-        : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
-        : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
-    if (copilotAI && image && !copilotImagesEnabled)
-      return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
-    const today = new Date().toISOString().slice(0, 10);
-    if (today !== day) { day = today; calls = 0; }
-    if (busy) return send(res, 429, { error: 'The coordinator is already planning. Wait for that request to finish.' });
-    if (copilotAI && calls >= limit) return send(res, 429, { error: `Session daily limit of ${limit} Copilot calls reached. Offline templates and configured Local AI are separate options.` });
-    busy = true;
-    const controller = new AbortController();
-    const interrupted = new Promise(resolvePromise => controller.signal.addEventListener('abort', resolvePromise, { once: true }));
-    const disconnect = () => {
-      if (!res.writableEnded) controller.abort(new Error('Planning request was cancelled by the client.'));
-    };
-    res.once('close', disconnect);
-    let deadline;
-    let heartbeat;
-    let streaming = false;
-    let finished;
-    let azureReservation;
-    const respond = (code, body) => {
-      clearTimeout(heartbeat);
-      if (res.destroyed || res.writableEnded) return;
-      if (streaming) res.end(JSON.stringify({ type: code === 200 ? 'result' : 'error', ...body }) + '\n');
-      else send(res, code, body);
-    };
+    // Reserve before reading a potentially large image body, and retain through
+    // provider/process cleanup rather than only through the HTTP response.
     try {
-      if (res.destroyed || controller.signal.aborted) return;
-      if (copilotAI) calls++;
-      let spec;
-      if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior, target), {
-        image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
-      }), 'Local AI');
-      else {
-        deadline = setTimeout(() => controller.abort(Object.assign(
-          new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
-          { name: 'TimeoutError' })), 300_000);
-        streaming = (req.headers.accept || '').split(',').some(entry => {
-          const [type, ...parameters] = entry.split(';');
-          return type.trim().toLowerCase() === 'application/x-ndjson'
-            && !parameters.some(value => /^\s*q\s*=\s*0(?:\.0*)?\s*$/i.test(value));
-        });
-        if (streaming) {
-          res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store',
-            'X-Accel-Buffering': 'no' });
-          res.flushHeaders();
-          const waiting = () => {
-            if (res.destroyed || res.writableEnded || controller.signal.aborted) return;
-            // Never accumulate heartbeat data behind a slow or stalled client.
-            if (!res.writableNeedDrain) res.write('{"type":"waiting"}\n');
-            heartbeat = setTimeout(waiting, 15_000);
-          };
-          waiting();
-        }
-        if (azureAI) {
-          const work = (async () => {
-            controller.signal.throwIfAborted();
-            try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({ signal: controller.signal }); }
-            catch (error) {
+      let body;
+      try { body = await readPlanningBody(req); }
+      catch (error) {
+        if (error instanceof SyntaxError) return send(res, 400, { error: 'Request body must be valid JSON.' });
+        if (error instanceof Error && error.message === 'Request too large.')
+          return send(res, 413, { error: 'Request too large.' });
+        return send(res, 400, { error: 'Could not read the planning request.' });
+      }
+      const imageRequested = Object.hasOwn(body, 'image') || body.imageConsent === true;
+      if (hosted && imageRequested)
+        return send(res, 403, { error: 'Image planning is unavailable in hosted mode.' });
+      if (azureAI && imageRequested)
+        return send(res, 400, { error: 'Image input is not supported by Azure planning.' });
+      let image;
+      try { image = validatePlanningImage(body.image, body.imageConsent); }
+      catch (error) { return send(res, 400, { error: safePlanningError(error) }); }
+      if (compatibleAI && image && !compatibleVisionEnabled)
+        return send(res, 403, { error: 'Compatible AI image input requires the separate BRICKLAB_COMPATIBLE_VISION=1 opt-in.' });
+      const { world, brief, hollowInterior = false, sceneSize } = body;
+      if (!['jurassic', 'space'].includes(world) || typeof brief !== 'string' || !brief.trim() || brief.length > 1000
+          || typeof hollowInterior !== 'boolean')
+        return send(res, 400, { error: 'Use a valid world and a brief of 1-1,000 characters.' });
+      let target;
+      if (sceneSize !== undefined) {
+        try { target = resolveSceneSize(brief, sceneSize).target; }
+        catch (error) { return send(res, 400, { error: error.message }); }
+      }
+      if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
+        return send(res, 403, { error: azureAI ? azurePlannerStatus.message
+          : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
+          : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
+      if (copilotAI && image && !copilotImagesEnabled)
+        return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
+      const today = new Date().toISOString().slice(0, 10);
+      if (today !== day) { day = today; calls = 0; }
+      if (planningQuarantined) return send(res, 429, { error: planningQuarantineMessage });
+      if (copilotAI && calls >= limit) return send(res, 429, { error: `Session daily limit of ${limit} Copilot calls reached. Offline templates and configured Local AI are separate options.` });
+      const controller = new AbortController();
+      activeControllers.add(controller);
+      const interrupted = new Promise(resolvePromise => controller.signal.addEventListener('abort', resolvePromise, { once: true }));
+      const disconnect = () => {
+        if (!res.writableEnded) controller.abort(new Error('Planning request was cancelled by the client.'));
+      };
+      res.once('close', disconnect);
+      let deadline;
+      let heartbeat;
+      let streaming = false;
+      let finished;
+      let azureReservation;
+      let copilotCall;
+      const respond = (code, body) => {
+        clearTimeout(heartbeat);
+        if (res.destroyed || res.writableEnded) return;
+        if (streaming) res.end(JSON.stringify({ type: code === 200 ? 'result' : 'error', ...body }) + '\n');
+        else send(res, code, body);
+      };
+      try {
+        if (res.destroyed || controller.signal.aborted) return;
+        if (copilotAI) copilotCall = ++calls;
+        let spec;
+        if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior, target), {
+          image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
+        }), 'Local AI');
+        else {
+          deadline = setTimeout(() => controller.abort(Object.assign(
+            new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
+            { name: 'TimeoutError' })), 300_000);
+          streaming = (req.headers.accept || '').split(',').some(entry => {
+            const [type, ...parameters] = entry.split(';');
+            return type.trim().toLowerCase() === 'application/x-ndjson'
+              && !parameters.some(value => /^\s*q\s*=\s*0(?:\.0*)?\s*$/i.test(value));
+          });
+          if (streaming) {
+            res.writeHead(200, { 'Content-Type': 'application/x-ndjson', 'Cache-Control': 'no-store',
+              'X-Accel-Buffering': 'no' });
+            res.flushHeaders();
+            const waiting = () => {
+              if (res.destroyed || res.writableEnded || controller.signal.aborted) return;
+              // Never accumulate heartbeat data behind a slow or stalled client.
+              if (!res.writableNeedDrain) res.write('{"type":"waiting"}\n');
+              heartbeat = setTimeout(waiting, 15_000);
+            };
+            waiting();
+          }
+          if (azureAI) {
+            const work = (async () => {
               controller.signal.throwIfAborted();
-              if (azureMonetaryBudget) {
-                const exhausted = error?.code === 'BUDGET_EXHAUSTED';
-                const windowClosed = error?.code === 'BUDGET_WINDOW_CLOSED';
-                throw Object.assign(new Error(exhausted ? 'The Azure daily inference budget is exhausted.'
-                  : windowClosed ? 'Azure planning is unavailable near the UTC day boundary.'
-                  : 'Azure inference budget or pricing could not be verified; no model request was sent.'),
+              try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({ signal: controller.signal }); }
+              catch (error) {
+                controller.signal.throwIfAborted();
+                if (azureMonetaryBudget) {
+                  const exhausted = error?.code === 'BUDGET_EXHAUSTED';
+                  const windowClosed = error?.code === 'BUDGET_WINDOW_CLOSED';
+                  throw Object.assign(new Error(exhausted ? 'The Azure daily inference budget is exhausted.'
+                    : windowClosed ? 'Azure planning is unavailable near the UTC day boundary.'
+                    : 'Azure inference budget or pricing could not be verified; no model request was sent.'),
+                  { statusCode: exhausted ? 429 : 503 });
+                }
+                const exhausted = error?.message === 'Azure daily planning limit reached.';
+                throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
+                  : 'Azure planning usage could not be reserved; no model request was sent.'),
                 { statusCode: exhausted ? 429 : 503 });
               }
-              const exhausted = error?.message === 'Azure daily planning limit reached.';
-              throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
-                : 'Azure planning usage could not be reserved; no model request was sent.'),
-              { statusCode: exhausted ? 429 : 503 });
-            }
-            // A reservation that completes after cancellation must never start a late model call.
-            controller.signal.throwIfAborted();
-            const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), signal: controller.signal });
-            controller.signal.throwIfAborted();
-            if (parsed?.model !== 'custom')
-              throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
-            return validateCustomSpec(parsed);
-          })();
-          // Hold the shared lock until the adapter actually settles, even if it ignores abort.
-          finished = work.then(() => {}, () => {});
-          spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-        } else if (compatibleAI) {
-          const work = (async () => {
-            const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior, target),
-              image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
-            controller.signal.throwIfAborted();
-            if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
-            return validateCustomSpec(parsed);
-          })();
-          finished = work.then(() => {}, () => {});
-          spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-        } else if (image) {
-          const work = (async () => {
-            const workdir = resolve(root, '.agent-home');
-            await mkdir(workdir, { recursive: true });
-            controller.signal.throwIfAborted();
-            let output;
-            try {
-              output = await windowsCopilotRunner.run({
-                executable: copilotExecutable,
-                args: copilotArguments(planningPrompt(world, brief, hollowInterior, target)),
-                cwd: workdir, image: body.image, imageConsent: body.imageConsent,
-                signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
-              });
-            } catch (error) {
-              if (error?.cleanupConfirmed !== true) {
-                copilotImageQuarantined = true;
-                console.error('Copilot image cleanup could not be confirmed. Planning is locked pending operator verification and restart.');
+              // A reservation that completes after cancellation must never start a late model call.
+              controller.signal.throwIfAborted();
+              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), signal: controller.signal });
+              controller.signal.throwIfAborted();
+              if (parsed?.model !== 'custom')
+                throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
+              return validateCustomSpec(parsed);
+            })();
+            // Hold this slot until the adapter actually settles, even if it ignores abort.
+            finished = work.then(() => {}, () => {});
+            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+          } else if (compatibleAI) {
+            const work = (async () => {
+              const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior, target),
+                image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
+              controller.signal.throwIfAborted();
+              if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
+              return validateCustomSpec(parsed);
+            })();
+            finished = work.then(() => {}, () => {});
+            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+          } else if (image) {
+            const work = (async () => {
+              const workdir = resolve(root, '.agent-home');
+              await mkdir(workdir, { recursive: true });
+              controller.signal.throwIfAborted();
+              let output;
+              try {
+                output = await windowsCopilotRunner.run({
+                  executable: copilotExecutable,
+                  args: copilotArguments(planningPrompt(world, brief, hollowInterior, target)),
+                  cwd: workdir, image: body.image, imageConsent: body.imageConsent,
+                  signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
+                });
+              } catch (error) {
+                if (error?.cleanupConfirmed !== true) quarantinePlanning();
+                throw error;
               }
-              throw error;
-            }
-            if (output?.cleanupConfirmed !== true) {
-              copilotImageQuarantined = true;
-              console.error('Copilot image cleanup could not be confirmed. Planning is locked pending operator verification and restart.');
-              throw new Error('Copilot image cleanup could not be confirmed.');
-            }
-            controller.signal.throwIfAborted();
-            if (output.privateAclVerified !== true || output.exitCode !== 0
-                || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
-                || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
-              throw new Error('Copilot image planning failed closed.');
-            const parsed = extractSpec(readCopilotResponse(output.stdout));
-            plannerFailure = null;
-            return parsed;
-          })();
-          finished = work.then(() => {}, () => {});
-          spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-        } else {
-          const invocation = askCopilot(world, brief, controller.signal, hollowInterior, target);
-          finished = invocation.finished;
-          spec = await invocation.result;
+              if (output?.cleanupConfirmed !== true) {
+                quarantinePlanning();
+                throw new Error('Copilot image cleanup could not be confirmed.');
+              }
+              controller.signal.throwIfAborted();
+              if (output.privateAclVerified !== true || output.exitCode !== 0
+                  || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
+                  || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
+                throw new Error('Copilot image planning failed closed.');
+              const parsed = extractSpec(readCopilotResponse(output.stdout));
+              plannerFailure = null;
+              return parsed;
+            })();
+            finished = work.then(() => {}, () => {});
+            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+          } else {
+            const invocation = askCopilot(world, brief, controller.signal, hollowInterior, target);
+            finished = invocation.finished;
+            spec = await invocation.result;
+          }
         }
+        controller.signal.throwIfAborted();
+        if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
+        respond(200, { spec, ...((azureAI && azureMonetaryBudget) || compatibleAI ? {}
+          : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
+        source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
+      } catch (error) {
+        // Output-limit errors still wait for termination; cancellation/timeout never delays the HTTP result.
+        if (!controller.signal.aborted) await Promise.race([finished, interrupted]);
+        respond(error instanceof SyntaxError ? 400
+          : controller.signal.reason?.name === 'TimeoutError' ? 504 : error?.statusCode === 429 ? 429
+          : azureAI && error?.statusCode === 503 ? 503 : 502,
+        { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
+          : planningQuarantined ? planningQuarantineMessage
+          : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
+            : safePlanningError(error) });
+      } finally {
+        clearTimeout(deadline);
+        clearTimeout(heartbeat);
+        res.removeListener('close', disconnect);
+        await finished;
+        activeControllers.delete(controller);
       }
-      if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-      respond(200, { spec, ...((azureAI && azureMonetaryBudget) || compatibleAI ? {}
-        : { calls: azureAI ? azureReservation.used : calls, limit: azureAI ? azureReservation.limit : limit }),
-      source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
-    } catch (error) {
-      // Output-limit errors still wait for termination; cancellation/timeout never delays the HTTP result.
-      if (!controller.signal.aborted) await Promise.race([finished, interrupted]);
-      respond(error instanceof SyntaxError ? 400
-        : controller.signal.reason?.name === 'TimeoutError' ? 504 : azureAI && error?.statusCode === 429 ? 429
-        : azureAI && error?.statusCode === 503 ? 503 : 502,
-      { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
-        : copilotImageQuarantined ? copilotImageLockMessage
-        : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
-          : safePlanningError(error) });
+      return;
     } finally {
-      clearTimeout(deadline);
-      clearTimeout(heartbeat);
-      res.removeListener('close', disconnect);
-      await finished;
-      if (!copilotImageQuarantined) busy = false;
+      releaseCapacity();
     }
-    return;
   }
   if (vite) return vite.middlewares(req, res);
   try {

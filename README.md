@@ -32,6 +32,41 @@ npm run build
 npm start
 ```
 
+### Shared planning capacity
+
+Each server process admits **8 planning requests total and 2 per provider**
+(Copilot text and images share one provider allowance). Local, compatible and
+Azure requests have separate provider slots: a busy Copilot provider does not
+serialize them. Set `BRICKLAB_PLANNING_CONCURRENCY` (integer 1-32) and
+`BRICKLAB_PROVIDER_CONCURRENCY` (integer 1-8, no greater than total) to lower or
+raise these bounded limits. Invalid configuration prevents startup. The local
+adapter also defaults to 2 simultaneous requests when used independently.
+
+Capacity is shared across clients/tabs, not a browser-local lock or a
+cross-instance semaphore. Excess requests receive HTTP 429, without queuing,
+retrying or submitting a model call. `/api/status` reports `planningCapacity`
+with active total, configured limits, per-provider counts and quarantine state.
+Slots cover body reading, provider work and cleanup; aborts/deadlines end the
+client response but do not release capacity until transport/process cleanup
+settles. Daily Copilot calls and Azure quota/spend reservations are independent
+of capacity and are not refunded on cancellation or failure.
+
+Unconfirmed Copilot image cleanup permanently quarantines **all planning** in
+that process, aborts active requests and prevents late completions from
+unlocking it. Unconfirmed Copilot text process-tree termination likewise
+quarantines planning with an explicit operator-facing error, even if the
+parent process has exited. An operator must verify cleanup before restarting; ordinary
+capacity exhaustion needs only an active request to finish. These changes do
+not enable any provider, paid hosted planning, or update an already-running
+server.
+
+If planning is quarantined, inspect the server's process tree and any private
+attachment/cancellation artifacts with the operator before authorizing
+recovery. A missing parent process is not proof that descendants exited.
+There is no API unlock or automatic quarantine expiry. Restarting also resets
+the process-local Copilot daily counter; it does not carry remaining quota
+forward or reset Azure's durable reservations.
+
 ### Optional OpenAI-compatible provider (private server only)
 
 Set `BRICKLAB_COMPATIBLE_AI=1`, `BRICKLAB_COMPATIBLE_ENDPOINT` to the full

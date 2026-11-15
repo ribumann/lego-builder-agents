@@ -3,6 +3,7 @@ export interface LocalPlannerOptions {
   model: string;
   url?: string;
   timeoutMs?: number;
+  concurrency?: number;
 }
 
 export interface LocalPlanner {
