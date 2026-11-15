@@ -1108,7 +1108,11 @@ setInterval(() => {}, 1000);
     // Container PID 1 may not immediately reap an orphan. A zombie is terminated, not running.
     if (process.platform === 'linux') {
       try { return (await readFile(`/proc/${pid}/stat`, 'utf8')).split(') ')[1].startsWith('Z'); }
-      catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return true; throw error; }
+      catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        if (code === 'ENOENT' || code === 'ESRCH') return true;
+        throw error;
+      }
     }
     return false;
   };
