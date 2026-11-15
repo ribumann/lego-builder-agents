@@ -75,7 +75,12 @@ released until the associated provider/process cleanup settles. In particular,
 unconfirmed process termination must not be described as clean cancellation.
 Fake-provider tests cover timeout and cancellation paths, but current real
 process cleanup and long-running Azure-edge transport have not been verified.
-Do not treat an HTTP timeout alone as proof that backend work stopped.
+The backend's 300-second deadline is distinct from Azure Front Door's
+profile-wide origin response timeout setting of 16-240 seconds
+([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
+That setting does not prove a hard limit on an already-streaming response;
+live long-stream behavior remains unverified. Do not treat an HTTP timeout
+alone as proof that backend work stopped.
 
 ## User consent and optional inputs
 

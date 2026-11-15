@@ -60,8 +60,12 @@ queuing or silently retrying provider requests. Its final integrated revision
 and limits still require owner confirmation. No 2x speed or throughput increase
 has been measured. A 300-second timeout is a release invariant: it must abort
 backend work and keep capacity held until provider/process cleanup settles.
-Fixture-based timeout tests do not establish end-to-end cleanup or a 300-second
-connection through Azure Front Door.
+This backend deadline is distinct from Azure Front Door's documented origin
+response timeout, which is profile-wide and configurable from 16 to 240 seconds
+([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
+That setting does not establish a hard limit for an already-streaming response.
+Fixture-based timeout tests do not establish end-to-end cleanup or long-stream
+reliability through Azure Front Door; that behavior remains unverified.
 
 The target quota scope is daily application quotas for hosted Azure only;
 local and Codespaces use should not have an application daily-call cap. The
