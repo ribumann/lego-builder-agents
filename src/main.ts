@@ -682,6 +682,8 @@ async function makePlan(demo = false) {
   try {
     if (!planningBrief.trim() || planningBrief.length > 1000) throw new Error('Give the team a brief of 1–1,000 characters.');
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
+    const selectedSize = Number($<HTMLSelectElement>('#scene-size').value);
+    const planningSize = mode !== 'local' ? resolveSceneSize(planningBrief, selectedSize) : undefined;
     planning = true; render();
     const image = demo ? undefined : await imageInput?.take();
     controller.signal.throwIfAborted();
@@ -689,7 +691,6 @@ async function makePlan(demo = false) {
     let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
     if (mode !== 'local') {
-      resolveSceneSize(planningBrief, Number($<HTMLSelectElement>('#scene-size').value));
       const localAI = mode === 'local-ai';
       const azure = mode === 'azure';
       const compatible = mode === 'compatible';
@@ -701,7 +702,7 @@ async function makePlan(demo = false) {
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
         body: JSON.stringify({ world, brief: planningBrief,
-          sceneSize: Number($<HTMLSelectElement>('#scene-size').value),
+          sceneSize: selectedSize,
           ...($<HTMLInputElement>('#hollow-interior').checked ? { hollowInterior: true } : {}),
           ...(image ? { image, imageConsent: true } : {}) }), signal: controller.signal });
       const data = await planningResponse(response);
@@ -714,6 +715,7 @@ async function makePlan(demo = false) {
       if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
       source = compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
       assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
+      assumptions.push(`${translate('Approximate planning target:')} ${planningSize!.target} ${translate('bricks')}; ${translate('Selected size:')} ${selectedSize}. ${translate('A rough target, not an exact output guarantee.')}`);
     } else {
       const parsed = parseBrief(world, planningBrief);
       spec = parsed.spec;

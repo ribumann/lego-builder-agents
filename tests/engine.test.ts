@@ -7,6 +7,17 @@ function finish(team: Team) {
   for (let i = 0; i < 2000 && team.status !== 'complete' && team.status !== 'damaged'; i++) team.step(16);
   assert.equal(team.status, 'complete', JSON.stringify(team.checks));
 }
+test('snapshots preserve rough planning target assumptions and accept legacy saves', () => {
+  const { spec } = parseBrief('space', EXAMPLES.space[0]);
+  const assumptions = ['Approximate planning target: 500 bricks; Selected size: 2000. A rough target, not an exact output guarantee.'];
+  const team = new Team(createPlan(spec, assumptions, 'copilot'));
+  const snapshot = team.snapshot('A tower');
+  assert.deepEqual(restoreSnapshot(JSON.parse(JSON.stringify(snapshot))).team.plan.assumptions, assumptions);
+  const { assumptions: _omitted, ...legacy } = snapshot;
+  assert.deepEqual(restoreSnapshot(legacy).team.plan.assumptions, []);
+  assert.throws(() => restoreSnapshot({ ...snapshot, assumptions: [42] }), /assumptions/);
+  assert.throws(() => restoreSnapshot({ ...snapshot, assumptions: ['a'.repeat(1201)] }), /assumptions/);
+});
 for (const world of ['jurassic', 'space'] as World[]) {
   for (const prompt of EXAMPLES[world]) {
     test(`build, inspect, damage, repair and restore: ${prompt}`, () => {
