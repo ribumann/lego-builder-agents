@@ -321,7 +321,8 @@ let copilotImagesEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
 let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
-let azurePlanner = { enabled: false, state: 'off', message: 'Azure planning is unavailable on this server.' };
+let azurePlanner = { enabled: false, state: 'off', authentication: 'entra', message: 'Azure planning is unavailable on this server.' };
+let publicAllowance = '';
 let compatiblePlanner = { enabled: false, state: 'off', message: 'Compatible AI is off.' };
 let planning = false;
 let planningController: AbortController | null = null;
@@ -699,7 +700,7 @@ async function makePlan(demo = false) {
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
-      const azureAccessToken = azure ? await acquireAzurePlanningToken() : undefined;
+      const azureAccessToken = azure && azurePlanner.authentication !== 'anonymous' ? await acquireAzurePlanningToken() : undefined;
       controller.signal.throwIfAborted();
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
@@ -758,7 +759,7 @@ async function makePlan(demo = false) {
         : 'Planning reached the 300-second limit. No new build was started.'
         : 'Planning aborted. No new build was started.'
       : error instanceof Error ? error.message : 'Planning failed. No new build was started.');
-  } finally { wait?.close(); planningController = null; planning = false; render(); }
+  } finally { wait?.close(); planningController = null; planning = false; render(); if (hosted) void refreshStatus(); }
 }
 function updateSpeed() {
   $('#speed').innerHTML = `${icon('fast')}<span>${speed}×</span>`;
@@ -978,7 +979,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   </details>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
-    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. Entra sign-in is required; when enabled, an explicit planning action may open Microsoft sign-in and then send the brief to Azure, which may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
+    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. ${hosted ? 'No visitor sign-in is required; the server uses its managed identity.' : 'Private Azure planning requires Entra sign-in.'} An explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
     <p id="azure-planner-status" role="status">${esc(translate(azurePlanner.message))}</p>
     <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
@@ -1035,7 +1036,7 @@ function updateMode() {
     : mode === 'local-ai'
       ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
       : mode === 'azure'
-        ? 'Plan with Azure Foundry requires Entra sign-in. Pressing the button may open Microsoft sign-in, then sends your brief to Azure and may incur charges for the service owner. Do not enter personal information.'
+        ? `${hosted ? 'No visitor sign-in is required. ' : 'Private planning requires Entra sign-in. '}Pressing Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. Do not enter personal information.${publicAllowance ? ` ${publicAllowance}` : ''}`
         : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
   $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
@@ -1053,11 +1054,19 @@ async function refreshStatus(inDialog = false) {
     if (data.localPlanner && typeof data.localPlanner.message === 'string')
       localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
     if (data.azurePlanner && typeof data.azurePlanner.message === 'string')
-      azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state), message: data.azurePlanner.message };
+      azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state),
+        authentication: data.azurePlanner.authentication === 'anonymous' ? 'anonymous' : 'entra', message: data.azurePlanner.message };
     if (data.compatiblePlanner && typeof data.compatiblePlanner.message === 'string')
       compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state), message: data.compatiblePlanner.message };
     hosted = data.hosted === true;
+    publicAllowance = hosted && data.publicAllowance
+      ? data.publicAllowance.available === true && Number.isInteger(data.publicAllowance.remaining)
+        && Number.isInteger(data.publicAllowance.limit)
+        ? `${data.publicAllowance.remaining} of ${data.publicAllowance.limit} shared planning attempts remain today (UTC). Snapshot only; other visitors can use them.`
+        : 'Shared planning allowance is unavailable; planning fails closed until it can be verified.'
+      : '';
     if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
+    else if (mode === 'azure') updateMode();
     imageInput?.refresh();
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);

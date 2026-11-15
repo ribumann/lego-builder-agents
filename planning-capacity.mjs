@@ -1,8 +1,8 @@
 export function createPlanningCapacity({ total = 8, perProvider = 2 } = {}) {
-  if (!Number.isInteger(total) || total < 1 || total > 32
-      || !Number.isInteger(perProvider) || perProvider < 1 || perProvider > 8
+  if (!Number.isInteger(total) || total < 1 || total > 20
+      || !Number.isInteger(perProvider) || perProvider < 1 || perProvider > 20
       || perProvider > total)
-    throw new Error('Planning capacity requires total 1-32 and per-provider 1-8, not exceeding total.');
+    throw new Error('Planning capacity requires total 1-20 and per-provider 1-20, not exceeding total.');
   const active = new Map();
   let count = 0;
   return {

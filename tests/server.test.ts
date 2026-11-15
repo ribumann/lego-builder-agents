@@ -114,6 +114,7 @@ import { createPlanningQuota } from ${JSON.stringify(new URL('../planning-quota.
 import { createAzureBudgetGate, createAzurePrincipalKey } from ${JSON.stringify(new URL('../azure-budget.mjs', import.meta.url).href)};
 import { createAzureAccessTokenVerifier } from ${JSON.stringify(new URL('../azure-auth.mjs', import.meta.url).href)};
 import { createAzurePlanner } from ${JSON.stringify(new URL('../azure-planner.mjs', import.meta.url).href)};
+import { createWindowsCopilotJobRunner } from ${JSON.stringify(new URL('../src/windows-copilot-job-runner.mjs', import.meta.url).href)};
 const actualReadFile = fs.readFile;
 const actualMkdtemp = fs.mkdtemp;
 let imageDirectories = 0;
@@ -215,14 +216,15 @@ globalThis.azureBoundaries = {
     if (process.env.TEST_REAL_AZURE_BUDGET === '1') {
       const gate = createAzureBudgetGate({ ...config, blobClient: budgetBlob,
         now: () => new Date('2026-11-14T12:00:00Z'), verifyPrices: async () => {}, verifyConfig: async () => {} });
-      return { reserve(details) {
+      return { status: () => gate.status(), reserve(details) {
         azureEvents.push({ type: 'reserve', ...details });
         const work = gate.reserve(details);
         notify();
         return work;
       } };
     }
-    return { reserve: details => boundary('reserve', reservations, details) };
+    return { status: async () => ({ available: false, remaining: null, limit: config.dailyCallLimit }),
+      reserve: details => boundary('reserve', reservations, details) };
   },
   createAzureAccessTokenVerifier(config) {
     if (process.env.TEST_AZURE_PUBLIC_KEY) return createAzureAccessTokenVerifier(config, {
@@ -239,6 +241,13 @@ globalThis.azureBoundaries = {
 };
 globalThis.windowsJobBoundary = {
   run(details) {
+    if (process.env.TEST_NATIVE_WINDOWS_JOB === '1') {
+      jobEvents.push(details);
+      notify();
+      return createWindowsCopilotJobRunner({ tempRoot: process.env.TEST_NATIVE_TEMP }).run({
+        ...details, timeoutMs: 15_000, args: ['-e', process.env.TEST_NATIVE_SCRIPT, '--', ...details.args],
+      });
+    }
     return new Promise((resolve, reject) => {
       jobEvents.push(details);
       jobs.push({ resolve, reject });
@@ -526,7 +535,7 @@ const defaultCapacity = { BRICKLAB_PLANNING_CONCURRENCY: undefined, BRICKLAB_PRO
 
 test('daily quota policy is public-only, deployment-configurable and rejects unsafe public settings', () => {
   assert.deepEqual(createPlanningQuota({ hosted: true, env: {} }),
-    { enabled: true, dailyCallLimit: 12, dailyClientLimit: 3 });
+    { enabled: true, dailyCallLimit: 50, dailyClientLimit: 3 });
   assert.deepEqual(createPlanningQuota({ hosted: true, env: {
     BRICKLAB_AZURE_DAILY_CALLS: '7', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '2',
   } }), { enabled: true, dailyCallLimit: 7, dailyClientLimit: 2 });
@@ -543,8 +552,8 @@ test('daily quota policy is public-only, deployment-configurable and rejects uns
 
 test('planning capacity rejects invalid bounds and an old release cannot free a newer request', () => {
   for (const options of [
-    { total: 0 }, { total: 33 }, { total: 1.5 }, { total: NaN },
-    { perProvider: 0 }, { perProvider: 9 }, { perProvider: Infinity },
+    { total: 0 }, { total: 21 }, { total: 1.5 }, { total: NaN },
+    { perProvider: 0 }, { perProvider: 21 }, { perProvider: Infinity },
     { total: 1, perProvider: 2 },
   ]) assert.throws(() => createPlanningCapacity(options), /Planning capacity requires/);
   const capacity = createPlanningCapacity({ total: 1, perProvider: 1 });
@@ -854,6 +863,82 @@ test('Windows text cleanup ambiguity aborts another job and late clean completio
   assert.equal((await server.post()).status, 429);
 });
 
+test('normal HTTP Windows text dispatch contains real detached descendants, isolates timeout and quarantines host loss',
+  { skip: process.platform !== 'win32', timeout: 30_000 }, async t => {
+    const root = await mkdtemp(join(tmpdir(), 'bricklab-http-native-'));
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const gate = join(root, 'release-second');
+    const marker = (id: string) => join(root, `${id}.json`);
+    const script = `
+      const fs = require('node:fs');
+      const prompt = process.argv[process.argv.indexOf('-p') + 1];
+      const id = prompt.includes('First native text') ? 'first' : 'second';
+      if (process.argv.includes('--attachment') || !process.argv.includes('--available-tools=')) process.exit(51);
+      const child = require('node:child_process').spawn(process.execPath,
+        ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
+      child.unref();
+      fs.writeFileSync(require('node:path').join(${JSON.stringify(root)}, id + '.json'),
+        JSON.stringify({ leader: process.pid, descendant: child.pid, host: process.ppid }));
+      const timer = setInterval(() => {
+        if (id === 'second' && fs.existsSync(${JSON.stringify(gate)})) {
+          clearInterval(timer); child.kill();
+          process.stdout.write(${JSON.stringify(JSON.stringify({ type: 'assistant.message',
+            data: { content: JSON.stringify(lifecycleSpec) } }) + '\n' + JSON.stringify({ type: 'result', exitCode: 0 }) + '\n')});
+        }
+      }, 20);
+    `;
+    const server = await startLifecycleServer(t, 'win32', { ...defaultCapacity,
+      TEST_NATIVE_WINDOWS_JOB: '1', TEST_NATIVE_TEMP: root, TEST_NATIVE_SCRIPT: script });
+    const first = await server.post(ndjson, JSON.stringify({ world: 'space', brief: 'First native text' }));
+    const firstBody = first.text();
+    const readMarker = async (id: string) => {
+      for (let attempt = 0; attempt < 400; attempt++) {
+        try { return JSON.parse(await readFile(marker(id), 'utf8')); }
+        catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+          await new Promise(resolve => setTimeout(resolve, 20));
+        }
+      }
+      assert.fail('Real native text process must start through the HTTP route');
+    };
+    const one = await readMarker('first');
+    await server.command({ action: 'advance', ms: 100_000 });
+    const second = server.post({}, JSON.stringify({ world: 'space', brief: 'Second native text' }));
+    const two = await readMarker('second');
+    assert.notEqual(one.host, two.host);
+    assert.equal((await (await server.get()).json() as any).planningCapacity.active, 2);
+    await server.command({ action: 'advance', ms: 200_000 });
+    assert.match(streamEvents(await firstBody).at(-1).error, /300 seconds/);
+    const until = Date.now() + 10_000;
+    while ((await (await server.get()).json() as any).planningCapacity.active !== 1) {
+      assert.ok(Date.now() < until, 'Timeout must terminate and await its actual native job');
+      await new Promise(resolve => setTimeout(resolve, 20));
+    }
+    for (const pid of [one.leader, one.descendant, one.host])
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+    for (const pid of [two.leader, two.descendant, two.host]) process.kill(pid, 0);
+    await writeFile(gate, 'release second native job');
+    assert.equal((await second).status, 200);
+    assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
+    assert.equal((await server.command({})).count, 0, 'No raw Copilot spawn was used');
+    await rm(marker('first'));
+    const lost = server.post({}, JSON.stringify({ world: 'space', brief: 'First native text host loss' }));
+    const three = await readMarker('first');
+    const runtime = join(process.env.LOCALAPPDATA!, 'Microsoft', 'WindowsApps',
+      'Microsoft.PowerShell_8wekyb3d8bbwe', 'pwsh.exe');
+    const stopped = spawnSync(runtime, ['-NoLogo', '-NoProfile', '-NonInteractive', '-Command',
+      `Stop-Process -Id ${three.host} -ErrorAction Stop`], { windowsHide: true, timeout: 10_000 });
+    assert.ifError(stopped.error);
+    assert.equal(stopped.status, 0);
+    assert.equal((await lost).status, 502);
+    const status = await (await server.get()).json() as any;
+    assert.equal(status.planningCapacity.active, 1, 'Unknown native cleanup retains its charged slot');
+    assert.equal(status.planningCapacity.quarantined, true);
+    assert.equal((await server.post()).status, 429);
+    for (const pid of [three.leader, three.descendant])
+      assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' });
+  });
+
 const azureFixtureEnv = {
   TEST_PUBLIC_QUOTA: '1',
   BRICKLAB_AZURE_AI: '1',
@@ -870,6 +955,98 @@ const azureFixtureEnv = {
   BRICKLAB_ENTRA_REQUIRED_SCOPE: 'BrickLab.Plan',
   BRICKLAB_ENTRA_REQUIRED_ROLE: 'BrickLab.Planner',
 };
+
+const anonymousHostedEnv = {
+  ...azureFixtureEnv, ...defaultCapacity, BRICKLAB_HOSTED: '1',
+  BRICKLAB_AZURE_DAILY_CALLS: undefined,
+  BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+  BRICKLAB_ENTRA_TENANT_ID: '', BRICKLAB_ENTRA_API_CLIENT_ID: '', BRICKLAB_ENTRA_SPA_CLIENT_ID: '',
+  TEST_REAL_AZURE_BUDGET: '1',
+};
+
+test('anonymous hosted route uses managed identity configuration with twenty isolated simultaneous plans and a public allowance', { timeout: 20_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', anonymousHostedEnv);
+  let status = await (await server.get()).json() as any;
+  assert.equal(status.azurePlanner.authentication, 'anonymous');
+  assert.deepEqual(status.publicAllowance, { available: true, day: '2026-11-14', used: 0, limit: 50, remaining: 50 });
+  assert.equal(status.planningCapacity.total, 20);
+  assert.equal(status.planningCapacity.perProvider, 20);
+  assert.equal((await server.get('/api/azure-auth-config')).status, 404);
+  assert.equal((await server.azurePost({ Origin: 'https://unrelated.example', Authorization: '' })).status, 403);
+  assert.equal((await server.azurePost({ 'X-Bricklab-Key': '', Authorization: '' })).status, 403);
+  assert.equal((await server.azurePost({ Authorization: '' }, '{}')).status, 400);
+  const requests: Promise<Response>[] = [];
+  for (let index = 0; index < 20; index++) {
+    requests.push(server.azurePost({ Authorization: '' }, JSON.stringify({ world: 'space', brief: `Public fixture ${index}` })));
+    await server.command({ action: 'azure-started', type: 'plan', count: index + 1 });
+  }
+  assert.equal((await server.azurePost({ Authorization: '' })).status, 429);
+  let state = await server.command({});
+  assert.equal(state.budgetState.calls, 20, 'Capacity rejection does not consume an attempt');
+  assert.equal(state.budgetState.reservedMicros, 11_000_000);
+  assert.deepEqual(state.budgetState.clientCalls, {}, 'Anonymous callers are not represented as verified identities');
+  status = await (await server.get()).json() as any;
+  assert.equal(status.planningCapacity.active, 20, 'All twenty plans overlap before any is completed');
+  assert.equal(status.publicAllowance.remaining, 30);
+  for (let index = 19; index >= 0; index--) {
+    const spec = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: `Result ${index}` } };
+    await server.command({ action: 'azure-complete', index, spec });
+    const response = await requests[index];
+    assert.equal(response.status, 200);
+    assert.equal((await response.json() as any).spec.design.name, `Result ${index}`);
+  }
+  state = await server.command({});
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 20, 'No preliminary model request or retries');
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
+});
+
+test('anonymous hosted requests share an atomic fifty-call boundary and failed work is never refunded', async t => {
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
+    TEST_BUDGET_STATE: JSON.stringify({ day: '2026-11-14', reservedMicros: 26_950_000, calls: 49, clientCalls: {} }),
+  });
+  const pending = [server.azurePost({ Authorization: '' }), server.azurePost({ Authorization: '' })];
+  await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+  await server.command({ action: 'azure-fail' });
+  const responses = await Promise.all(pending);
+  assert.deepEqual(responses.map(response => response.status).sort(), [429, 502]);
+  const state = await server.command({});
+  assert.equal(state.budgetState.calls, 50);
+  assert.equal(state.budgetState.reservedMicros, 27_500_000);
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 1);
+  const status = await (await server.get()).json() as any;
+  assert.deepEqual(status.publicAllowance, { available: true, day: '2026-11-14', used: 50, limit: 50, remaining: 0 });
+  assert.equal((await server.azurePost({ Authorization: '' })).status, 429);
+});
+
+test('anonymous hosted deadline aborts upstream, retains its slot through cleanup and leaves another request untouched', async t => {
+  const server = await startLifecycleServer(t, 'linux', anonymousHostedEnv);
+  const first = await server.azurePost({ Authorization: '', ...ndjson });
+  await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+  await server.command({ action: 'advance', ms: 100_000 });
+  const second = server.azurePost({ Authorization: '' });
+  await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+  await server.command({ action: 'advance', ms: 200_000 });
+  const events = streamEvents(await first.text());
+  assert.equal(events.at(-1).type, 'error');
+  assert.match(events.at(-1).error, /300 seconds/);
+  let state = await server.command({});
+  assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted), [true, false]);
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 2);
+  await server.command({ action: 'azure-complete', spec: lifecycleSpec });
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 1);
+  await server.command({ action: 'azure-complete', index: 1, spec: lifecycleSpec });
+  assert.equal((await second).status, 200);
+  state = await server.command({});
+  assert.equal(state.budgetState.calls, 2);
+});
+
+test('anonymous hosted route fails closed when global durable reservation is unavailable', async t => {
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv, TEST_BUDGET_STATE: '{}' });
+  const status = await (await server.get()).json() as any;
+  assert.deepEqual(status.publicAllowance, { available: false, limit: 50, remaining: null });
+  assert.equal((await server.azurePost({ Authorization: '' })).status, 503);
+  assert.deepEqual((await server.command({})).azureEvents.map((event: any) => event.type), ['reserve']);
+});
 
 async function startSignedBudgetServer(t: TestContext, env: NodeJS.ProcessEnv = {}) {
   const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
@@ -1042,7 +1219,7 @@ test('private Azure spend-budget opt-in retains CAS dollar protection but no pub
 });
 
 test('300-second deadline actually closes Azure and compatible mock HTTP transports without aborting another request', { timeout: 25_000 }, async t => {
-  for (const adapter of ['azure', 'compatible']) await t.test(adapter, async t => {
+  for (const adapter of ['azure', 'azure-public', 'compatible']) await t.test(adapter, async t => {
     const requests: import('node:http').ServerResponse[] = [];
     let firstStarted!: () => void;
     let bothStarted!: () => void;
@@ -1069,11 +1246,13 @@ test('300-second deadline actually closes Azure and compatible mock HTTP transpo
     const endpoint = `http://127.0.0.1:${address.port}/fixture`;
     const signedServer = adapter === 'azure'
       ? await startSignedBudgetServer(t, { TEST_AZURE_HTTP_ENDPOINT: endpoint }) : null;
-    const server = signedServer ?? await startLifecycleServer(t, 'linux', { ...defaultCapacity,
-      BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_COMPATIBLE_ENDPOINT: endpoint, BRICKLAB_COMPATIBLE_MODEL: 'fixture' });
+    const server = signedServer ?? (adapter === 'azure-public'
+      ? await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv, TEST_AZURE_HTTP_ENDPOINT: endpoint })
+      : await startLifecycleServer(t, 'linux', { ...defaultCapacity,
+      BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_COMPATIBLE_ENDPOINT: endpoint, BRICKLAB_COMPATIBLE_MODEL: 'fixture' }));
     const authorization = signedServer ? `Bearer ${await signedServer.token(signedServer.principal(1))}` : '';
     const post = (payload = JSON.stringify({ world: 'space', brief: 'Deadline fixture' })) =>
-      fetchWithHost(`${server.base}/api/${adapter}-plan`, { method: 'POST',
+      fetchWithHost(`${server.base}/api/${adapter === 'azure-public' ? 'azure' : adapter}-plan`, { method: 'POST',
         headers: { ...server.headers, ...ndjson, ...(authorization ? { Authorization: authorization } : {}) },
         body: payload, stream: true });
     const first = await post();
@@ -1099,7 +1278,7 @@ test('300-second deadline actually closes Azure and compatible mock HTTP transpo
       message: { role: 'assistant', content: JSON.stringify(lifecycleSpec) } }] }));
     assert.equal(streamEvents(await secondBody).at(-1).type, 'result');
     assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
-    if (adapter === 'azure') {
+    if (adapter.startsWith('azure')) {
       const state = await server.command({});
       assert.equal(state.budgetState.calls, 2);
       assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted),
@@ -1430,7 +1609,7 @@ test('hosted mode is anonymous static/offline only with exact host/origin bounds
   assert.equal(status.localPlanner.enabled, false);
   assert.equal(status.azurePlanner.enabled, false);
   assert.equal(status.azurePlanner.state, 'off');
-  assert.match(status.azurePlanner.message, /blocked.*public edge/);
+  assert.match(status.azurePlanner.message, /off.*static\/offline/);
   for (const Host of ['localhost:4173', 'bricklab.azurewebsites.net', 'attacker.example',
     'bricklab.liberatetheinnerchild.net:443', 'bricklab.liberatetheinnerchild.net.', 'BRICKLAB.liberatetheinnerchild.net']) {
     assert.equal((await get('/', { Host, 'X-Forwarded-Host': headers.Host, 'X-Forwarded-For': '127.0.0.1' })).status, 403);
@@ -1463,7 +1642,7 @@ test('hosted origin can be configured for a second exact HTTPS domain', { timeou
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents, []);
 });
 
-test('hosted public planning stays blocked and unsafe/incomplete startup configuration fails closed', () => {
+test('hosted paid planning defaults off and unsafe/incomplete public configuration fails startup', () => {
   const cases: [NodeJS.ProcessEnv, string[]][] = [
     [{ BRICKLAB_HOSTED: '1' }, []],
     [{ BRICKLAB_HOSTED: '1', BRICKLAB_CODESPACES: '1' }, ['--production']],

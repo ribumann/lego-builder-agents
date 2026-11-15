@@ -15,12 +15,7 @@ param packageUploaderObjectId string
 @description('Public Azure planning requests per UTC day across all app instances; does not enable paid planning.')
 @minValue(1)
 @maxValue(100)
-param azureDailyCalls int = 12
-
-@description('Public Azure planning requests per verified principal per UTC day.')
-@minValue(1)
-@maxValue(3)
-param azureDailyClientCalls int = 3
+param azureDailyCalls int = 50
 
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 var webName = 'bricklab-${suffix}'
@@ -75,8 +70,12 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
           value: string(azureDailyCalls)
         }
         {
-          name: 'BRICKLAB_AZURE_DAILY_CLIENT_CALLS'
-          value: string(azureDailyClientCalls)
+          name: 'BRICKLAB_PLANNING_CONCURRENCY'
+          value: '20'
+        }
+        {
+          name: 'BRICKLAB_PROVIDER_CONCURRENCY'
+          value: '20'
         }
       ]
       ipSecurityRestrictionsDefaultAction: 'Deny'
@@ -235,7 +234,7 @@ resource contentFilter 'Microsoft.CognitiveServices/accounts/raiPolicies@2024-10
   }
 }
 
-resource model 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
+resource model 'Microsoft.CognitiveServices/accounts/deployments@2024-10-01' = {
   parent: ai
   name: 'bricklab-planner-gpt54'
   sku: {
@@ -243,6 +242,7 @@ resource model 'Microsoft.CognitiveServices/accounts/deployments@2023-05-01' = {
     capacity: 1
   }
   properties: {
+    raiPolicyName: contentFilter.name
     model: {
       format: 'OpenAI'
       name: 'gpt-5.4'

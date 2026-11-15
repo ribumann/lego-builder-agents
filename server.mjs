@@ -42,8 +42,6 @@ if (hosted) {
 if (hosted && (!production || process.env.BRICKLAB_CODESPACES === '1'
     || !Number.isInteger(port) || port < 1 || port > 65535))
   throw new Error('BRICKLAB_HOSTED=1 requires production, a valid PORT and no Codespace mode. Hosted mode serves public static/offline content only.');
-if (hosted && process.env.BRICKLAB_AZURE_AI === '1')
-  throw new Error('Hosted Azure planning is blocked pending a verified public edge with abuse and quota protections. Leave BRICKLAB_AZURE_AI off for public static/offline serving.');
 if (hosted && process.env.BRICKLAB_COMPATIBLE_AI === '1')
   throw new Error('Compatible AI cannot be enabled in public hosted mode.');
 const compatibleVisionEnabled = process.env.BRICKLAB_COMPATIBLE_VISION === '1';
@@ -56,7 +54,7 @@ const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
 const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
 const planningQuota = createPlanningQuota({ hosted });
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
-const azureAuthConfig = azureEnabled ? getAzureAuthConfig() : null;
+const azureAuthConfig = azureEnabled && !hosted ? getAzureAuthConfig() : null;
 const verifyAzureAccessToken = azureAuthConfig
   ? createAzureAccessTokenVerifier(azureAuthConfig) : null;
 const planAzure = azureEnabled ? createAzurePlanner({
@@ -79,19 +77,20 @@ const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate(
     dailyClientLimit: planningQuota.dailyClientLimit } : {}),
   enforceDailyCallQuota: planningQuota.enabled,
   clientHashSecret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
-  requireClientKey: planningQuota.enabled,
+  requireClientKey: planningQuota.enabled && !hosted,
 }) : null;
 const azurePlannerStatus = azureEnabled
-  ? { enabled: true, state: 'configured', message: `Azure planning and Entra sign-in are configured, not verified. ${azureMonetaryBudget ? 'Explicit requests reserve the estimated-spend budget before inference; no refunds.' : planningQuota.enabled ? 'Explicit requests reserve durable public quota before inference; no refunds.' : 'No application daily request quota applies on this private server.'} Only an explicit planning request sends a brief. No retries.` }
+  ? { enabled: true, state: 'configured', authentication: hosted ? 'anonymous' : 'entra',
+    message: `Azure planning is configured, not verified, and uses the server managed identity.${hosted ? ' No visitor sign-in is required.' : ' Private Azure planning requires Entra sign-in.'} ${azureMonetaryBudget ? 'Explicit requests reserve the estimated-spend budget before inference; no refunds.' : 'No application daily request quota applies on this private server.'} Only an explicit planning request sends a brief. No retries.` }
   : { enabled: false, state: 'off', message: hosted
-    ? 'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.'
+    ? 'Azure planning is off; only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
 const liveEnabled = !hosted && process.env.BRICKLAB_COPILOT === '1';
 const planningCapacity = createPlanningCapacity({
   total: process.env.BRICKLAB_PLANNING_CONCURRENCY === undefined
-    ? 8 : Number(process.env.BRICKLAB_PLANNING_CONCURRENCY),
+    ? hosted ? 20 : 8 : Number(process.env.BRICKLAB_PLANNING_CONCURRENCY),
   perProvider: process.env.BRICKLAB_PROVIDER_CONCURRENCY === undefined
-    ? 2 : Number(process.env.BRICKLAB_PROVIDER_CONCURRENCY),
+    ? hosted ? 20 : 2 : Number(process.env.BRICKLAB_PROVIDER_CONCURRENCY),
 });
 const localPlanner = createLocalPlanner({
   enabled: !hosted && process.env.BRICKLAB_LOCAL_AI === '1',
@@ -369,8 +368,8 @@ const server = http.createServer(async (req, res) => {
   res.setHeader('Referrer-Policy', 'no-referrer');
   if (hosted) {
     res.setHeader('Cache-Control', 'no-store');
-    // Host/Origin bounds are NOT authentication. Hosted mode is public static/offline only;
-    // no principal or forwarded IP header establishes a trusted paid-planning boundary here.
+    // Host/Origin checks are not visitor authentication. Public requests must
+    // reserve the shared global budget; forwarded headers never establish identity.
     if (!allowedHosts.has(req.headers.host)
         || (req.headers.origin !== undefined && !allowedOrigins.has(req.headers.origin)))
       return send(res, 403, { error: 'Use the exact hosted HTTPS app host and origin.' });
@@ -402,7 +401,8 @@ const server = http.createServer(async (req, res) => {
         calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
         azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
         planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
-        planningQuota,
+        planningQuota: hosted ? { ...planningQuota, dailyClientLimit: null } : planningQuota,
+        ...(hosted && azureBudget ? { publicAllowance: await azureBudget.status() } : {}),
         copilotImages: copilotImagesEnabled && !planningQuarantined });
     }
     if (req.method === 'GET' && url.pathname === '/api/azure-auth-config') {
@@ -428,7 +428,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
     if (azureAI && !azureEnabled) return send(res, 403, { error: azurePlannerStatus.message });
     let azurePrincipal;
-    if (azureAI) {
+    if (azureAI && !hosted) {
       if (!verifyAzureAccessToken) return send(res, 503, { error: 'Azure sign-in is not configured; no model request was sent.' });
       try { azurePrincipal = await verifyAzureAccessToken(req.headers.authorization); }
       catch (error) {
@@ -484,8 +484,8 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, { error: azureAI ? azurePlannerStatus.message
           : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
-      const azureClient = azureAI && planningQuota.enabled && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
-      if (azureAI && planningQuota.enabled && azureMonetaryBudget && !azureClient)
+      const azureClient = azureAI && !hosted && planningQuota.enabled && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
+      if (azureAI && !hosted && planningQuota.enabled && azureMonetaryBudget && !azureClient)
         return send(res, 503, { error: 'Azure planning rate limits could not be verified; no model request was sent.' });
       if (copilotAI && image && !copilotImagesEnabled)
         return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
@@ -636,7 +636,8 @@ const server = http.createServer(async (req, res) => {
         }
         controller.signal.throwIfAborted();
         if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-        respond(200, { spec, ...((azureAI && (azureMonetaryBudget || !planningQuota.enabled)) || compatibleAI ? {}
+        respond(200, { spec, ...(hosted && azureAI ? { calls: azureReservation.calls, limit: azureReservation.dailyCallLimit } : {}),
+        ...((azureAI && (azureMonetaryBudget || !planningQuota.enabled)) || compatibleAI ? {}
           : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
         source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
       } catch (error) {
@@ -676,7 +677,7 @@ const server = http.createServer(async (req, res) => {
 });
 server.listen(port, host, () => {
   console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'} | Local AI: ${localPlanner.status().state}`);
-  if (hosted) console.warn('Hosted public static/offline mode only: all planning providers are disabled. Paid Azure planning is blocked pending a verified public edge. Deployment and platform protections have NOT been verified by this server.');
+  if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with mandatory shared estimated-spend/call reservations' : 'static/offline only; Azure planning is off'}. Deployment and platform protections have NOT been verified by this server. Keep one worker until a distributed in-flight bound is verified.`);
   if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(); vite?.close().then(() => process.exit(0)); });

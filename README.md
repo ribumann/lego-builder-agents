@@ -34,11 +34,12 @@ npm start
 
 ### Shared planning capacity
 
-Each server process admits **8 planning requests total and 2 per provider**
+Each private server process admits **8 planning requests total and 2 per provider**.
+Public hosted Azure defaults to **20 total and 20 Azure requests** per process
 (Copilot text and images share one provider allowance). Local, compatible and
 Azure requests have separate provider slots: a busy Copilot provider does not
-serialize them. Set `BRICKLAB_PLANNING_CONCURRENCY` (integer 1-32) and
-`BRICKLAB_PROVIDER_CONCURRENCY` (integer 1-8, no greater than total) to lower or
+serialize them. Set `BRICKLAB_PLANNING_CONCURRENCY` (integer 1-20) and
+`BRICKLAB_PROVIDER_CONCURRENCY` (integer 1-20, no greater than total) to lower or
 raise these bounded limits. Invalid configuration prevents startup. The local
 adapter also defaults to 2 simultaneous requests when used independently.
 
@@ -50,15 +51,25 @@ Slots cover body reading, provider work and cleanup; aborts/deadlines end the
 client response but do not release capacity until transport/process cleanup
 is confirmed. Ambiguous Copilot jobs remain charged while globally quarantined.
 Daily request quotas apply only to public hosted Azure, independently
-of capacity: `BRICKLAB_AZURE_DAILY_CALLS` defaults to 12 (1-100) and
-`BRICKLAB_AZURE_DAILY_CLIENT_CALLS` defaults to 3 (1-3 per verified principal).
-They are deployment environment settings; invalid public settings fail startup.
+of capacity: `BRICKLAB_AZURE_DAILY_CALLS` defaults to **50** (integer 1-100).
+It is a deployment environment setting; invalid public settings fail startup.
+The anonymous public page displays a read-only remaining-allowance snapshot;
+other visitors may consume it before a request is admitted. No visitor sign-in
+or reliable per-client identity is claimed. One App Service worker/process is
+required for the deployment-wide 20-request in-flight bound; the daily
+Blob CAS allowance is shared across instances. These are upper bounds, not
+guarantees of model throughput.
 Local servers and Codespaces have no daily request quota, even if those settings
 or the obsolete `BRICKLAB_DAILY_CALLS` are supplied. Copilot `calls` is informational
 and `limit` is null. Provider subscription quotas and compute costs still apply.
 Explicit private Azure spend-budget opt-in retains its atomic monetary
 reservation ceiling without daily request/client caps; reservations are never
-refunded on cancellation or failure. Public paid activation remains blocked.
+refunded on cancellation or failure. Public Azure also requires this monetary
+gate, which fails closed before inference if state, pricing, deployment or
+the actually attached blocking policy cannot be verified. Managed identity
+authenticates the server to Azure; no model credential is sent to the browser.
+The infrastructure default remains `BRICKLAB_AZURE_AI=0`; code readiness
+does not establish live deployment readiness or authorize paid activation.
 
 Unconfirmed Copilot image cleanup permanently quarantines **all planning** in
 that process, aborts active requests and prevents late completions from
@@ -66,7 +77,7 @@ unlocking it. Unconfirmed Copilot text process-tree termination likewise
 quarantines planning with an explicit operator-facing error, even if the
 parent process has exited. An operator must verify cleanup before restarting; ordinary
 capacity exhaustion needs only an active request to finish. These changes do
-not enable any provider, paid hosted planning, or update an already-running
+not automatically enable any provider, paid hosted planning, or update an already-running
 server.
 
 If planning is quarantined, inspect the server's process tree and any private

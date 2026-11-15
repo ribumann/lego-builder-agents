@@ -6,8 +6,9 @@ have provisioned the individual resources. One staging deployment loaded a
 private Blob package with managed identity, and a non-paid synthetic stream
 completed after 271.6 seconds; an earlier stream closed early. Full
 reproducibility, reliable streaming, edge protections and hosted model
-generation have not been verified. The current server deliberately refuses
-to enable the hosted Azure planner. Do not remove that safeguard to make the site appear ready.
+generation have not been verified. The current code supports an anonymous
+managed-identity Azure wrapper with mandatory global reservations; deployment
+defaults keep paid planning off until the real configuration is verified.
 Until these checks and the application integration are complete, this is a
 staging guide, not a production recipe.
 
@@ -57,20 +58,17 @@ and [DNS](https://azure.microsoft.com/pricing/details/dns/).
 For inference, the current gate verifies the
 [Sweden Central GPT-5.4 Data Zone retail meters](https://prices.azure.com/api/retail/prices?%24filter=productName%20eq%20%27Azure%20OpenAI%20GPT5%27%20and%20armRegionName%20eq%20%27swedencentral%27%20and%20%28skuName%20eq%20%275.4%20inp%20Dz%27%20or%20skuName%20eq%20%275.4%20opt%20Dz%27%29)
 before every call and reserves $0.55 against a $50 UTC-day budget. The default
-application limit is 12 calls per day (at most $6.60 of estimated reservations)
-and three calls per verified principal per day. Daily request/client caps apply
+application limit is 50 calls per day (at most $27.50 of estimated reservations).
+Daily request caps apply
 only to the public hosted deployment; local servers and Codespaces have no
 daily request quota. Explicit private spend-budget mode retains its monetary
 ceiling without request/client daily caps. The global call and dollar counters and
-pseudonymous client counters share the same private Blob state and use ETag
+optional legacy principal counters share the same private Blob state and use ETag
 conditional writes, so concurrent reservations from separate app instances
-cannot exceed those limits. legacy dollar-only state is read conservatively
-and is never reset. Monetary-budget client counts are keyed by an HMAC of the
-verified Entra `tid` and `oid` claims; only the HMAC and count are stored.
-Forwarded IP headers do not establish identity. The HMAC secret must be a
-stable, random 32-byte value in a Key Vault reference or protected App Service
-setting. Rotating it resets per-client fairness for the current UTC day but
-does not reset global counters.
+cannot exceed global limits. Legacy dollar-only state is read conservatively
+and is never reset. Public users are anonymous; no reliable per-client fairness
+or identity is claimed. No visitor Entra registration or client-hash secret is
+required. The page shows a read-only global remaining-allowance snapshot.
 
 The $50 daily dollar reservation is a second backstop, not a hard cap on your
 Azure bill or a guarantee of actual charges: contract prices, later price or
@@ -79,8 +77,10 @@ hosting, storage, network and tax are outside the gate. Azure Cost Management
 budgets alert rather than stop spending; configure alerts separately. The
 Front Door WAF rate rule is also approximate, not authentication or a global
 spend limit. Do not scale the App Service above one worker without adding and
-verifying a shared in-flight semaphore; the bounded capacity (8 total, 2 per
-provider by default) is per process. See [budget limitations](azure-planner.md).
+verifying a shared in-flight semaphore; hosted bounded capacity (20 total,
+20 per provider by default) is per process, not guaranteed model throughput.
+Local/Codespace defaults remain 8 total and 2 per provider.
+See [budget limitations](azure-planner.md).
 
 ## Provision isolated resources
 
@@ -232,43 +232,32 @@ environment without relaxing your network policy.
 
 The hosted app settings are `HOST=0.0.0.0`, `BRICKLAB_HOSTED=1`, and the
 exact `BRICKLAB_HOSTED_ORIGIN`. Azure injects `PORT`. For the currently
-blocked paid planner the intended additional settings are
+opt-in paid planner the additional settings are
 `BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`,
 `AZURE_OPENAI_RESOURCE_ID`, `AZURE_STORAGE_ACCOUNT`, and
 `BRICKLAB_AZURE_BUDGET_CONTAINER=usage`,
 `BRICKLAB_AZURE_CONTENT_FILTER_POLICY=bricklab-public-safe`,
-`BRICKLAB_AZURE_CLIENT_HASH_KEY`, `BRICKLAB_AZURE_DAILY_CALLS` (default 12;
-integer 1-100), and `BRICKLAB_AZURE_DAILY_CLIENT_CALLS` (default 3; integer 1-3).
-The Bicep parameters `azureDailyCalls` and `azureDailyClientCalls` wire these
-quota settings into the web app while leaving `BRICKLAB_AZURE_AI=0`.
+`BRICKLAB_AZURE_DAILY_CALLS` (default 50; integer 1-100),
+`BRICKLAB_PLANNING_CONCURRENCY=20` and `BRICKLAB_PROVIDER_CONCURRENCY=20`.
+The Bicep parameter `azureDailyCalls` wires the global daily allowance
+into the web app while leaving `BRICKLAB_AZURE_AI=0`.
 Changing a quota does not enable paid planning. Invalid public quota settings
 fail startup; private local/Codespace settings are ignored. No deployment was
 performed to validate these settings on the live app. Resource identifiers and the content-filter policy name are
-not secrets. Store the client-hash key as a protected setting, never in source
-control or a browser. Configure the Entra settings
-`BRICKLAB_ENTRA_TENANT_ID`, `BRICKLAB_ENTRA_API_CLIENT_ID`,
-`BRICKLAB_ENTRA_SPA_CLIENT_ID`, `BRICKLAB_ENTRA_REQUIRED_SCOPE=BrickLab.Plan`,
-and `BRICKLAB_ENTRA_REQUIRED_ROLE=BrickLab.Planner`. Create a single-tenant
-API registration with v2 access tokens, the delegated scope and the user/group
-app role; assign only approved users/groups and require role assignment on its
-enterprise application. Create a separate SPA registration, grant only the
-delegated API scope, and register the exact HTTPS site origin as its redirect
-URI. The API audience is the API app ID GUID and `azp` must be the configured
-SPA app ID. No client secret is needed or accepted by BrickLab.
-
-The server validates the Entra signature, tenant-specific v2 issuer, audience,
-tenant ID, authorized SPA client, delegated scope and app role before it reads
-the request body or reserves budget. The browser requests an API access token
-with MSAL only after the user explicitly starts Azure planning; its token cache
-uses session storage. `/api/azure-auth-config` returns public registration
-identifiers only. Missing auth configuration fails startup. This code has not
-been verified against a real tenant or role assignment.
+not secrets. Public visitors do not sign in; the server's managed identity
+authenticates to model, configuration and storage APIs. No model credential
+is sent to the browser. The Entra/MSAL option remains for separately configured
+private Azure servers, not the anonymous public lab.
 
 The base Bicep template creates the named policy with
 blocking filters for medium/high violence, hate, sexual and self-harm input
 and output, direct jailbreak detection, and protected-text/code output
-detection. The app verifies that exact policy through Azure Resource Manager
-before reserving budget and sends `x-policy-id` on every model call; filtered
+detection. The model deployment explicitly sets `raiPolicyName` to that policy.
+The app verifies both the attachment and exact policy through Azure Resource
+Manager before reserving budget; merely creating an unattached policy is not
+sufficient. Live deployments reporting `Microsoft.DefaultV2` do not satisfy
+this configured-policy check; inspect/attach the reviewed policy before activation.
+The adapter also sends `x-policy-id` on every model call; filtered
 or annotated-blocked responses are rejected without retries. If the read-back
 is missing, denied, or has weaker settings, the request fails before inference.
 The identity may need a narrowly scoped read-only role on the dedicated
@@ -279,22 +268,18 @@ image handling.
 
 These settings are **not authorization to enable the paid route**. Do not
 enable Copilot, Codespaces, or local-model modes on the public instance. The
-hosted Azure startup guard remains in place. The origin/session-token check is
-not user authentication: a public visitor can obtain the browser token. The
-new Entra verifier and MSAL client are implemented locally, but require
-operator-created app registrations and role assignments plus real-tenant
-validation before paid access can be considered. Do not treat WAF throttling
-or a shared daily quota as a substitute for authentication. The static/offline
-lab remains public and unchanged.
+hosted setting defaults to `BRICKLAB_AZURE_AI=0`. The origin/session-token check
+is not user authentication: a public visitor can obtain the browser token.
+Global durable reservations provide the application spending/call boundary;
+WAF throttling is only approximate defense in depth. Anonymous visitors may
+exhaust the shared allowance, so no per-client fairness guarantee is made.
+The static/offline lab remains available without inference.
 
-Before any public paid deployment, configure and verify the Entra app-role
-token flow for the planner route while leaving the static application
-anonymous; the current App Service Easy Auth exclusion model does not itself
-provide a simple protected-only API path. Verify exact Host and Origin
+Before any public paid deployment, verify the managed-identity model/storage
+access and actually attached blocking policy. Verify exact Host and Origin
 handling, direct-origin denial, WAF association, durable shared request and
-dollar reservations under concurrent requests from separate instances, and
-the protected client hash setting. Per-client counters are now keyed by an
-HMAC of the validated tenant/object IDs, not forwarded IP addresses. Keep the plan at one worker unless a shared
+dollar reservations under concurrent requests from separate instances.
+Keep the plan at one worker and one Node server process unless a shared
 in-flight semaphore is added. Use a
 non-paid synthetic heartbeat stream through the actual edge to test beyond
 the approximately 240-second platform boundary; separately verify that a

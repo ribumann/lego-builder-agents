@@ -123,16 +123,30 @@ test('pricing and storage failures deny reservations without disclosing details'
   assert.throws(() => gate(blob, { endpoint: 'https://other.openai.azure.com' }), /matching Azure OpenAI/);
 });
 
+test('public allowance is read-only, global and explicit about unavailable or exhausted state', async () => {
+  const blob = fakeBlob(JSON.stringify({ day: '2026-11-14', reservedMicros: 27_500_000, calls: 50, clientCalls: {} }));
+  const budget = gate(blob, { dailyCallLimit: 50 });
+  assert.deepEqual(await budget.status(), { available: true, day: '2026-11-14', used: 50, limit: 50, remaining: 0 });
+  assert.equal(blob.state().calls, 50, 'Status cannot reserve or refund');
+  assert.deepEqual(await gate(fakeBlob('{}'), { dailyCallLimit: 50 }).status(),
+    { available: false, limit: 50, remaining: null });
+  const dollars = gate(fakeBlob('{"day":"2026-11-14","reservedMicros":50000000,"calls":90}'), { dailyCallLimit: 100 });
+  assert.equal((await dollars.status()).remaining, 0, 'Spend ceiling may exhaust before configured call ceiling');
+});
 test('deployment verification rejects a different model, SKU, region, or key-enabled account', async () => {
   const account = { name: 'example-openai', kind: 'OpenAI', location: 'swedencentral',
     properties: { customSubDomainName: 'example-openai', disableLocalAuth: true, provisioningState: 'Succeeded' } };
   const model = { sku: { name: 'DataZoneStandard' }, properties: { provisioningState: 'Succeeded',
+    raiPolicyName: contentFilterPolicy,
     model: { format: 'OpenAI', name: 'gpt-5.4', version: '2026-03-05' } } };
   const credential = { async getToken() { return { token: 'test-token' }; } };
   const verify = (a, m, p = policy) => verifyDeploymentConfig({ resourceId, deployment, contentFilterPolicy, credential,
     fetchImpl: async url => new Response(JSON.stringify(url.includes('/deployments/') ? m
       : url.includes('/raiPolicies/') ? p : a)) });
   await verify(account, model);
+  for (const raiPolicyName of [undefined, 'Microsoft.DefaultV2', 'unattached-policy'])
+    await assert.rejects(verify(account, { ...model, properties: { ...model.properties, raiPolicyName } }),
+      /Deployment or content filter/);
   await assert.rejects(verify({ ...account, location: 'westeurope' }, model));
   await assert.rejects(verify({ ...account, properties: { ...account.properties, disableLocalAuth: false } }, model));
   await assert.rejects(verify(account, { ...model, sku: { name: 'GlobalStandard' } }));

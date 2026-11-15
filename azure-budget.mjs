@@ -58,6 +58,7 @@ export async function verifyDeploymentConfig({ resourceId, deployment, contentFi
       || model.sku?.name !== 'DataZoneStandard' || model.properties?.provisioningState !== 'Succeeded'
       || model.properties?.model?.format !== 'OpenAI' || model.properties?.model?.name !== 'gpt-5.4'
       || model.properties?.model?.version !== '2026-03-05'
+      || model.properties?.raiPolicyName?.toLowerCase() !== contentFilterPolicy.toLowerCase()
       || !isSafeContentFilterPolicy(policy, contentFilterPolicy))
     throw new Error('Deployment or content filter does not match the reviewed configuration.');
 }
@@ -145,7 +146,52 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
     return date.toISOString().slice(0, 10);
   }
 
+  async function readState(today, signal) {
+    const response = await blobClient.download(0, undefined, { abortSignal: signal });
+    if (!response.etag || !response.readableStreamBody
+        || (response.contentLength !== undefined && response.contentLength > MAX_STATE_BYTES)) {
+      response.readableStreamBody?.destroy();
+      throw new Error('Invalid budget state.');
+    }
+    const chunks = [];
+    let size = 0;
+    for await (const chunk of response.readableStreamBody) {
+      size += chunk.length;
+      if (size > MAX_STATE_BYTES) throw new Error('Budget state too large.');
+      chunks.push(chunk);
+    }
+    const state = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+    const clients = state?.clientCalls === undefined ? {} : state.clientCalls;
+    // Legacy spend cannot safely establish an unused request allowance.
+    const calls = state?.calls === undefined
+      ? enforceDailyCallQuota && state?.day === today && state?.reservedMicros > 0 ? dailyCallLimit : 0 : state.calls;
+    if (!state || typeof state !== 'object' || Array.isArray(state)
+        || typeof state.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.day)
+        || !Number.isSafeInteger(state.reservedMicros) || state.reservedMicros < 0 || state.reservedMicros > DAILY_LIMIT
+        || !Number.isInteger(calls) || calls < 0 || calls > 100
+        || !clients || typeof clients !== 'object' || Array.isArray(clients) || Object.keys(clients).length > MAX_CLIENTS
+        || Object.entries(clients).some(([key, count]) =>
+          !/^[0-9a-f]{64}$/.test(key) || !Number.isInteger(count) || count < 1 || count > 100)
+        || Object.values(clients).reduce((sum, count) => sum + count, 0) > calls
+        || new Date(`${state.day}T00:00:00Z`).toISOString().slice(0, 10) !== state.day || state.day > today)
+      throw new Error('Invalid budget state.');
+    return { etag: response.etag, spent: state.day === today ? state.reservedMicros : 0,
+      calls: state.day === today ? calls : 0, clients: state.day === today ? clients : {} };
+  }
+
   return {
+    async status() {
+      try {
+        const day = currentDay();
+        const state = await readState(day, AbortSignal.timeout(5000));
+        if (currentDay() !== day) throw new Error('UTC day changed.');
+        return { available: true, day, used: state.calls, limit: dailyCallLimit,
+          remaining: Math.max(0, Math.min(dailyCallLimit - state.calls,
+            Math.floor((DAILY_LIMIT - state.spent) / RESERVATION))) };
+      } catch {
+        return { available: false, limit: dailyCallLimit, remaining: null };
+      }
+    },
     async reserve({ signal, clientKey } = {}) {
       try {
         currentDay();
@@ -159,40 +205,7 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
         ]);
         for (let attempt = 0; attempt < 5; attempt++) {
           const today = currentDay();
-          const response = await blobClient.download(0, undefined, { abortSignal: signal });
-          if (!response.etag || !response.readableStreamBody
-              || (response.contentLength !== undefined && response.contentLength > MAX_STATE_BYTES)) {
-            response.readableStreamBody?.destroy();
-            throw new Error('Invalid budget state.');
-          }
-          const chunks = [];
-          let size = 0;
-          for await (const chunk of response.readableStreamBody) {
-            size += chunk.length;
-            if (size > MAX_STATE_BYTES) throw new Error('Budget state too large.');
-            chunks.push(chunk);
-          }
-          const state = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
-          const previousClients = state?.clientCalls === undefined ? {} : state.clientCalls;
-          // Legacy spend may include cheaper modalities, so it cannot safely imply a call count.
-          const previousCalls = state?.calls === undefined
-            ? enforceDailyCallQuota && state?.day === today && state?.reservedMicros > 0 ? dailyCallLimit : 0 : state.calls;
-          if (!state || typeof state !== 'object' || Array.isArray(state)
-              || typeof state.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.day)
-              || !Number.isSafeInteger(state.reservedMicros) || state.reservedMicros < 0
-              || state.reservedMicros > DAILY_LIMIT
-              || !Number.isInteger(previousCalls) || previousCalls < 0 || previousCalls > 100
-              || !previousClients || typeof previousClients !== 'object' || Array.isArray(previousClients)
-              || Object.keys(previousClients).length > MAX_CLIENTS
-              || Object.entries(previousClients).some(([key, count]) =>
-                !/^[0-9a-f]{64}$/.test(key) || !Number.isInteger(count) || count < 1 || count > 100)
-              || Object.values(previousClients).reduce((sum, count) => sum + count, 0) > previousCalls
-              || new Date(`${state.day}T00:00:00Z`).toISOString().slice(0, 10) !== state.day
-              || state.day > today)
-            throw new Error('Invalid budget state.');
-          const spent = state.day === today ? state.reservedMicros : 0;
-          const calls = state.day === today ? previousCalls : 0;
-          const clients = state.day === today ? previousClients : {};
+          const { etag, spent, calls, clients } = await readState(today, signal);
           if (enforceDailyCallQuota && calls >= dailyCallLimit)
             throw failure('BUDGET_CALL_LIMIT', 'The Azure daily planning request limit is exhausted.');
           if (enforceDailyCallQuota && clientKey && (clients[clientKey] ?? 0) >= dailyClientLimit)
@@ -206,7 +219,7 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
           try {
             if (currentDay() !== today) throw new Error('UTC day changed.');
             await blobClient.upload(body, Buffer.byteLength(body), {
-              abortSignal: signal, conditions: { ifMatch: response.etag },
+              abortSignal: signal, conditions: { ifMatch: etag },
               blobHTTPHeaders: { blobContentType: 'application/json' },
             });
             if (currentDay() !== today) throw new Error('UTC day changed.');

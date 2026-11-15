@@ -1,142 +1,107 @@
-# Azure OpenAI planner adapter
+# Azure Foundry planner
 
-`azure-planner.mjs` is a separately configured adapter, not a deployment. It uses the
-hosting resource's managed identity and requires `AZURE_OPENAI_ENDPOINT` (an
-HTTPS `*.openai.azure.com` resource endpoint) and `AZURE_OPENAI_DEPLOYMENT`.
-Grant that identity the Cognitive Services OpenAI User role on its dedicated
-Azure OpenAI resource. No key or developer credentials are used.
+The Azure OpenAI adapter makes one managed-identity-authenticated HTTP request
+to the configured Foundry model deployment. It needs no Copilot CLI, agent
+runtime, client API key or preliminary model call. The five visible game agents
+execute and check the returned geometry locally; they are not five model calls.
 
-The caller supplies the shared planning prompt and an AbortSignal to
-`planAzure({ prompt, signal })`, then validates the returned custom design and
-selected world. The adapter sends one request, caps output tokens and response
-size, rejects incomplete responses, and invokes inference only once without a
-fallback. The identity SDK may retry its own token acquisition requests.
+## Anonymous public deployment
 
-Do not enable it on a public service until real user authentication, exact host
-and origin checks, shared abuse/spend limits, safe content filtering, transport
-timeouts and cancellation are configured and verified. The Entra route/client
-code is implemented in the release worktree but has not been validated against
-a real tenant. Configuration alone does not establish model access or
-successful generation.
+Set `BRICKLAB_HOSTED=1`, production serving, the exact HTTPS
+`BRICKLAB_HOSTED_ORIGIN`, and the settings below. Infrastructure defaults to
+`BRICKLAB_AZURE_AI=0`: do not enable paid inference until deployment verification
+is complete. Code/fixture verification is not a claim of live availability.
 
-The optional `BRICKLAB_AZURE_AI=1` integration is restricted to the existing
-local or private-Codespace API boundaries and requires production serving and
-Entra configuration; estimated-spend protection is a separate private opt-in
-described below. `BRICKLAB_HOSTED=1` serves the anonymous lab separately:
-it disables every planner, including Azure, pending verified public edge
-protections. Never copy a personal Copilot credential into a public host.
-For a separately hosted lab, set `BRICKLAB_HOSTED_ORIGIN` to its exact HTTPS
-DNS origin (for example `https://lab.example.org`), with no port, path or
-trailing slash. The default is `https://bricklab.liberatetheinnerchild.net`.
-This configures host/origin checks only; it does not verify a trusted edge.
+| Setting | Contract |
+| --- | --- |
+| `BRICKLAB_AZURE_AI` | Explicit opt-in `1`; otherwise Azure planning is off |
+| `AZURE_OPENAI_ENDPOINT` | HTTPS `*.openai.azure.com` endpoint |
+| `AZURE_OPENAI_DEPLOYMENT` | Reviewed model deployment name |
+| `AZURE_OPENAI_RESOURCE_ID` | Matching Azure OpenAI account ARM ID |
+| `AZURE_STORAGE_ACCOUNT` | Private reservation-state storage account |
+| `BRICKLAB_AZURE_BUDGET_CONTAINER` | Private container containing `daily-budget.json` |
+| `BRICKLAB_AZURE_CONTENT_FILTER_POLICY` | Verified policy actually attached to the model |
+| `BRICKLAB_AZURE_DAILY_CALLS` | Shared UTC-day call limit; default **50**, integer 1-100 |
+| `BRICKLAB_PLANNING_CONCURRENCY` | Hosted default **20**, integer 1-20 |
+| `BRICKLAB_PROVIDER_CONCURRENCY` | Hosted default **20**, integer 1-20, not above total |
 
-The private Azure route now has a fail-closed Entra access-token verifier and
-the browser obtains a delegated token with MSAL only after the user explicitly
-starts Azure planning. The API checks the signature and v2 issuer, exact API
-audience, tenant, SPA client (`azp`), delegated scope and app role. Configure
-the API and SPA registrations and assign a user/group before enabling Azure.
-The anonymous static/offline app remains separate. These code paths have not
-been validated against a real tenant or enabled on the hosted app; the hosted
-paid-provider startup block remains in place.
+No visitor Entra sign-in or client-hash secret is required for the public site.
+The host's managed identity authenticates to Azure services. Grant it
+Cognitive Services OpenAI User on the dedicated account, sufficient read-only
+account/deployment/policy access, and Storage Blob Data Contributor on the
+reservation container. Pre-provision `daily-budget.json` with
+`{"day":"2000-01-01","reservedMicros":0}`; never delete/reset it to fix a failure.
 
-Public daily request quotas do **not** enforce an inference spending cap.
-Public planning must remain disabled until the hosted monetary
-budget and real user authentication are configured and verified. Neither the
-inference reservation nor Azure budget alerts are a hard cap on the Azure bill.
+Every valid admitted request must atomically reserve a call and **$0.55 of
+estimated inference spend** before inference. Global calls and the **$50/UTC-day
+estimated-spend ceiling** share one Blob ETag conditional update across app
+instances. Missing/corrupt/inaccessible state, failed verification or unresolved
+CAS contention denies inference. Reservations are never refunded on validation
+failure, provider failure, cancellation or disconnect. There are no automatic
+model retries or hidden fallback.
 
-Daily request quotas are scoped to **public hosted Azure only**. Configure
-`BRICKLAB_AZURE_DAILY_CALLS` (default 12, integer 1-100) and
-`BRICKLAB_AZURE_DAILY_CLIENT_CALLS` (default 3, integer 1-3) through deployment
-environment settings. Invalid public settings prevent startup. Local servers
-and private Codespaces have no daily request/client cap, regardless of these
-settings or the obsolete `BRICKLAB_DAILY_CALLS`; local Copilot counters are
-informational. Azure sign-in and bounded concurrency still apply. No quota
-storage is contacted by an ordinary private Azure request.
+The page displays the global remaining allowance from a bounded read-only
+status operation. It is a snapshot, not a held reservation; other visitors can
+consume it. Unavailable state is reported explicitly, never as unused quota.
+Anonymous users have no verified per-client identity; legacy principal-limit
+settings do not establish public fairness. WAF throttles, if deployed, are
+best-effort abuse mitigation, not the global spend/call accounting mechanism.
 
-`azure-usage.mjs` remains an independently usable legacy request-count gate,
-not the private server's default and not a monetary guarantee. The public
-deployment uses the combined monetary/request/principal CAS budget below,
-without a legacy-gate fallback. Never delete or reset reservation state to
-troubleshoot.
-For the GPT-5.4 Data Zone model, `azure-budget.mjs` provides an atomic
-estimated-inference-cost, request-count and per-client reservation gate.
-Hosted planning remains blocked; the gate can be exercised on the private
-server by setting
-`BRICKLAB_AZURE_BUDGET=1` and `BRICKLAB_AZURE_BUDGET_CONTAINER` alongside the
-Azure adapter settings. On a private server this selects estimated-spend
-protection only, with no global request/client daily cap and no fallback. Pre-provision `daily-budget.json`
-in a private Blob container with `{"day":"2000-01-01","reservedMicros":0}`
-and grant the host identity Storage Blob Data Contributor on that container.
-Set `AZURE_OPENAI_RESOURCE_ID` to the Azure OpenAI account's ARM resource ID.
-The host identity also needs read access to that account, deployment and
-content-filter policy. The server validates the request and acquires its
-per-process in-flight slot before reserving budget and starting inference.
-Exhaustion, a UTC day boundary, request/client limits, and unavailable state,
-configuration or pricing fail closed.
+Keep **one App Service worker and one Node server process** for a whole-app
+20-request in-flight upper bound. Capacity is process-local, not a distributed
+semaphore. Provider quotas may permit less throughput. Capacity exhaustion
+returns explicit shared-server HTTP 429 without queuing or reserving a call.
+Front Door is optional for the model API; an existing edge/WAF must be verified
+with the actual NDJSON transport rather than assumed reliable.
 
-The gate checks the account, identity-only authentication, region, deployed
-model version, SKU and content-filter policy against the reviewed configuration
-via Azure Resource Manager on every call. It reserves $0.55 per request against
-$50 per UTC day, using a conservative 128,000 input-token allowance and 12,000
-completion tokens including reasoning. Public hosted request/principal caps
-share the budget blob and are conditionally updated across app instances.
-A stable 32-byte `BRICKLAB_AZURE_CLIENT_HASH_KEY` is required for public per-principal
-accounting. The server HMACs the `tid` and `oid` claims only after token
-verification; raw identity claims are not persisted. IP limits and forwarded
-headers are not identity. Private spend-budget mode does not require this
-principal quota key. The per-process capacity defaults to 8 total requests and
-2 per provider; it is not a distributed semaphore. Keep the App Service at
-one worker until a shared in-flight bound is independently verified.
+## Model, safety and monetary limits
 
-At the 300-second deadline, the request's AbortSignal cancels the adapter,
-not just its HTTP response. The slot remains held until its work/transport
-settles. A simultaneous request retains its own deadline and signal; a late
-completion cannot return a scene or refund its committed reservation.
-It checks the current Sweden Central GPT-5.4 Data Zone retail meters before
-every reservation and denies calls if they exceed $2.75 input or $16.50 output
-per million tokens. The pinned policy must block medium/high severity for
-prompt and completion violence, hate, sexual and self-harm; direct jailbreak
-prompts and protected text/code completions are also blocked. It is sent via
-`x-policy-id` for every request and policy contents are read back before
-reservation. Filtered responses are rejected and never retried. Reservations
-are never refunded. Calls cannot start within six minutes of UTC midnight.
-Azure image input is explicitly rejected before reservation or provider
-invocation; this text-only policy has not been verified for image safety.
-Missing, corrupt or inaccessible state fails closed; never delete or reset it
-to troubleshoot.
+The current monetary verifier pins Sweden Central, OpenAI GPT-5.4 version
+`2026-03-05`, DataZoneStandard and identity-only account authentication.
+It checks model deployment configuration and requires `properties.raiPolicyName`
+to match the configured policy, then reads that policy's blocking filters.
+An existing but unattached custom policy is insufficient. A different/default
+attached policy is not assumed unfiltered, but is rejected unless it matches
+the reviewed configuration; do not silently relabel `Microsoft.DefaultV2`.
+The Bicep deployment explicitly attaches `bricklab-public-safe`.
 
-This is an inference estimate, not a guarantee of the entire Azure bill: retail
-pricing may differ from the subscription's actual contract, prices may change
-after verification, billing timing and tokenization may differ, and hosting,
-network, storage, tax and other usage are excluded. It only covers calls through
-this gate to the pinned deployment, not other clients or model deployments.
-The older `azure-usage.mjs` request-count gate is separate and is not the $50
-budget. Platform WAF rate limits are approximate per-IP/per-edge controls, not
-authentication or a global spend limit. The current public hosted startup guard remains active. Its origin/session
-token check is not user authentication. The Entra route and MSAL client
-integration exist in the release worktree, but no real app registration,
-role assignment, tenant token validation, or public paid request has been
-verified. Do not remove the hosted guard before those checks and operator
-setup are complete.
+The reviewed policy blocks medium/high prompt/completion violence, hate,
+sexual and self-harm content, direct jailbreak prompts and protected text/code
+completions. Filtered/incomplete outputs are rejected, not retried. Azure image
+requests are rejected before reservation/inference; text-only checks do not
+establish image safety.
 
-For Entra setup, use one single-tenant API app registration and one SPA app
-registration. Configure the API to issue v2 access tokens, expose the
-delegated `BrickLab.Plan` scope, and define the `BrickLab.Planner` user/group
-app role. Assign only the approved user/group to that role, require assignment
-on the API enterprise application, and grant the SPA only the delegated API
-scope. Register the exact HTTPS site origin as the SPA redirect URI. Configure:
+Retail verification permits up to $2.75 input and $16.50 output per million
+tokens for the pinned deployment. The reservation assumes 128,000 input tokens
+and 12,000 completion tokens, including reasoning, despite the smaller actual
+prompt. Contract pricing, billing timing, later configuration changes and
+other callers can differ. This is **not a hard cap on the Azure bill**:
+hosting, storage, network, tax and other usage are excluded. Subscription-wide
+governance and spend analysis remain the operator's responsibility.
 
-- `BRICKLAB_ENTRA_TENANT_ID`: the directory tenant GUID.
-- `BRICKLAB_ENTRA_API_CLIENT_ID`: the API app ID GUID (the expected v2 `aud`).
-- `BRICKLAB_ENTRA_SPA_CLIENT_ID`: the SPA app ID GUID (the expected `azp`).
-- `BRICKLAB_ENTRA_REQUIRED_SCOPE=BrickLab.Plan`.
-- `BRICKLAB_ENTRA_REQUIRED_ROLE=BrickLab.Planner`.
+## Lifecycle and output
 
-The browser-facing `/api/azure-auth-config` exposes only these non-secret
-registration identifiers and the API scope URI. MSAL uses session storage,
-tries silent token acquisition first, and prompts only from the user's Azure
-planning action. No client secret or provider token is stored by BrickLab.
-Missing or invalid server settings prevent Azure startup; missing, invalid,
-wrong-tenant, wrong-audience, wrong-client, expired, wrong-scope, or
-unassigned-role tokens are rejected before request parsing, reservation or
-inference.
+The adapter caps prompts at 32,000 bytes, provider envelopes at 1 MiB and final
+JSON at 128,000 bytes, requesting at most 12,000 completion tokens. Geometry and
+selected world are validated locally before a scene can start.
+
+At 300 seconds the request AbortSignal cancels the real upstream transport;
+client disconnect cancels only that request. Its slot stays held until the
+adapter settles. Late completion cannot create a scene or refund a reservation.
+Transport cancellation does not prove that the remote service stops computing
+or billing. Calls are denied within six minutes of UTC midnight to avoid
+unaccounted cross-day work. Actual proxy delivery/timeouts need live validation.
+
+## Local servers and private Codespaces
+
+There is **no application daily call or client cap** locally or in Codespaces,
+including obsolete `BRICKLAB_DAILY_CALLS`. Private Azure retains its separately
+configured Entra verifier/MSAL flow and exact Host/Origin/session-token checks.
+Configure `BRICKLAB_ENTRA_TENANT_ID`, `BRICKLAB_ENTRA_API_CLIENT_ID`,
+`BRICKLAB_ENTRA_SPA_CLIENT_ID`, scope and role for that private option.
+
+Ordinary private Azure does not contact quota storage. Explicit
+`BRICKLAB_AZURE_BUDGET=1` retains atomic estimated-spend protection without
+daily request/principal caps. Local/Codespace capacity defaults remain 8 total
+and 2 per provider. No real tenant, paid inference, live Azure deployment or
+parked Ollama/BYO provider was exercised by these fixture tests.
