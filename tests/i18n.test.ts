@@ -11,7 +11,7 @@ test('planning estimates stay provider-specific in every supported language', ()
     const azure = planningDescription('Azure Foundry', 'A 500-brick lighthouse');
     assert.match(copilot, /55–175/);
     assert.doesNotMatch(azure, /55–175/);
-    assert.match(azure, /Azure Foundry/);
+    assert.match(azure, /Azure[ -]Foundry/);
     assert.match(azure, /300/);
     const image = planningDescription('Copilot', 'A 500-brick lighthouse', true);
     assert.doesNotMatch(image, /55–175|20–183/);
