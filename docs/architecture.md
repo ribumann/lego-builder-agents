@@ -67,9 +67,11 @@ the next package.
 
 ### Provisional hosted-planning contract
 
-The following is the backend owner's contract proposal, received before its
-immutable commit SHA and full final verification. It is not a statement of
-current deployed behavior or availability:
+The following is the backend owner's contract proposal. The backend branch
+contains commit `61e5c000b26b95e9f2cfbca715a4199b63404168`, but related worktree
+edits remain uncommitted and the full final run is pending. No immutable
+revision yet contains all of these details. This is not a statement of current
+deployed behavior or availability:
 
 - The hosted lab remains anonymous. The backend app uses managed identity for
   Azure services; visitor Entra sign-in and a client-hash key are not part of
@@ -96,7 +98,7 @@ current deployed behavior or availability:
   the shared slot remains held and all planning is quarantined.
 - The backend owner reports focused overlap/quota/unavailable-state tests and
   an anonymous adapter socket-close test at 300 seconds passing on the
-  provisional candidate. The full final run and immutable SHA are pending.
+  provisional worktree. The full final run and immutable final SHA are pending.
 
 The backend's 300-second deadline is distinct from Azure Front Door's
 documented origin response timeout, which is profile-wide and configurable

@@ -52,24 +52,39 @@ saves or provider settings.
 
 ## Provider and request boundaries
 
-The server adapters are deliberately separate:
+There is one browser workshop and one Node server, not a separate application
+core for each provider. `src/main.ts` selects an explicit planning route;
+`server.mjs` wires those routes to provider-specific code. Accepted AI results
+pass the same `validateSpec`/`createPlan`/`Team` flow in the browser. The shared
+`planning-prompt.mjs` prompt and `src/custom-design.mjs` geometry contract keep
+provider output aligned with that core. Offline templates enter the same engine
+without calling a model.
 
-- Copilot invokes the standalone CLI under the server user's account. It is not
-  the Copilot desktop/IDE sign-in. Copilot image requests are a separate
-  Windows-only opt-in with process containment and private temporary files.
+The adapters are explicit modules/routes, not a dynamic plugin system. There is
+no runtime discovery or drop-in registration API: adding a provider requires
+deliberate server configuration, status handling, route/UI selection, shared
+spec validation, and tests. The current boundaries are:
+
+- The implemented Copilot text route invokes the standalone CLI under the
+  server user's account. It is not the Copilot desktop/IDE sign-in. Copilot
+  image requests are a separate Windows-only opt-in with process containment
+  and private temporary files.
 - Azure uses backend managed identity and a dedicated reservation gate; the
-  public visitor remains anonymous. The current live app has Azure planning
-  off. Its hosted route is a provisional contract, not live availability:
-  Azure uses a global daily call count plus a shared Blob CAS ledger for an
-  estimated $50/day, reserving $0.55 per request without refund. The proposed
-  call cap is configured by `BRICKLAB_AZURE_DAILY_CALLS` (default 50, range
-  1-100). The ledger's remaining allowance is read-only and unavailable state
-  must be explicit. These are app-level estimates, not invoice caps or
-  subscription budgets; local/Codespaces have no application daily-call cap.
-  Before hosted use, `properties.raiPolicyName` must match the verified
-  blocking content-filter policy.
+  public visitor remains anonymous. The adapter and reservation path exist in
+  code, but the current live planner is off. Its hosted route is a provisional
+  contract, not live availability: Azure uses a global daily call count plus a
+  shared Blob CAS ledger for an estimated $50/day, reserving $0.55 per request
+  without refund. The proposed call cap is configured by
+  `BRICKLAB_AZURE_DAILY_CALLS` (default 50, range 1-100). The ledger's
+  remaining allowance is read-only and unavailable state must be explicit.
+  These are app-level estimates, not invoice caps or subscription budgets;
+  local/Codespaces have no application daily-call cap. Before hosted use,
+  `properties.raiPolicyName` must match the verified blocking content-filter
+  policy.
 - Local AI and OpenAI-compatible adapters exist in code but are backlog, not
   supported MVP choices. They must not be presented as release-ready paths.
+- The GitHub Models Actions workflow is a separate artifact-generation path,
+  not another runtime-pluggable provider for the workshop.
 
 Planning is explicit, bounded, and fail-closed: input size and schema are
 checked, provider output is validated, and provider errors do not trigger a
@@ -78,8 +93,10 @@ provider in hosted mode and 8 total/2 per provider in private mode. Hosted
 limits are configurable from 1 to 20, with each provider limit at most the
 total; final concurrency environment variable names remain unconfirmed. A
 20-slot hosted deployment requires one worker and one Node process and is not
-an upstream guarantee. These figures are not yet checked against an immutable
-backend SHA or full final run.
+an upstream guarantee. The backend branch contains commit
+`61e5c000b26b95e9f2cfbca715a4199b63404168`, but related changes remain
+uncommitted and the full final run is pending; this provisional contract is not
+yet represented by one final immutable revision.
 
 Cancellation and cleanup are critical correctness properties. The provisional
 backend contract specifies a 300-second HTTP abort and waiting for cleanup
