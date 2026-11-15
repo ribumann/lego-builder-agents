@@ -12,6 +12,11 @@ The browser worker requires Transformers; its Node-oriented image dependency `sh
 
 Exact all-zero decoded audio is rejected before inference as empty audio, without a volume threshold that would reject quiet nonzero speech. This is only a digital zero-signal check: microphone noise and other silent-sounding audio can still reach the model and produce hallucinations. Mandatory review/editing remains necessary.
 
-## Hosted speech remains disabled
+## Browser-local transcription only
 
-No hosted speech route or cloud fallback is exposed here. A separate private managed-identity and ledger test succeeded, but public consent, privacy, abuse controls and production integration remain unverified. Azure Speech billing depends on actual pricing and usage; no public paid mode may be enabled until those protections are verified.
+There is no Azure Speech route, paid audio backend or cloud transcription
+fallback. No Azure Speech managed-identity role or private endpoint is needed.
+Only reviewed text explicitly applied to the brief can be submitted to the
+selected planner by a later explicit Plan action; recording and transcription
+do not submit a planning request. First-use model downloads are browser-side
+from Hugging Face/CDN, not audio uploads.

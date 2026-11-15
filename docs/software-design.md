@@ -104,8 +104,8 @@ or billing stopped. Native Windows Copilot text/image jobs use Job containment;
 unconfirmed cleanup retains capacity and quarantines planning until an operator
 verifies before restart. The backend owner reports that the full suite, an
 HTTP-to-native-Windows text timeout-isolation check, and host-loss quarantine
-verification passed for that earlier SHA; the revised candidate's tests, manual
-UAT, and live Azure inference remain unverified. The backend deadline is
+verification passed for that earlier SHA. Mock checks also cover the simplified
+backend; manual UAT and live Azure inference remain unverified. The backend deadline is
 distinct from Azure Front Door's profile-wide origin response timeout setting
 of 16-240 seconds
 ([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).

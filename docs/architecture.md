@@ -53,7 +53,7 @@ plan. The five visible roles are application logic, not five model calls.
 | --- | --- | --- |
 | Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | One earlier Windows ARM64 candidate completed a real text request and a consented synthetic-image request. An earlier backend candidate has automated coverage for HTTP timeout, Windows text-job cleanup, and capacity retention; the revised candidate and manual UAT remain unverified. |
 | Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | The last verified live app is anonymous and serves static/offline use; its public Azure planner was off. The simplified planner is in implementation, not verified as deployed. | Azure owner confirmed source/package revision `084cfb4b5ec7bed93c362ce8a50f29ae2ab76142`; the custom-domain/Front Door endpoint returned HTTPS 200, `/api/status` reported hosted offline-only, and a direct App Service request returned 403 under the existing Front Door-only origin rules. These observations do not verify a newer release. |
+| Azure-hosted app | The last verified live app is anonymous and serves static/offline use; its public Azure planner was off. The simplified planner is implemented in source, not verified as deployed. | Azure owner confirmed source/package revision `084cfb4b5ec7bed93c362ce8a50f29ae2ab76142`; the custom-domain/Front Door endpoint returned HTTPS 200, `/api/status` reported hosted offline-only, and a direct App Service request returned 403 under the existing Front Door-only origin rules. These observations do not verify a newer release. |
 
 Read-only Azure inventory for the existing deployment: Front Door Standard
 with WAF Prevention and a 240-second profile origin-response timeout; Linux
@@ -65,19 +65,17 @@ owner reported app settings `BRICKLAB_HOSTED=1` and
 VM runner was deallocated. These observations describe the previously
 verified site, not a new MVP candidate.
 
-### Simplified hosted-planning contract (in implementation)
+### Simplified hosted-planning source contract (not deployment verification)
 
-The backend owner is implementing the following user-approved simplification.
-Its final immutable revision and validation results are pending; it is not a
-claim that the simplified planner is live. An earlier candidate
-`eb858843f3b86eb384f1e96ad64c749f855935a5` passed its reported automated
-checks but implemented a different contract.
+The source implements the following user-approved simplification, covered by
+mock/unit and browser checks. These are not a claim that the simplified
+planner is deployed or that real Azure inference has been verified.
 
 - Hosted visitors are anonymous; the backend uses managed identity for Azure
   services. Visitor Entra sign-in and visitor client-hash keys are not used.
 - Hosted planning targets 20 total slots and 20 per provider.
   A 20-slot deployment requires one worker and one Node process; it is not an
-  upstream capacity guarantee. Private mode previously defaulted to 8 total
+  upstream capacity guarantee. Private mode defaults to 8 total
   and 2 per provider. Local and Codespaces have no application daily-call
   quota.
 - Public Azure planning targets an atomic shared limit of 50 calls per UTC
