@@ -83,6 +83,7 @@ test('workshop mounts a separate collapsed playground and synchronizes all six l
   const lab = page.locator('[data-agent-playground]');
   await expect(lab).not.toHaveAttribute('open', '');
   await expect(lab.locator(':scope > summary')).toContainText('Der Agentenspielplatz');
+  await expect(lab.locator(':scope > summary')).not.toContainText('6');
   await lab.locator(':scope > summary').click();
   await lab.locator('[data-lab-action="step"]').click();
   await expect(lab.locator('.lab-event code')).toHaveText('create_plan(…)');
@@ -151,7 +152,13 @@ test('missing stock pauses atomically and the player can replan independent work
   await startScenario(page, 'missing');
   await finishUntilPaused(page);
   await expect(lab.locator('.lab-placed')).toHaveCount(5);
+  await expect(lab.locator('.lab-toolbar .lab-intervention [data-lab-action="replan"]')).toBeVisible();
+  await expect(lab.locator('.lab-toolbar .lab-playback [data-lab-action="play"]')).toBeVisible();
+  await expect(lab.locator('.lab-toolbar .lab-playback [data-lab-action="step"]')).toBeVisible();
+  await expect(lab.locator('.lab-next')).toContainText('Choose a challenge action');
   await lab.locator('[data-lab-action="replan"]').click();
+  await expect(lab.locator('[data-lab-action="play"]')).toBeFocused();
+  await expect(lab.locator('.lab-next')).toContainText('Choose Play');
   await finishUntilPaused(page);
   await expect(lab.locator('.lab-placed')).toHaveCount(9);
   await expect(lab.locator('[data-lab-action="replan"]')).toHaveCount(0);
@@ -168,6 +175,8 @@ test('invalid plan cannot execute before a player correction and a new verificat
   await finishUntilPaused(page);
   await expect(lab.locator('.lab-placed')).toHaveCount(0);
   await lab.locator('[data-lab-action="revise"]').click();
+  await expect(lab.locator('[data-lab-action="play"]')).toBeFocused();
+  await expect(lab.locator('.lab-next')).toContainText('Choose Play');
   await expect(lab.locator('.lab-placed')).toHaveCount(0);
   await lab.locator('[data-lab-action="step"]').click();
   await expect(lab.locator('.lab-event').last()).toContainText('check_dependencies(');
@@ -203,14 +212,18 @@ test('all six app languages work on mobile with reduced motion and unchanged too
   await page.emulateMedia({ reducedMotion: 'reduce' });
   const lab = await openLab(page);
   await lab.locator('[data-lab-action="step"]').click();
-  for (const [language, heading, context] of [
-    ['en', 'The agent playground', 'Context'], ['de', 'Der Agentenspielplatz', 'Kontext'],
-    ['fr', 'Le terrain des agents', 'Contexte'], ['it', 'Il laboratorio degli agenti', 'Contesto'],
-    ['es', 'El patio de los agentes', 'Contexto'], ['pt', 'O laboratório dos agentes', 'Contexto'],
+  for (const [language, heading, context, guidance] of [
+    ['en', 'The agent playground', 'Context', 'Choose Play to continue automatically, or One step to advance once.'],
+    ['de', 'Der Agentenspielplatz', 'Kontext', 'Wähle „Abspielen“ für den automatischen Ablauf oder „Ein Schritt“ für die nächste Aktion.'],
+    ['fr', 'Le terrain des agents', 'Contexte', 'Choisissez « Lecture » pour continuer automatiquement ou « Un pas » pour avancer une fois.'],
+    ['it', 'Il laboratorio degli agenti', 'Contesto', 'Scegli «Riproduci» per continuare automaticamente o «Un passo» per avanzare una volta.'],
+    ['es', 'El patio de los agentes', 'Contexto', 'Elige «Reproducir» para continuar automáticamente o «Un paso» para avanzar una vez.'],
+    ['pt', 'O laboratório dos agentes', 'Contexto', 'Escolha «Reproduzir» para continuar automaticamente ou «Um passo» para avançar uma vez.'],
   ] as const) {
     await page.evaluate(language => window.playgroundTestHandle.setLanguage(language), language);
     await expect(lab.locator(':scope > summary')).toContainText(heading);
     await expect(lab.getByRole('tab', { name: context, exact: true })).toBeVisible();
+    await expect(lab.locator('.lab-next')).toHaveText(guidance);
     await expect(lab.locator('.lab-event code')).toHaveText('create_plan(…)');
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   }
