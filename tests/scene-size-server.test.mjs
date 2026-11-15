@@ -84,7 +84,8 @@ test('all planning endpoints validate scene size before provider access', async 
     const post = body => fetch(base + route, { method: 'POST',
       headers: { origin: base, 'content-type': 'application/json', 'x-bricklab-key': status.sessionKey },
       body: JSON.stringify({ world: 'space', brief: 'A tower', ...body }) });
-    for (const body of [{ sceneSize: '1000' }, { sceneSize: 9000 }, { sceneSize: 1000, brief: '9000 bricks' }]) {
+    for (const body of [{ sceneSize: '1000' }, { sceneSize: 9000 }, { sceneSize: 1000, brief: '9000 bricks' },
+      { sceneSize: 1000, brief: 'build -5 bricks' }, { sceneSize: 1000, brief: 'build −5 bricks' }]) {
       const response = await post(body);
       assert.equal(response.status, 400, route);
     }
