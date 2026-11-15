@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { expandCustomBricks, validateCustomSpec } from '../src/custom-design.mjs';
-import { Team, allBricks, createPlan, restoreSnapshot, validateSpec } from '../src/engine';
+import { CUSTOM_DESIGN_PROMPT, expandCustomBricks, validateCustomSpec } from '../src/custom-design.mjs';
+import { COLORS, Team, allBricks, createPlan, restoreSnapshot, validateSpec, type Color } from '../src/engine';
 import { worldExample } from '../src/world-examples';
 import { BrickBatch, MAX_DECORATIVE_STUDS } from '../src/brick-batch';
 import * as THREE from 'three';
@@ -14,6 +14,12 @@ const design = (name: string, bricks: ReturnType<typeof brick>[]) => ({
 const fixtures = [
   design('Lighthouse', [brick(0, 0, 0, 3, 1, 3), brick(1, 1, 1, 1, 4, 1), brick(0, 5, 0, 3, 1, 3, 'detail')]),
   design('Garden bench', [brick(-3, 0, 0, 1, 2, 2), brick(1, 0, 0, 1, 2, 2), brick(-3, 2, 0, 5, 1, 2), brick(-3, 3, 1, 5, 2, 1, 'detail')]),
+  design('Hollow room', [
+    brick(0, 0, 0, 5, 1, 5), brick(0, 1, 0, 5, 3, 1),
+    brick(0, 1, 1, 1, 3, 4), brick(4, 1, 1, 1, 3, 4),
+    brick(1, 1, 4, 1, 3, 1), brick(3, 1, 4, 1, 3, 1),
+    brick(0, 4, 0, 5, 1, 5), brick(1, 1, 2, 1, 1, 1, 'detail'),
+  ]),
 ];
 for (const fixture of fixtures) test(`${fixture.design.name}: execute, inspect, repair and restore custom geometry`, () => {
   const spec = validateSpec(fixture, 'space');
@@ -30,7 +36,7 @@ for (const fixture of fixtures) test(`${fixture.design.name}: execute, inspect, 
   assert.equal(team.status, 'damaged');
   const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot(fixture.design.name))));
   restored.team.repair();
-  restored.team.step(20);
+  for (let i = 0; i < 8192 && restored.team.step(20); i++) {}
   assert.equal(restored.team.status, 'complete');
   const again = restoreSnapshot(JSON.parse(JSON.stringify(restored.team.snapshot(fixture.design.name))));
   assert.deepEqual(again.team.plan.spec, spec);
@@ -46,6 +52,38 @@ test('custom input rejects overlaps, out-of-bounds, unsafe values and excessive 
   assert.throws(() => validateCustomSpec(design('bad color', [{ ...brick(0, 0, 0, 1, 1, 1), color: 'url(evil)' }])), /color/);
   assert.throws(() => validateCustomSpec({ ...fixtures[0], budget: 1 }), /budget/);
   assert.throws(() => validateSpec(fixtures[0], 'jurassic'), /world/);
+});
+
+test('expanded palette is accepted by custom geometry, rendered, and preserved through save and reload', () => {
+  const colors: Color[] = ['black', 'yellow', 'gray', 'brown', 'pink'];
+  const spec = validateCustomSpec({
+    world: 'space', model: 'custom', color: 'black', longTail: false, wideWings: false, budget: 50,
+    design: { name: 'Color bar', bricks: colors.map((color, x) => ({
+      x, y: 0, z: 0, width: 1, height: 1, depth: 1, color, part: 'frame',
+    })) },
+  });
+  assert.equal(spec.color, 'black');
+  assert.ok(colors.every(color => CUSTOM_DESIGN_PROMPT.includes(`"${color}"`)));
+  const plan = createPlan(spec);
+  const bricks = allBricks(plan);
+  assert.deepEqual(bricks.map(brick => brick.color), colors.map(color => COLORS[color]));
+  const materials: string[] = [];
+  const cube = new THREE.BoxGeometry(), stud = new THREE.CylinderGeometry();
+  const material = new THREE.MeshBasicMaterial();
+  const batch = new BrickBatch(bricks, cube, stud, color => {
+    materials.push(color);
+    return material;
+  }, new Map(), false, 1000);
+  assert.deepEqual(new Set(materials), new Set(colors.map(color => COLORS[color])));
+  assert.equal(batch.group.children.length, colors.length * 2);
+  batch.dispose(); cube.dispose(); stud.dispose(); material.dispose();
+
+  const team = new Team(plan);
+  for (let i = 0; i < 100 && team.status !== 'complete'; i++) team.step(20);
+  assert.equal(team.status, 'complete');
+  const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot('Color bar'))));
+  assert.deepEqual(restored.team.plan.spec, spec);
+  assert.deepEqual(allBricks(restored.team.plan).map(brick => brick.color), colors.map(color => COLORS[color]));
 });
 
 test('repeat expansion is bounded, non-overlapping and canonical', () => {
@@ -142,7 +180,7 @@ for (const world of ['jurassic', 'space'] as const) test(`${world} example build
   const restored = restoreSnapshot(saved);
   assert.equal(restored.team.status, 'damaged');
   restored.team.repair();
-  restored.team.step(20);
+  for (let i = 0; i < 8192 && restored.team.step(20); i++) {}
   assert.equal(restored.team.status, 'complete');
   assert.deepEqual(allBricks(restored.team.plan), allBricks(team.plan));
   assert.deepEqual(restored.team.plan.spec, spec);
@@ -164,6 +202,17 @@ test('world bodies and studs are instanced by color and retain selection IDs', (
   batch.setExploded(true, 1000);
   body.getMatrixAt(0, matrix);
   assert.notEqual(matrix.elements[12], b.x + (b.width! - 1) / 2);
+  const cut = new THREE.Plane(new THREE.Vector3(1, 0, 0), -1);
+  batch.setCutaway(cut);
+  assert.ok(meshes.every(mesh => {
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    return material.clippingPlanes?.[0] === cut && material.clipShadows;
+  }));
+  batch.setCutaway();
+  assert.ok(meshes.every(mesh => {
+    const material = Array.isArray(mesh.material) ? mesh.material[0] : mesh.material;
+    return material.clippingPlanes?.length === 0 && !material.clipShadows;
+  }));
   batch.dispose(); cube.dispose(); stud.dispose(); material.dispose();
 });
 
@@ -183,9 +232,14 @@ test('instanced selection and placement animation preserve brick geometry', () =
   assert.ok(hits.length > 0);
   assert.equal(hits[0].object.userData.brickIds[hits[0].instanceId!], b.id);
   batch.dispose();
-  const reduced = new BrickBatch([b], cube, stud, () => material, new Map(), false, 100);
+  const reduced = new BrickBatch([b], cube, stud, () => material, new Map([[b.id, 100]]), false, 100);
+  reduced.finishAnimation();
+  reduced.animate(101);
   (reduced.group.children[0] as THREE.InstancedMesh).getMatrixAt(0, matrix);
   assert.ok(Math.abs(matrix.elements[13] - 0.73) < 0.00001);
+  reduced.setExploded(true, 102);
+  (reduced.group.children[0] as THREE.InstancedMesh).getMatrixAt(0, matrix);
+  assert.ok(Math.abs(matrix.elements[13] - (0.73 * 1.45 + 1)) < 0.00001);
   reduced.dispose(); cube.dispose(); stud.dispose(); material.dispose();
 });
 

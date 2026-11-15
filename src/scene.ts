@@ -22,12 +22,15 @@ export class Workbench {
   private frame = 0;
   private resize: ResizeObserver;
   private exploded = false;
-  private reduced = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  private motionPreference = matchMedia('(prefers-reduced-motion: reduce)');
+  private reduced = this.motionPreference.matches;
   private agentTargets = new Map<string, THREE.Vector3>();
   private onSelect: (brick: Brick) => void;
   private bricks = new Map<string, Brick>();
   private down = { x: 0, y: 0 };
   private cameraTarget = new THREE.Vector3(-1, 3, 0);
+  private cutawayPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
+  private interiorView = false;
   private cameraDistance = 39;
   private renderMetricsDirty = true;
   constructor(host: HTMLElement, onSelect: (brick: Brick) => void) {
@@ -45,6 +48,7 @@ export class Workbench {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
     this.controls.target.set(0, 3, 0);
     this.controls.enableDamping = !this.reduced;
+    this.motionPreference.addEventListener('change', this.updateMotionPreference);
     this.controls.minDistance = 16;
     this.controls.maxDistance = 500;
     this.controls.maxPolarAngle = Math.PI / 2.08;
@@ -71,7 +75,8 @@ export class Workbench {
       const ray = new THREE.Raycaster();
       ray.setFromCamera(new THREE.Vector2((e.clientX - rect.left) / rect.width * 2 - 1,
         -(e.clientY - rect.top) / rect.height * 2 + 1), this.camera);
-      const hit = ray.intersectObjects(this.model.children, true)[0];
+      const hit = ray.intersectObjects(this.model.children, true).find(hit =>
+        !this.interiorView || this.cutawayPlane.distanceToPoint(hit.point) >= 0);
       const id = hit?.instanceId === undefined ? undefined : hit.object.userData.brickIds?.[hit.instanceId];
       const brick = id && this.bricks.get(id);
       if (brick) this.onSelect(brick);
@@ -79,8 +84,8 @@ export class Workbench {
     this.setWorld('jurassic');
     this.animate();
   }
-  private material(color: string, ghost = false) {
-    const id = color + ghost;
+  private material(color: string, ghost = false, brick = false) {
+    const id = `${brick ? 'brick:' : ''}${color}${ghost}`;
     if (!this.materials.has(id)) this.materials.set(id, new THREE.MeshStandardMaterial({
       color, roughness: 0.38, metalness: 0.04, transparent: ghost, opacity: ghost ? 0.12 : 1,
       depthWrite: !ghost,
@@ -186,8 +191,14 @@ export class Workbench {
     this.born.clear();
     this.blueprintBatch?.dispose();
     this.blueprint.clear();
-    this.blueprintBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color, true), new Map(), true, performance.now());
+    this.blueprintBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color, true, true), new Map(), true, performance.now());
     this.blueprint.add(this.blueprintBatch.group);
+    if (bricks.length) {
+      const minX = Math.min(...bricks.map(b => b.x - 0.5));
+      const maxX = Math.max(...bricks.map(b => b.x + (b.width ?? 1) - 0.5));
+      this.cutawayPlane.constant = (minX + maxX) / 2;
+    }
+    this.blueprintBatch.setCutaway(this.interiorView ? this.cutawayPlane : undefined);
     const largeSite = bricks.some(b => b.x < -13 || b.x + (b.width ?? 1) > 13 || b.z < -11 || b.z + (b.depth ?? 1) > 11);
     const ground = this.scenery.getObjectByName('build-ground');
     const plate = this.scenery.getObjectByName('build-plate');
@@ -224,10 +235,17 @@ export class Workbench {
     this.bricks = new Map(bricks.map(b => [b.id, b]));
     this.modelBatch?.dispose();
     this.model.clear();
-    this.modelBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color), this.born, false, now);
+    this.modelBatch = new BrickBatch(bricks, this.cube, this.stud, color => this.material(color, false, true), this.born, false, now);
     this.modelBatch.setExploded(this.exploded, now);
+    this.modelBatch.setCutaway(this.interiorView ? this.cutawayPlane : undefined);
     this.model.add(this.modelBatch.group);
     this.renderMetricsDirty = true;
+  }
+  setInteriorView(value: boolean) {
+    this.interiorView = value;
+    this.renderer.localClippingEnabled = value;
+    this.modelBatch?.setCutaway(value ? this.cutawayPlane : undefined);
+    this.blueprintBatch?.setCutaway(value ? this.cutawayPlane : undefined);
   }
   explode(value: boolean) { this.exploded = value; this.modelBatch?.setExploded(value, performance.now()); }
   resetCamera() {
@@ -235,6 +253,14 @@ export class Workbench {
     this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }
+  private updateMotionPreference = () => {
+    this.reduced = this.motionPreference.matches;
+    this.controls.enableDamping = !this.reduced;
+    if (this.reduced) {
+      this.born.clear();
+      this.modelBatch?.finishAnimation();
+    }
+  };
   private animate = () => {
     this.frame = requestAnimationFrame(this.animate);
     const now = performance.now();
@@ -243,7 +269,7 @@ export class Workbench {
       const target = this.agentTargets.get(robot.name);
       if (target) {
         robot.position.lerp(target, this.reduced ? 1 : 0.025);
-        robot.rotation.y = Math.sin(now / 1700) * 0.2;
+        robot.rotation.y = this.reduced ? 0 : Math.sin(now / 1700) * 0.2;
       }
     }
     this.controls.update();
@@ -271,6 +297,7 @@ export class Workbench {
     cancelAnimationFrame(this.frame);
     this.resize.disconnect();
     this.controls.dispose();
+    this.motionPreference.removeEventListener('change', this.updateMotionPreference);
     this.renderer.dispose();
     this.modelBatch?.dispose();
     this.blueprintBatch?.dispose();
