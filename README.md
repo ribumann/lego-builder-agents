@@ -74,6 +74,12 @@ GitHub; Local AI sends it to the configured model service on the server host.
    explain one dependency and one handoff. Saves are local to the browser;
    the download is a file, not a public sharing service.
 
+For a separate exercise, open **The agent playground** below the extended
+insights. Step through its six deterministic roles, replay an actual repair,
+try missing stock or a circular dependency, and optionally remember the repair
+for the next robot. Its browser-local lesson is separate from workshop saves;
+it makes no model requests. See [playground instructions](docs/agent-playground.md).
+
 More missions: a green stegosaurus with a long tail, a white cargo ship with
 engines, or the local herd/fleet examples. With an explicitly configured AI
 planner, try an original lighthouse, a dinosaur habitat, or a space station

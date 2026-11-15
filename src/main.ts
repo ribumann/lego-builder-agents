@@ -5,6 +5,7 @@ import { Workbench } from './scene';
 import { worldExample } from './world-examples';
 import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-append';
 import { agentInsights } from './agent-insights';
+import { mountAgentPlayground } from './agent-playground';
 import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, translateTaskName, type Language } from './i18n';
 import { createVoiceInput, type VoiceUpdate } from './voice-input';
 import { voiceLabels } from './voice-labels';
@@ -166,6 +167,7 @@ app.innerHTML = `
       <div id="insight-agents"></div>
       <p>Planning source is saved attribution, not independent proof. Counts are bricks and tasks, not model tokens. Connectivity checks do not prove physical stability.</p>
     </details>
+    <div id="agent-playground-host"></div>
     <section class="learning-strip"><span class="learning-symbol">${icon('help')}</span><div><h3 id="quiz-title">Quick thought: what makes this a team of agents?</h3><div id="quiz-options"><button data-answer="wrong">They all use the same color</button><button data-answer="right">They choose actions and share progress</button><button data-answer="wrong">They build without any plan</button></div><p id="quiz-feedback" role="status">Make a prediction, then watch the crew.</p></div><div class="file-actions"><button id="herd-example" class="button outline">Load local Jurassic herd</button><button id="fleet-example" class="button outline">Load local space fleet</button><button id="export" class="button outline" disabled>${icon('download')} Save build file</button><button id="import" class="button outline">Load build / AI mission</button><input id="import-file" type="file" accept=".json,application/json" hidden aria-label="Choose a build or AI mission JSON file"/></div></section>
     <footer><span>BrickLab <span class="footer-dot">·</span> A hands-on introduction to agentic teamwork.</span><span>Independent educational demo. Not affiliated with the LEGO Group.</span></footer>
   </main>
@@ -251,6 +253,7 @@ const applyLanguage = () => {
   document.documentElement.lang = getLanguage();
   languageSelect.value = getLanguage();
   translateInterface(app);
+  playground.setLanguage(getLanguage());
   applyVoiceLabels();
   imageInput?.refresh();
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
@@ -314,6 +317,7 @@ let examples = 0;
 let scene: Workbench | undefined;
 let storageWarningShown = false;
 let quizWon = false;
+const playground = mountAgentPlayground($('#agent-playground-host'), { language: getLanguage() });
 applyLanguage();
 const brief = $<HTMLTextAreaElement>('#brief');
 brief.value = translate(EXAMPLES.jurassic[0]);

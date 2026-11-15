@@ -66,6 +66,42 @@ async function startScenario(page: Page, scenario: string) {
   await page.locator('[data-lab-action="play"]').click();
 }
 
+test('workshop mounts a separate collapsed playground and synchronizes all six languages', async ({ page }) => {
+  let planningRequests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'off', message: 'Off' },
+  } }));
+  await page.route(/\/api\/(?:plan|local-plan|compatible-plan|azure-plan)$/, route => {
+    planningRequests++;
+    return route.abort();
+  });
+  await page.addInitScript(() => {
+    localStorage.setItem('bricklab-language', 'de');
+    localStorage.setItem('bricklab-jurassic', 'main-workshop-untouched');
+  });
+  await page.goto('/');
+  const lab = page.locator('[data-agent-playground]');
+  await expect(lab).not.toHaveAttribute('open', '');
+  await expect(lab.locator(':scope > summary')).toContainText('Der Agentenspielplatz');
+  await lab.locator(':scope > summary').click();
+  await lab.locator('[data-lab-action="step"]').click();
+  await expect(lab.locator('.lab-event code')).toHaveText('create_plan(…)');
+  for (const [language, heading, context] of [
+    ['en', 'The agent playground', 'Context'], ['de', 'Der Agentenspielplatz', 'Kontext'],
+    ['fr', 'Le terrain des agents', 'Contexte'], ['it', 'Il laboratorio degli agenti', 'Contesto'],
+    ['es', 'El patio de los agentes', 'Contexto'], ['pt', 'O laboratório dos agentes', 'Contexto'],
+  ] as const) {
+    await page.locator('#language').selectOption(language);
+    await expect(lab.locator(':scope > summary')).toContainText(heading);
+    await expect(lab.getByRole('tab', { name: context, exact: true })).toBeVisible();
+    await expect(lab.locator('.lab-event code')).toHaveText('create_plan(…)');
+  }
+  await expect(lab.locator('[data-lab-agent]')).toHaveCount(6);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe('main-workshop-untouched');
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-agent-playground-memory-v1'))).toBeNull();
+  expect(planningRequests).toBe(0);
+});
+
 test('tool history replays the actual defect and repair; remembered lesson changes the next build', async ({ page }) => {
   let providers = 0;
   await page.route('**/api/**', route => { providers++; return route.abort(); });

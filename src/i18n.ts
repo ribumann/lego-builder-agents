@@ -993,7 +993,7 @@ const originalText = new WeakMap<Text, { source: string; rendered: string }>();
 const originalAttributes = new WeakMap<Element, Map<string, { source: string; rendered: string }>>();
 
 export function translateInterface(root: HTMLElement): void {
-  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status, #insight-state, #insight-agents, #image-input, .voice-panel';
+  const excluded = '#event-list, #task-list, #scene-caption, #brick-info, #notice, #planner-status, #azure-planner-status, #local-planner-status, #compatible-planner-status, #insight-state, #insight-agents, #image-input, .voice-panel, #agent-playground-host';
   const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT);
   while (walker.nextNode()) {
     const node = walker.currentNode as Text;
