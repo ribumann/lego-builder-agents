@@ -78,7 +78,10 @@ is an application estimate, not actual billing.
 - Codespaces adds exact forwarded-host/origin checks, a separate app login, and
   a fresh GitHub CLI check that the port is private. GitHub/Copilot sign-in and
   BrickLab's app password are distinct credentials. Never publish the port or
-  copy credentials into the browser.
+  paste GitHub credentials or tokens into BrickLab or chat. For the private
+  app's HTTPS Basic Authentication prompt only, enter username `bricklab` and
+  the temporary app password printed in the Codespace terminal; never use a
+  GitHub password or token there.
 - Public hosted mode serves static/offline content only. Host and Origin checks
   are not authentication; forwarded client headers do not establish a trusted
   identity. The app must not enable public paid planning until the edge, caller
