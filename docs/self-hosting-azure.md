@@ -26,9 +26,10 @@ establish reliable transport through the production custom domain.
 
 ## Prerequisites and costs
 
-Use your own Azure subscription, a dedicated resource group, and a DNS name
+use your own Azure subscription, a dedicated resource group, and a DNS name
 you control. You need permission to create resources and role assignments,
-Azure CLI with Bicep, Node.js 24 and npm, Git, and a Linux build environment.
+Azure CLI with Bicep, Node.js 24 and npm, Python 3, Git, and a Linux build
+environment.
 Azure OpenAI GPT-5.4 version `2026-03-05`, DataZoneStandard capacity, and
 Linux App Service B1 must be available in the chosen subscription. These
 templates use Sweden Central for storage and the model and Italy North for
@@ -55,14 +56,28 @@ and [DNS](https://azure.microsoft.com/pricing/details/dns/).
 
 For inference, the current gate verifies the
 [Sweden Central GPT-5.4 Data Zone retail meters](https://prices.azure.com/api/retail/prices?%24filter=productName%20eq%20%27Azure%20OpenAI%20GPT5%27%20and%20armRegionName%20eq%20%27swedencentral%27%20and%20%28skuName%20eq%20%275.4%20inp%20Dz%27%20or%20skuName%20eq%20%275.4%20opt%20Dz%27%29)
-before every call and reserves $0.55 against a $50 UTC-day budget. At most 90
-reservations ($49.50) fit per day; 30 such days reserve $1,485. Actual billed
-tokens may be lower. **This is not a hard cap on your Azure bill**, or a
-guarantee of actual inference charges: contract prices, subsequent price or
+before every call and reserves $0.55 against a $50 UTC-day budget. The default
+application limit is 12 calls per day (at most $6.60 of estimated reservations)
+and three calls per client per day. The global call and dollar counters and
+pseudonymous client counters share the same private Blob state and use ETag
+conditional writes, so concurrent reservations from separate app instances
+cannot exceed those limits. legacy dollar-only state is read conservatively
+and is never reset. Monetary-budget client counts are keyed by an HMAC of the
+verified Entra `tid` and `oid` claims; only the HMAC and count are stored.
+Forwarded IP headers do not establish identity. The HMAC secret must be a
+stable, random 32-byte value in a Key Vault reference or protected App Service
+setting. Rotating it resets per-client fairness for the current UTC day but
+does not reset global counters.
+
+The $50 daily dollar reservation is a second backstop, not a hard cap on your
+Azure bill or a guarantee of actual charges: contract prices, later price or
 deployment changes, billing timing and tokenization can differ. Other callers,
 hosting, storage, network and tax are outside the gate. Azure Cost Management
-budgets alert rather than stop spending; create alerts separately and monitor
-actual charges. See [budget limitations](azure-planner.md).
+budgets alert rather than stop spending; configure alerts separately. The
+Front Door WAF rate rule is also approximate, not authentication or a global
+spend limit. Do not scale the App Service above one worker without adding and
+verifying a shared in-flight semaphore; the existing `busy` lock is per
+process. See [budget limitations](azure-planner.md).
 
 ## Provision isolated resources
 
@@ -187,12 +202,24 @@ slash, port, path, or credentials.
 ## Build, deploy and configure
 
 Build the exact reviewed application revision in a clean Linux environment
-using `npm ci`, `npm run build`, then `npm prune --omit=dev`. Create a ZIP
-with the application files, `dist` and production dependencies at its root,
-excluding `.git` and development-only material. Upload a uniquely named ZIP
-to the private `packages` container from the connected operator machine,
-using `az storage blob upload --auth-mode login`. Never upload your local
-Copilot or GitHub credential caches. Configure `WEBSITE_RUN_FROM_PACKAGE`
+using `npm ci`, `npm run build`, then `npm prune --omit=dev`. Create the
+release using the repository packager, which verifies the runtime module
+closure, production dependency tree, required worker/runtime assets and
+Windows helper, and writes a per-file SHA-256 manifest. The archive is
+deterministic, refuses to overwrite an existing artifact, and retains the
+existing 25,000,000-byte size guard:
+
+```bash
+REVISION=$(git rev-parse HEAD)
+npm run package:azure -- --revision "$REVISION" \
+  --output "../bricklab-release-$REVISION.zip"
+```
+
+Review the emitted archive SHA-256, byte counts and asset breakdown before
+upload. Upload a uniquely named ZIP to the private `packages` container from
+the connected operator machine, using `az storage blob upload --auth-mode
+login`. Never upload your local Copilot or GitHub credential caches.
+Configure `WEBSITE_RUN_FROM_PACKAGE`
 to the private Blob URL and set
 `WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID=SystemAssigned` so the web app
 uses its system-assigned identity to read it.
@@ -205,14 +232,62 @@ exact `BRICKLAB_HOSTED_ORIGIN`. Azure injects `PORT`. For the currently
 blocked paid planner the intended additional settings are
 `BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`,
 `AZURE_OPENAI_RESOURCE_ID`, `AZURE_STORAGE_ACCOUNT`, and
-`BRICKLAB_AZURE_BUDGET_CONTAINER=usage`. These values are resource identifiers,
-not secrets. Do not enable Copilot, Codespaces, or local-model modes on the
-public instance. The server will refuse hosted Azure mode until the
-application's safety gate is legitimately completed.
+`BRICKLAB_AZURE_BUDGET_CONTAINER=usage`,
+`BRICKLAB_AZURE_CONTENT_FILTER_POLICY=bricklab-public-safe`,
+`BRICKLAB_AZURE_CLIENT_HASH_KEY`, and `BRICKLAB_AZURE_DAILY_CALLS` (default
+12; maximum 100). Resource identifiers and the content-filter policy name are
+not secrets. Store the client-hash key as a protected setting, never in source
+control or a browser. Configure the Entra settings
+`BRICKLAB_ENTRA_TENANT_ID`, `BRICKLAB_ENTRA_API_CLIENT_ID`,
+`BRICKLAB_ENTRA_SPA_CLIENT_ID`, `BRICKLAB_ENTRA_REQUIRED_SCOPE=BrickLab.Plan`,
+and `BRICKLAB_ENTRA_REQUIRED_ROLE=BrickLab.Planner`. Create a single-tenant
+API registration with v2 access tokens, the delegated scope and the user/group
+app role; assign only approved users/groups and require role assignment on its
+enterprise application. Create a separate SPA registration, grant only the
+delegated API scope, and register the exact HTTPS site origin as its redirect
+URI. The API audience is the API app ID GUID and `azp` must be the configured
+SPA app ID. No client secret is needed or accepted by BrickLab.
 
-Before any public paid deployment, verify exact Host and Origin handling,
-direct-origin denial, WAF association and throttling, durable fail-closed
-budget reservations under concurrent requests and cancellation. Use a
+The server validates the Entra signature, tenant-specific v2 issuer, audience,
+tenant ID, authorized SPA client, delegated scope and app role before it reads
+the request body or reserves budget. The browser requests an API access token
+with MSAL only after the user explicitly starts Azure planning; its token cache
+uses session storage. `/api/azure-auth-config` returns public registration
+identifiers only. Missing auth configuration fails startup. This code has not
+been verified against a real tenant or role assignment.
+
+The base Bicep template creates the named policy with
+blocking filters for medium/high violence, hate, sexual and self-harm input
+and output, direct jailbreak detection, and protected-text/code output
+detection. The app verifies that exact policy through Azure Resource Manager
+before reserving budget and sends `x-policy-id` on every model call; filtered
+or annotated-blocked responses are rejected without retries. If the read-back
+is missing, denied, or has weaker settings, the request fails before inference.
+The identity may need a narrowly scoped read-only role on the dedicated
+Cognitive Services account if its current role cannot read the policy.
+Azure image input is explicitly rejected before budget reservation and
+provider invocation; text-only filter verification does not establish safe
+image handling.
+
+These settings are **not authorization to enable the paid route**. Do not
+enable Copilot, Codespaces, or local-model modes on the public instance. The
+hosted Azure startup guard remains in place. The origin/session-token check is
+not user authentication: a public visitor can obtain the browser token. The
+new Entra verifier and MSAL client are implemented locally, but require
+operator-created app registrations and role assignments plus real-tenant
+validation before paid access can be considered. Do not treat WAF throttling
+or a shared daily quota as a substitute for authentication. The static/offline
+lab remains public and unchanged.
+
+Before any public paid deployment, configure and verify the Entra app-role
+token flow for the planner route while leaving the static application
+anonymous; the current App Service Easy Auth exclusion model does not itself
+provide a simple protected-only API path. Verify exact Host and Origin
+handling, direct-origin denial, WAF association, durable shared request and
+dollar reservations under concurrent requests from separate instances, and
+the protected client hash setting. Per-client counters are now keyed by an
+HMAC of the validated tenant/object IDs, not forwarded IP addresses. Keep the plan at one worker unless a shared
+in-flight semaphore is added. Use a
 non-paid synthetic heartbeat stream through the actual edge to test beyond
 the approximately 240-second platform boundary; separately verify that a
 real or simulated planning request stops by its 300-second deadline.

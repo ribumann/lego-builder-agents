@@ -1,13 +1,20 @@
 import { ManagedIdentityCredential } from '@azure/identity';
 import { BlobServiceClient } from '@azure/storage-blob';
+import { createHmac } from 'node:crypto';
 
 const DAILY_LIMIT = 50_000_000;
+const DEFAULT_DAILY_CALLS = 12;
+const MAX_DAILY_CALLS = 100;
+const MAX_CLIENT_CALLS = 3;
 // Reserve for 128k input tokens despite the adapter's 32k-byte prompt ceiling.
 // The output ceiling includes visible and reasoning tokens.
 const RESERVATION = 128_000 * 2.75 + 12_000 * 16.5;
-const MAX_STATE_BYTES = 256;
+const MAX_STATE_BYTES = 16_384;
+const MAX_CLIENTS = 100;
+const GUID = /^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i;
 const PRICE_FILTER = "productName eq 'Azure OpenAI GPT5' and armRegionName eq 'swedencentral' and (skuName eq '5.4 inp Dz' or skuName eq '5.4 opt Dz')";
 const PRICE_URL = `https://prices.azure.com/api/retail/prices?%24filter=${encodeURIComponent(PRICE_FILTER)}`;
+const POLICY_NAME_PATTERN = /^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/;
 
 function failure(code, message) {
   return Object.assign(new Error(message), { code });
@@ -30,16 +37,18 @@ async function boundedJSON(response, limit) {
   return JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
 }
 
-export async function verifyDeploymentConfig({ resourceId, deployment, credential, signal, fetchImpl = fetch }) {
+export async function verifyDeploymentConfig({ resourceId, deployment, contentFilterPolicy,
+  credential, signal, fetchImpl = fetch }) {
   const timeout = AbortSignal.timeout(10_000);
   const combined = signal ? AbortSignal.any([signal, timeout]) : timeout;
   const token = await credential.getToken('https://management.azure.com/.default', { abortSignal: combined });
   if (!token?.token) throw new Error('Management identity unavailable.');
-  const get = async path => boundedJSON(await fetchImpl(`https://management.azure.com${path}?api-version=2023-05-01`, {
+  const get = async (path, apiVersion = '2023-05-01') => boundedJSON(await fetchImpl(`https://management.azure.com${path}?api-version=${apiVersion}`, {
     headers: { Authorization: `Bearer ${token.token}` }, redirect: 'error', signal: combined,
   }), 256_000);
   const account = await get(resourceId);
   const model = await get(`${resourceId}/deployments/${encodeURIComponent(deployment)}`);
+  const policy = await get(`${resourceId}/raiPolicies/${encodeURIComponent(contentFilterPolicy)}`, '2024-10-01');
   const accountName = resourceId.slice(resourceId.lastIndexOf('/') + 1).toLowerCase();
   if (account.location?.toLowerCase() !== 'swedencentral' || account.kind !== 'OpenAI'
       || account.name?.toLowerCase() !== accountName
@@ -48,8 +57,29 @@ export async function verifyDeploymentConfig({ resourceId, deployment, credentia
       || account.properties?.provisioningState !== 'Succeeded'
       || model.sku?.name !== 'DataZoneStandard' || model.properties?.provisioningState !== 'Succeeded'
       || model.properties?.model?.format !== 'OpenAI' || model.properties?.model?.name !== 'gpt-5.4'
-      || model.properties?.model?.version !== '2026-03-05')
-    throw new Error('Deployment does not match the priced configuration.');
+      || model.properties?.model?.version !== '2026-03-05'
+      || !isSafeContentFilterPolicy(policy, contentFilterPolicy))
+    throw new Error('Deployment or content filter does not match the reviewed configuration.');
+}
+
+export function isSafeContentFilterPolicy(policy, expectedName) {
+  if (!policy || policy.name?.toLowerCase() !== expectedName?.toLowerCase()
+      || policy.properties?.basePolicyName !== 'Microsoft.Default'
+      || policy.properties?.mode !== 'Blocking'
+      || !Array.isArray(policy.properties?.contentFilters)) return false;
+  const filters = policy.properties.contentFilters;
+  const hasBlockingFilter = (name, source, checkSeverity = false) => {
+    const matches = filters.filter(filter => filter?.name === name && filter?.source === source);
+    return matches.length === 1 && matches[0].enabled === true && matches[0].blocking === true
+      && (!checkSeverity || ['Low', 'Medium'].includes(matches[0].severityThreshold));
+  };
+  for (const name of ['Hate', 'Sexual', 'Selfharm', 'Violence']) {
+    if (!hasBlockingFilter(name, 'Prompt', true) || !hasBlockingFilter(name, 'Completion', true))
+      return false;
+  }
+  return hasBlockingFilter('Jailbreak', 'Prompt')
+    && hasBlockingFilter('Protected Material Text', 'Completion')
+    && hasBlockingFilter('Protected Material Code', 'Completion');
 }
 
 export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
@@ -70,14 +100,32 @@ export async function verifyRetailPrices({ signal, now, fetchImpl = fetch }) {
   }
 }
 
-export function createAzureBudgetGate({ account, container, endpoint, deployment, resourceId, blobClient,
+export function createAzurePrincipalKey({ secret, tenantId, objectId }) {
+  if (typeof secret !== 'string' || Buffer.byteLength(secret) < 32)
+    throw new Error('Azure principal-rate-limit secret must contain at least 32 bytes.');
+  if (typeof tenantId !== 'string' || !GUID.test(tenantId)
+      || typeof objectId !== 'string' || !GUID.test(objectId))
+    throw new Error('Azure authenticated principal is invalid.');
+  return createHmac('sha256', secret)
+    .update(`${tenantId.toLowerCase()}:${objectId.toLowerCase()}`).digest('hex');
+}
+
+export function createAzureBudgetGate({ account, container, endpoint, deployment, resourceId, contentFilterPolicy,
+  blobClient, dailyCallLimit = DEFAULT_DAILY_CALLS, dailyClientLimit = MAX_CLIENT_CALLS,
+  clientHashSecret, requireClientKey = false,
   credential = new ManagedIdentityCredential(), now = () => new Date(),
   verifyPrices = verifyRetailPrices, verifyConfig = verifyDeploymentConfig }) {
   const match = typeof resourceId === 'string' && /^\/subscriptions\/[0-9a-f-]{36}\/resourceGroups\/[\w().-]{1,90}\/providers\/Microsoft\.CognitiveServices\/accounts\/([a-z0-9][a-z0-9-]{0,62})$/i.exec(resourceId);
   if (!match || typeof endpoint !== 'string'
       || endpoint.replace(/\/$/, '').toLowerCase() !== `https://${match[1].toLowerCase()}.openai.azure.com`
-      || typeof deployment !== 'string' || !/^[a-zA-Z0-9][a-zA-Z0-9._-]{0,63}$/.test(deployment))
-    throw new Error('Azure budget requires a matching Azure OpenAI resource ID, endpoint and deployment.');
+      || typeof deployment !== 'string' || !POLICY_NAME_PATTERN.test(deployment)
+      || typeof contentFilterPolicy !== 'string' || !POLICY_NAME_PATTERN.test(contentFilterPolicy))
+    throw new Error('Azure budget requires a matching Azure OpenAI resource ID, endpoint, deployment and content filter policy.');
+  if (!Number.isInteger(dailyCallLimit) || dailyCallLimit < 1 || dailyCallLimit > MAX_DAILY_CALLS
+      || !Number.isInteger(dailyClientLimit) || dailyClientLimit < 1 || dailyClientLimit > MAX_CLIENT_CALLS)
+    throw new Error(`Azure planning limits must be 1-${MAX_DAILY_CALLS} calls per day and 1-${MAX_CLIENT_CALLS} per client.`);
+  if (requireClientKey && (typeof clientHashSecret !== 'string' || Buffer.byteLength(clientHashSecret) < 32))
+    throw new Error('Hosted Azure planning requires a 32-byte client rate-limit secret.');
   if (!blobClient) {
     if (typeof account !== 'string' || !/^[a-z0-9]{3,24}$/.test(account)
         || typeof container !== 'string' || !/^[a-z0-9](?:[a-z0-9-]{1,61}[a-z0-9])$/.test(container)
@@ -97,12 +145,16 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
   }
 
   return {
-    async reserve({ signal } = {}) {
+    async reserve({ signal, clientKey } = {}) {
       try {
         currentDay();
+        if (requireClientKey && (typeof clientKey !== 'string' || !/^[0-9a-f]{64}$/.test(clientKey)))
+          throw new Error('Client rate limit could not be verified.');
+        if (clientKey !== undefined && !/^[0-9a-f]{64}$/.test(clientKey))
+          throw new Error('Client rate limit could not be verified.');
         await Promise.all([
           verifyPrices({ signal, now: now() }),
-          verifyConfig({ resourceId, deployment, credential, signal }),
+          verifyConfig({ resourceId, deployment, contentFilterPolicy, credential, signal }),
         ]);
         for (let attempt = 0; attempt < 5; attempt++) {
           const today = currentDay();
@@ -120,17 +172,36 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
             chunks.push(chunk);
           }
           const state = JSON.parse(new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)));
+          const previousClients = state?.clientCalls === undefined ? {} : state.clientCalls;
+          // Legacy spend may include cheaper modalities, so it cannot safely imply a call count.
+          const previousCalls = state?.calls === undefined
+            ? state?.day === today && state?.reservedMicros > 0 ? dailyCallLimit : 0 : state.calls;
           if (!state || typeof state !== 'object' || Array.isArray(state)
               || typeof state.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.day)
               || !Number.isSafeInteger(state.reservedMicros) || state.reservedMicros < 0
               || state.reservedMicros > DAILY_LIMIT
+              || !Number.isInteger(previousCalls) || previousCalls < 0 || previousCalls > 100
+              || !previousClients || typeof previousClients !== 'object' || Array.isArray(previousClients)
+              || Object.keys(previousClients).length > MAX_CLIENTS
+              || Object.entries(previousClients).some(([key, count]) =>
+                !/^[0-9a-f]{64}$/.test(key) || !Number.isInteger(count) || count < 1 || count > 100)
+              || Object.values(previousClients).reduce((sum, count) => sum + count, 0) > previousCalls
               || new Date(`${state.day}T00:00:00Z`).toISOString().slice(0, 10) !== state.day
               || state.day > today)
             throw new Error('Invalid budget state.');
           const spent = state.day === today ? state.reservedMicros : 0;
+          const calls = state.day === today ? previousCalls : 0;
+          const clients = state.day === today ? previousClients : {};
+          if (calls >= dailyCallLimit)
+            throw failure('BUDGET_CALL_LIMIT', 'The Azure daily planning request limit is exhausted.');
+          if (clientKey && (clients[clientKey] ?? 0) >= dailyClientLimit)
+            throw failure('BUDGET_CLIENT_LIMIT', 'The Azure per-client planning limit is exhausted.');
           if (spent + RESERVATION > DAILY_LIMIT)
             throw failure('BUDGET_EXHAUSTED', 'The Azure daily inference budget is exhausted.');
-          const body = JSON.stringify({ day: today, reservedMicros: spent + RESERVATION });
+          const clientCalls = { ...clients };
+          if (clientKey) clientCalls[clientKey] = (clientCalls[clientKey] ?? 0) + 1;
+          const body = JSON.stringify({ day: today, reservedMicros: spent + RESERVATION,
+            calls: calls + 1, clientCalls });
           try {
             if (currentDay() !== today) throw new Error('UTC day changed.');
             await blobClient.upload(body, Buffer.byteLength(body), {
@@ -138,7 +209,8 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
               blobHTTPHeaders: { blobContentType: 'application/json' },
             });
             if (currentDay() !== today) throw new Error('UTC day changed.');
-            return { reservedMicros: spent + RESERVATION, dailyLimitMicros: DAILY_LIMIT };
+            return { reservedMicros: spent + RESERVATION, dailyLimitMicros: DAILY_LIMIT,
+              calls: calls + 1, dailyCallLimit };
           } catch (error) {
             if (error?.statusCode === 412 && !signal?.aborted) continue;
             throw error;
@@ -147,7 +219,8 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
         throw new Error('Reservation conflicts.');
       } catch (error) {
         if (signal?.aborted) throw failure('CANCELLED', 'Azure planning was cancelled.');
-        if (error?.code === 'BUDGET_EXHAUSTED' || error?.code === 'BUDGET_WINDOW_CLOSED') throw error;
+        if (['BUDGET_EXHAUSTED', 'BUDGET_WINDOW_CLOSED', 'BUDGET_CALL_LIMIT', 'BUDGET_CLIENT_LIMIT'].includes(error?.code))
+          throw error;
         throw failure('BUDGET_UNAVAILABLE', 'Azure inference budget or pricing could not be verified; no model request was sent.');
       }
     },

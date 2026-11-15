@@ -11,6 +11,7 @@ import { createVoiceInput, type VoiceUpdate } from './voice-input';
 import { voiceLabels } from './voice-labels';
 import { createPlanningImageInput } from './planning-image-input';
 import { resolveSceneSize } from './scene-size.mjs';
+import { acquireAzurePlanningToken } from './azure-auth';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -698,9 +699,13 @@ async function makePlan(demo = false) {
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
       if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
+      const azureAccessToken = azure ? await acquireAzurePlanningToken() : undefined;
+      controller.signal.throwIfAborted();
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
+        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey,
+          ...(localAI ? {} : { Accept: 'application/x-ndjson' }),
+          ...(azureAccessToken ? { Authorization: `Bearer ${azureAccessToken}` } : {}) },
         body: JSON.stringify({ world, brief: planningBrief,
           sceneSize: selectedSize,
           ...($<HTMLInputElement>('#hollow-interior').checked ? { hollowInterior: true } : {}),
@@ -973,7 +978,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   </details>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
-    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. When enabled, an explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
+    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. Entra sign-in is required; when enabled, an explicit planning action may open Microsoft sign-in and then send the brief to Azure, which may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
     <p id="azure-planner-status" role="status">${esc(translate(azurePlanner.message))}</p>
     <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
@@ -1030,7 +1035,7 @@ function updateMode() {
     : mode === 'local-ai'
       ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
       : mode === 'azure'
-        ? 'Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. No request until you press it. Do not enter personal information.'
+        ? 'Plan with Azure Foundry requires Entra sign-in. Pressing the button may open Microsoft sign-in, then sends your brief to Azure and may incur charges for the service owner. Do not enter personal information.'
         : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
   $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';

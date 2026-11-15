@@ -13,8 +13,9 @@ import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-outp
 import { createLocalPlanner } from './local-planner.mjs';
 import { createPlanningCapacity } from './planning-capacity.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
+import { createAzureAccessTokenVerifier, getAzureAuthConfig } from './azure-auth.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
-import { createAzureBudgetGate } from './azure-budget.mjs';
+import { createAzureBudgetGate, createAzurePrincipalKey } from './azure-budget.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
 import { MAX_IMAGE_BYTES, validatePlanningImage } from './planning-image.mjs';
 import { createWindowsCopilotJobRunner } from './src/windows-copilot-job-runner.mjs';
@@ -53,10 +54,14 @@ const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COM
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
 const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
+const azureAuthConfig = azureEnabled ? getAzureAuthConfig() : null;
+const verifyAzureAccessToken = azureAuthConfig
+  ? createAzureAccessTokenVerifier(azureAuthConfig) : null;
 const azureLimit = process.env.BRICKLAB_AZURE_DAILY_CALLS === undefined
   ? 12 : Number(process.env.BRICKLAB_AZURE_DAILY_CALLS);
 const planAzure = azureEnabled ? createAzurePlanner({
   endpoint: process.env.AZURE_OPENAI_ENDPOINT, deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
+  contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
 }) : null;
 const azureUsage = azureEnabled && !azureMonetaryBudget ? createAzureUsageGate({
   account: process.env.AZURE_STORAGE_ACCOUNT,
@@ -69,9 +74,13 @@ const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate(
   endpoint: process.env.AZURE_OPENAI_ENDPOINT,
   deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
   resourceId: process.env.AZURE_OPENAI_RESOURCE_ID,
+  contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
+  dailyCallLimit: azureLimit,
+  clientHashSecret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
+  requireClientKey: azureMonetaryBudget,
 }) : null;
 const azurePlannerStatus = azureEnabled
-  ? { enabled: true, state: 'configured', message: `Azure planning and ${azureMonetaryBudget ? 'inference budget' : 'durable quota'} are configured, not verified. Only an explicit Azure planning request reserves ${azureMonetaryBudget ? 'budget' : 'quota'} and sends a brief. No retries or refunds.` }
+  ? { enabled: true, state: 'configured', message: `Azure planning, Entra sign-in and ${azureMonetaryBudget ? 'inference budget' : 'durable quota'} are configured, not verified. Only an explicit Azure planning request reserves ${azureMonetaryBudget ? 'budget' : 'quota'} and sends a brief. No retries or refunds.` }
   : { enabled: false, state: 'off', message: hosted
     ? 'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
@@ -143,6 +152,15 @@ const sameSecret = (value, expected) => typeof value === 'string'
   && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 const sameToken = token => sameSecret(token, sessionKey);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+function azureClientKey(principal) {
+  try {
+    return createAzurePrincipalKey({ secret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
+      tenantId: principal.tenantId, objectId: principal.objectId });
+  } catch {
+    return null;
+  }
+}
 
 async function readPlanningBody(req) {
   const declared = req.headers['content-length'];
@@ -385,6 +403,18 @@ const server = http.createServer(async (req, res) => {
         planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
         copilotImages: copilotImagesEnabled && !planningQuarantined });
     }
+    if (req.method === 'GET' && url.pathname === '/api/azure-auth-config') {
+      if (!azureAuthConfig) return send(res, 404, { error: 'Azure sign-in is unavailable.' });
+      if (req.headers.origin !== undefined && !allowedOrigins.has(req.headers.origin))
+        return send(res, 403, { error: 'Use this app\'s exact origin.' });
+      return send(res, 200, {
+        tenantId: azureAuthConfig.tenantId,
+        apiClientId: azureAuthConfig.apiClientId,
+        clientId: azureAuthConfig.spaClientId,
+        requiredScope: azureAuthConfig.requiredScope,
+        scope: `api://${azureAuthConfig.apiClientId}/${azureAuthConfig.requiredScope}`,
+      });
+    }
     const localAI = url.pathname === '/api/local-plan';
     const azureAI = url.pathname === '/api/azure-plan';
     const compatibleAI = url.pathname === '/api/compatible-plan';
@@ -394,6 +424,20 @@ const server = http.createServer(async (req, res) => {
     if (!origin || !allowedOrigins.has(origin)
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
+    if (azureAI && !azureEnabled) return send(res, 403, { error: azurePlannerStatus.message });
+    let azurePrincipal;
+    if (azureAI) {
+      if (!verifyAzureAccessToken) return send(res, 503, { error: 'Azure sign-in is not configured; no model request was sent.' });
+      try { azurePrincipal = await verifyAzureAccessToken(req.headers.authorization); }
+      catch (error) {
+        const statusCode = error?.statusCode === 403 ? 403 : 401;
+        if (statusCode === 401)
+          res.setHeader('WWW-Authenticate', 'Bearer realm="BrickLab Azure planner", error="invalid_token"');
+        return send(res, statusCode, { error: statusCode === 403
+          ? 'Azure access is not authorized for planning.'
+          : 'A valid Azure access token is required; no model request was sent.' });
+      }
+    }
     if (planningQuarantined) {
       req.resume();
       return send(res, 429, { error: planningQuarantineMessage });
@@ -438,6 +482,9 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, { error: azureAI ? azurePlannerStatus.message
           : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
+      const azureClient = azureAI && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
+      if (azureAI && azureMonetaryBudget && !azureClient)
+        return send(res, 503, { error: 'Azure planning rate limits could not be verified; no model request was sent.' });
       if (copilotAI && image && !copilotImagesEnabled)
         return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
       const today = new Date().toISOString().slice(0, 10);
@@ -494,16 +541,22 @@ const server = http.createServer(async (req, res) => {
           if (azureAI) {
             const work = (async () => {
               controller.signal.throwIfAborted();
-              try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({ signal: controller.signal }); }
+              try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({
+                signal: controller.signal, ...(azureClient ? { clientKey: azureClient } : {}),
+              }); }
               catch (error) {
                 controller.signal.throwIfAborted();
                 if (azureMonetaryBudget) {
                   const exhausted = error?.code === 'BUDGET_EXHAUSTED';
+                  const requestLimit = error?.code === 'BUDGET_CALL_LIMIT';
+                  const clientLimit = error?.code === 'BUDGET_CLIENT_LIMIT';
                   const windowClosed = error?.code === 'BUDGET_WINDOW_CLOSED';
                   throw Object.assign(new Error(exhausted ? 'The Azure daily inference budget is exhausted.'
+                    : requestLimit ? 'The Azure daily planning request limit is exhausted.'
+                    : clientLimit ? 'This client has reached the Azure daily planning limit.'
                     : windowClosed ? 'Azure planning is unavailable near the UTC day boundary.'
                     : 'Azure inference budget or pricing could not be verified; no model request was sent.'),
-                  { statusCode: exhausted ? 429 : 503 });
+                  { statusCode: exhausted || requestLimit || clientLimit ? 429 : 503 });
                 }
                 const exhausted = error?.message === 'Azure daily planning limit reached.';
                 throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'

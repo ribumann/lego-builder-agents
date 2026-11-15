@@ -9,12 +9,15 @@
     "start": "node server.mjs --production",
     "test": "node --import tsx --test tests/*.test.ts tests/*.test.mjs",
     "test:e2e": "playwright test",
+    "package:azure": "python3 scripts/package_azure_release.py",
     "check": "npm test && npm run build"
   },
   "dependencies": {
     "@azure/identity": "^4.14.1",
+    "@azure/msal-browser": "^5.29.1",
     "@azure/storage-blob": "^12.34.0",
     "@huggingface/transformers": "3.8.1",
+    "jose": "^6.2.12",
     "three": "^0.180.0"
   },
   "devDependencies": {
