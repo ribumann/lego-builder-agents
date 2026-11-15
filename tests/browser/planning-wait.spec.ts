@@ -147,7 +147,7 @@ test('compatible AI is explicit, localized and preserves attribution', async ({ 
   } }));
   await page.route('**/api/compatible-plan', route => {
     calls++;
-    expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon' });
+    expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon', sceneSize: 1000 });
     const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
       design: { name: 'Beacon', bricks: [{ x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' }] } };
     return route.fulfill({ contentType: 'application/x-ndjson', body: `${JSON.stringify({ type: 'result', spec })}\n` });
@@ -174,7 +174,7 @@ test('hosted Azure planning is separate, explicit, and preserves attribution', a
   } }));
   await page.route('**/api/azure-plan', route => {
     calls++;
-    expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon' });
+    expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon', sceneSize: 1000 });
     const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
       design: { name: 'Beacon', bricks: [{ x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' }] } };
     return route.fulfill({ contentType: 'application/x-ndjson', body: `${JSON.stringify({ type: 'result', spec })}\n` });
