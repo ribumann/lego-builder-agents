@@ -48,7 +48,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
   const child = spawn(process.execPath, [...nodeArgs, 'server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
       BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '',
-      BRICKLAB_COPILOT_IMAGES: '0',
+      BRICKLAB_COPILOT_IMAGES: '0', BRICKLAB_COPILOT_MODEL: undefined,
       // Historical lifecycle cases explicitly exercise a one-slot configuration.
       BRICKLAB_PLANNING_CONCURRENCY: '1', BRICKLAB_PROVIDER_CONCURRENCY: '1',
       BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
@@ -455,6 +455,48 @@ test('planning forwards a hollow preference to one CLI call without rewriting th
   assert.ok(state.prompts[0].endsWith(`User brief: ${JSON.stringify(brief)}`));
   await command({ action: 'complete', spec: lifecycleSpec });
   assert.equal((await response).status, 200);
+});
+
+test('Copilot model selection is optional and fixed for the process across guarded text and image routes', { timeout: 20_000 }, async t => {
+  for (const [platform, image] of [['linux', false], ['win32', false], ['win32', true]] as const) {
+    for (const model of [undefined, 'gpt-6.1-sol']) {
+      const server = await startLifecycleServer(t, platform, {
+        ...(image ? windowsImageConfig : {}), BRICKLAB_COPILOT_MODEL: model,
+      });
+      const payload = image ? windowsImageBody : JSON.stringify({
+        world: 'space', brief: 'A fixture sculpture', model: 'request-must-not-select-model',
+      });
+      const response = await server.post(ndjson, payload);
+      const state = await server.command({ action: platform === 'win32' ? 'job-started' : 'started', count: 1 });
+      const args: string[] = platform === 'win32' ? state.jobEvents[0].args : state.childArgs[0];
+      assert.equal(state.count, platform === 'win32' ? 0 : 1);
+      const flags = args.slice(2);
+      assert.deepEqual(flags, ['--output-format=json', '--stream=off', '--available-tools=',
+        '--disable-builtin-mcps', '--no-custom-instructions', '--no-ask-user', '--no-auto-update',
+        '--disable-client-telemetry', ...(model === undefined ? [] : ['--model', model])]);
+      if (platform === 'win32') await server.command({ action: 'job-complete', output: imageJobOutput() });
+      else await server.command({ action: 'complete', spec: lifecycleSpec });
+      const events = streamEvents(await response.text());
+      assert.equal(events.at(-1).type, 'result');
+      assert.equal(events.at(-1).calls, 1);
+      assert.deepEqual(events.at(-1).spec, lifecycleSpec);
+    }
+  }
+});
+
+test('invalid configured Copilot model fails before the server starts', () => {
+  for (const model of ['', '-p', 'gpt model', 'gpt\nmodel', 'gpt;command', 'a'.repeat(129)]) {
+    const result = spawnSync(process.execPath, ['server.mjs', '--production'], {
+      env: { ...process.env, HOST: '127.0.0.1', PORT: '0', BRICKLAB_HOSTED: '0',
+        BRICKLAB_CODESPACES: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COPILOT: '1',
+        BRICKLAB_COPILOT_BIN: '', BRICKLAB_COPILOT_MODEL: model },
+      encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /BRICKLAB_COPILOT_MODEL must be a nonempty model identifier/);
+    assert.equal(result.stdout.includes('BrickLab:'), false);
+  }
 });
 
 test('Copilot permits one invocation, continues at 100s/200s, and responds at the 300s deadline while cleanup holds the lock', async t => {
@@ -876,7 +918,8 @@ test('normal HTTP Windows text dispatch contains real detached descendants, isol
       const fs = require('node:fs');
       const prompt = process.argv[process.argv.indexOf('-p') + 1];
       const id = prompt.includes('First native text') ? 'first' : 'second';
-      if (process.argv.includes('--attachment') || !process.argv.includes('--available-tools=')) process.exit(51);
+      if (process.argv.includes('--attachment') || !process.argv.includes('--available-tools=')
+          || process.argv[process.argv.indexOf('--model') + 1] !== 'gpt-6.1-sol') process.exit(51);
       const child = require('node:child_process').spawn(process.execPath,
         ['-e', 'setInterval(() => {}, 1000)'], { detached: true, stdio: 'ignore' });
       child.unref();
@@ -890,7 +933,7 @@ test('normal HTTP Windows text dispatch contains real detached descendants, isol
         }
       }, 20);
     `;
-    const server = await startLifecycleServer(t, 'win32', { ...defaultCapacity,
+    const server = await startLifecycleServer(t, 'win32', { ...defaultCapacity, BRICKLAB_COPILOT_MODEL: 'gpt-6.1-sol',
       TEST_NATIVE_WINDOWS_JOB: '1', TEST_NATIVE_TEMP: root, TEST_NATIVE_SCRIPT: script });
     const first = await server.post(ndjson, JSON.stringify({ world: 'space', brief: 'First native text' }));
     const firstBody = first.text();
@@ -1920,7 +1963,9 @@ test('consented Windows image planning uses one bounded job and the strict custo
 
 test('Copilot text and images correct once only after the previous invocation has cleaned up', { timeout: 15_000 }, async t => {
   for (const image of [false, true]) {
-    const server = await startLifecycleServer(t, image ? 'win32' : 'linux', image ? windowsImageConfig : {});
+    const server = await startLifecycleServer(t, image ? 'win32' : 'linux', {
+      ...(image ? windowsImageConfig : {}), BRICKLAB_COPILOT_MODEL: 'gpt-6.1-sol',
+    });
     const response = await server.post(ndjson, image ? windowsImageBody : JSON.stringify({ world: 'space', brief: 'Synthetic sculpture' }));
     const invalid = { ...lifecycleSpec, design: { ...lifecycleSpec.design,
       bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } };
@@ -1930,11 +1975,15 @@ test('Copilot text and images correct once only after the previous invocation ha
       const state = await server.command({ action: 'job-started', count: 2 });
       assert.match(state.jobEvents[1].args[1], /intersects object 1, brick 1, repeat 1/);
       assert.deepEqual(state.jobEvents[1].image, consentedTestImage);
+      assert.deepEqual(state.jobEvents.map((job: { args: string[] }) => job.args.slice(-2)),
+        [['--model', 'gpt-6.1-sol'], ['--model', 'gpt-6.1-sol']]);
       await server.command({ action: 'job-complete', index: 1, output: imageJobOutput() });
     } else {
       await server.command({ action: 'started', count: 1 });
       await server.command({ action: 'complete', spec: invalid });
-      await server.command({ action: 'started', count: 2 });
+      const state = await server.command({ action: 'started', count: 2 });
+      assert.deepEqual(state.childArgs.map((args: string[]) => args.slice(-2)),
+        [['--model', 'gpt-6.1-sol'], ['--model', 'gpt-6.1-sol']]);
       await server.command({ action: 'complete', index: 1, spec: lifecycleSpec });
     }
     const events = streamEvents(await response.text());

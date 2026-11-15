@@ -87,6 +87,9 @@ const copilotExecutable = process.env.BRICKLAB_COPILOT_BIN || 'copilot';
 if (process.env.BRICKLAB_COPILOT_BIN
     && (!isAbsolute(copilotExecutable) || /\.(?:cmd|bat)$/i.test(copilotExecutable)))
   throw new Error('BRICKLAB_COPILOT_BIN must be an absolute path to the standalone Copilot executable (native .exe on Windows), not a shell script launcher.');
+const copilotModel = liveEnabled ? process.env.BRICKLAB_COPILOT_MODEL : undefined;
+if (copilotModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(copilotModel))
+  throw new Error('BRICKLAB_COPILOT_MODEL must be a nonempty model identifier of at most 128 characters.');
 const copilotImagesEnabled = liveEnabled && process.platform === 'win32'
   && process.env.BRICKLAB_COPILOT_IMAGES === '1'
   && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable);
@@ -235,7 +238,8 @@ export function extractSpec(text, provider = 'Copilot') {
 
 const copilotArguments = prompt => ['-p', prompt, '--output-format=json', '--stream=off',
   '--available-tools=', '--disable-builtin-mcps', '--no-custom-instructions',
-  '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'];
+  '--no-ask-user', '--no-auto-update', '--disable-client-telemetry',
+  ...(copilotModel === undefined ? [] : ['--model', copilotModel])];
 
 function parseCopilotPlan(code, stdout, stderr) {
   if (code !== 0) {
