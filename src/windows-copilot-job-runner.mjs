@@ -15,8 +15,8 @@ const RESULT_PREFIX = 'BRICKLAB_JOB_RESULT:';
 const MAX_PROTOCOL_BYTES = 2_500_000;
 
 const failure = (message, cleanupConfirmed = false) => Object.assign(new Error(message), { cleanupConfirmed });
-const invalid = () => failure('Copilot image request is invalid.', true);
-const unsupported = () => failure('Copilot image attachments require verified Windows process containment.', true);
+const invalid = () => failure('Copilot planning request is invalid.', true);
+const unsupported = () => failure('Copilot planning requires verified Windows process containment.', true);
 
 function validateOptions(options) {
   if (!options || typeof options !== 'object' || Array.isArray(options)
@@ -41,7 +41,6 @@ function validateOptions(options) {
   let validatedImage;
   try { validatedImage = validatePlanningImage(image, imageConsent); }
   catch { throw invalid(); }
-  if (!validatedImage) throw invalid();
   return { executable, args, cwd, signal, timeoutMs, maxOutputBytes, image: validatedImage };
 }
 
@@ -89,7 +88,8 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
   const run = async options => {
     if (process.platform !== 'win32') throw unsupported();
     const request = validateOptions(options);
-    if (request.signal?.aborted) throw failure('Copilot image planning was cancelled.', true);
+    const cleanupLabel = request.image ? 'attachment cleanup' : 'process and temporary-storage cleanup';
+    if (request.signal?.aborted) throw failure('Copilot planning was cancelled.', true);
     const root = tempRoot ?? tmpdir();
     const requestId = randomUUID().replaceAll('-', '');
     const directoryName = `bricklab-copilot-${requestId}`;
@@ -124,7 +124,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
     const powerShell = findTrustedPowerShell();
     try { await access(powerShell); }
     catch { throw failure('A trusted PowerShell 7 runtime is unavailable.', true); }
-    if (request.signal?.aborted) throw failure('Copilot image planning was cancelled.', true);
+    if (request.signal?.aborted) throw failure('Copilot planning was cancelled.', true);
     let child;
     try {
       child = spawn(powerShell, ['-NoLogo', '-NoProfile', '-NonInteractive', '-File', HOST_SCRIPT], {
@@ -189,19 +189,19 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
           return;
         }
         if (result.status === 'cancelled') {
-          finish(failure('Copilot image planning was cancelled; attachment cleanup is confirmed.', true));
+          finish(failure(`Copilot planning was cancelled; ${cleanupLabel} is confirmed.`, true));
           return;
         }
         if (request.signal?.aborted || cancelSignalError || inputFailed) {
-          finish(failure('Copilot cancellation could not be confirmed; attachment cleanup is confirmed.', true));
+          finish(failure(`Copilot cancellation could not be confirmed; ${cleanupLabel} is confirmed.`, true));
           return;
         }
         if (result.status === 'timeout') {
-          finish(failure('Copilot image planning timed out; attachment cleanup is confirmed.', true));
+          finish(failure(`Copilot planning timed out; ${cleanupLabel} is confirmed.`, true));
           return;
         }
         if (result.status === 'output-limit') {
-          finish(failure('Copilot response exceeded its output limit; attachment cleanup is confirmed.', true));
+          finish(failure(`Copilot response exceeded its output limit; ${cleanupLabel} is confirmed.`, true));
           return;
         }
         if (result.ok !== true || result.privateAclVerified !== true
@@ -213,7 +213,7 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
         const stdout = Buffer.from(result.stdoutBase64, 'base64').toString('utf8');
         const stderr = Buffer.from(result.stderrBase64, 'base64').toString('utf8');
         if (Buffer.byteLength(stdout) + Buffer.byteLength(stderr) > request.maxOutputBytes) {
-          finish(failure('Copilot response exceeded its output limit; attachment cleanup is confirmed.', true));
+          finish(failure(`Copilot response exceeded its output limit; ${cleanupLabel} is confirmed.`, true));
           return;
         }
         finish(null, {
@@ -233,8 +233,8 @@ export function createWindowsCopilotJobRunner({ tempRoot } = {}) {
           cwd: request.cwd,
           timeoutMs: request.timeoutMs,
           maxOutputBytes: request.maxOutputBytes,
-          imageMimeType: request.image.mimeType,
-          imageBase64: request.image.bytes.toString('base64'),
+          ...(request.image ? { imageMimeType: request.image.mimeType,
+            imageBase64: request.image.bytes.toString('base64') } : {}),
           directoryName,
           cancelSignalName,
         }) + '\n');

@@ -48,8 +48,17 @@ retrying or submitting a model call. `/api/status` reports `planningCapacity`
 with active total, configured limits, per-provider counts and quarantine state.
 Slots cover body reading, provider work and cleanup; aborts/deadlines end the
 client response but do not release capacity until transport/process cleanup
-settles. Daily Copilot calls and Azure quota/spend reservations are independent
-of capacity and are not refunded on cancellation or failure.
+is confirmed. Ambiguous Copilot jobs remain charged while globally quarantined.
+Daily request quotas apply only to public hosted Azure, independently
+of capacity: `BRICKLAB_AZURE_DAILY_CALLS` defaults to 12 (1-100) and
+`BRICKLAB_AZURE_DAILY_CLIENT_CALLS` defaults to 3 (1-3 per verified principal).
+They are deployment environment settings; invalid public settings fail startup.
+Local servers and Codespaces have no daily request quota, even if those settings
+or the obsolete `BRICKLAB_DAILY_CALLS` are supplied. Copilot `calls` is informational
+and `limit` is null. Provider subscription quotas and compute costs still apply.
+Explicit private Azure spend-budget opt-in retains its atomic monetary
+reservation ceiling without daily request/client caps; reservations are never
+refunded on cancellation or failure. Public paid activation remains blocked.
 
 Unconfirmed Copilot image cleanup permanently quarantines **all planning** in
 that process, aborts active requests and prevents late completions from
@@ -64,8 +73,8 @@ If planning is quarantined, inspect the server's process tree and any private
 attachment/cancellation artifacts with the operator before authorizing
 recovery. A missing parent process is not proof that descendants exited.
 There is no API unlock or automatic quarantine expiry. Restarting also resets
-the process-local Copilot daily counter; it does not carry remaining quota
-forward or reset Azure's durable reservations.
+the informational process-local Copilot counter, but cannot reset public Azure's
+durable quota/spend reservations.
 
 ### Optional OpenAI-compatible provider (private server only)
 
@@ -261,6 +270,7 @@ PowerShell:
 
 ```powershell
 $env:BRICKLAB_COPILOT="1"
+$env:BRICKLAB_COPILOT_BIN='C:\path\to\standalone\copilot.exe'
 npm run dev
 ```
 
@@ -268,7 +278,7 @@ Copilot planning is the default choice, or select **Change mode -> Use Copilot p
 
 Server status detects a missing or unusable CLI with a non-model `copilot --version` check; it sends no brief and verifies no account entitlement. Authentication errors from an attempted plan provide login instructions without displaying raw CLI output or automatically retrying. An installed CLI is not proof of a working login or subscription.
 
-On Windows, a VS Code `copilot.exe` shim may win command resolution while the standalone CLI is missing. Check `Get-Command copilot -All` and `copilot --version`; the app also recognizes a shim reporting that the CLI is not installed. If needed, set `BRICKLAB_COPILOT_BIN` to the **absolute path of the actual standalone native executable** (`.exe` on Windows), then restart. This override is used for both status and planning without a shell, including paths with spaces. `.cmd`/`.bat` wrappers are intentionally unsupported rather than enabling shell execution of a child's brief. The private Codespace setup avoids relying on the computer's Windows executable or login. Native Windows ARM64 CLI version reporting and a bounded real local API planning request were verified. The two subprocess tests that create POSIX shebang executables are explicitly skipped on Windows, not represented as native Windows coverage.
+On Windows, a VS Code `copilot.exe` shim may win command resolution while the standalone CLI is missing. Check `Get-Command copilot -All` and `copilot --version`; the app also recognizes a shim reporting that the CLI is not installed. **Set `BRICKLAB_COPILOT_BIN` to the absolute path of the actual standalone native `.exe`** and install the Microsoft Store PowerShell 7 package. Both text and image planning require verified Windows Job Object containment: the child is created suspended, assigned before resume, cannot break away, and cleanup waits for zero active processes. Paths with spaces are supported without a shell; no `.cmd`/`.bat`, shim or raw-spawn fallback is enabled. Missing containment fails closed without sending a brief. The private Linux Codespace setup uses its own CLI/login and detached POSIX process groups, not the Windows executable. Native synthetic Windows text/image jobs verify detached descendant cleanup, timeout, cancellation and host-loss failure; POSIX subprocess fixtures are explicitly skipped on Windows. Historical real local planning observations do not establish live provider verification for a new release.
 
 The server invokes `copilot -p` without shell interpolation, with an empty available-tool list, built-in MCPs disabled, and repository custom instructions disabled. No model tools are exposed. Both server and browser require validated custom brick arrangements: template-only and invalid responses fail visibly, without automatic retries, substitution or pretending offline planning was AI. Legacy saves and imported Actions missions may still contain templates; they are not new cloud planning results.
 
@@ -298,7 +308,7 @@ Choose **Change mode -> Use Local AI**, then **Plan with Local AI**. Status and 
 
 The default endpoint is `http://127.0.0.1:11434`; optional `BRICKLAB_LOCAL_URL` accepts only an HTTP numeric loopback address (`127.0.0.1` or `[::1]`), without userinfo, paths, query or fragment. Hostnames (including `localhost`), external addresses and redirects are rejected. Transport does not use environment proxies. Model metadata identifying a remote/cloud model is rejected **before transmitting the brief**. **Loopback alone does not prove offline operation:** use `OLLAMA_NO_CLOUD=1`, a genuinely local downloaded model and a trusted service. Metadata cannot prove what a modified or misconfigured service does internally.
 
-Local AI shares Host/Origin/authentication checks, the per-process request token, custom geometry validation and a single active planning slot with Copilot. It has a 90-second deadline, 1 MiB provider-envelope limit and 128,000-byte final-content limit, with bounded output tokens. Its cancellable dialog shows elapsed time and the separate 90-second maximum, not Copilot's measured estimates or 300-second deadline. It uses no Copilot quota, but server/Codespace compute charges may apply. Keep children's identifying/sensitive information out of briefs.
+Local AI shares Host/Origin/authentication checks, the per-process request token and custom geometry validation with Copilot, but has independent bounded provider slots. It has a 90-second deadline, 1 MiB provider-envelope limit and 128,000-byte final-content limit, with bounded output tokens. Its cancellable dialog shows elapsed time and the separate 90-second maximum, not Copilot's measured estimates or 300-second deadline. It uses no Copilot quota, but server/Codespace compute charges may apply. Keep children's identifying/sensitive information out of briefs.
 
 Fake local-provider and browser tests cover success, failures, explicit mode separation and remote-model rejection. No Ollama executable/listener was observed on the checked Linux server or Windows ARM64 host, so **real local-model inference remains unverified**. No model was installed/downloaded or live local-model success inferred from fixtures.
 
@@ -310,7 +320,7 @@ This removes the four-template subject restriction **for AI-planned designs**, n
 
 The shared custom contract supports legacy `design.bricks` or named groups in `design.objects`, with **1-256 compact brick records in total**, optional `repeat: {count, dx, dy, dz}`, up to **32 objects**, **8,192 expanded bricks** and **262,144 occupied cells**. Each brick has integer dimensions **1-8** per axis; every occupied cell must stay within **x/z -64..63 and y 0..63**. Colors are allowlisted and overlaps are rejected, including between objects. Separate objects may be apart; PlanBot and CheckBot check face connectivity within each object. Missing-brick repair cannot fix a fundamentally disconnected blueprint. Invalid output fails explicitly, without automatic paid retries. Old template and single-object custom saves remain supported; new saves retain validated object geometry. A novel design's semantic quality and large-scene live model reliability remain unverified.
 
-Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with one concurrent invocation allowed. The planning dialog shows actual elapsed time and a rough, sample-based estimate, not model progress; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. The deadline still applies without a response. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Default limit is **12 Copilot planning invocations per UTC day per server process**, configurable with `BRICKLAB_DAILY_CALLS` (1-100). Restarting resets the counter; this is a demo guardrail, **not a durable FinOps or monetary budget**. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
+Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with two concurrent invocations by default. The planning dialog shows actual elapsed time and a rough, sample-based estimate, not model progress; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. At 300 seconds the server actually aborts and terminates the process tree, then awaits confirmed cleanup before releasing that request's slot; an HTTP timeout alone does not release it. Unconfirmed termination permanently quarantines planning with operator recovery instructions. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit. Local servers and Codespaces have **no application daily request quota**; `BRICKLAB_DAILY_CALLS` no longer applies. Copilot service costs/quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
 
 The estimate compares an unambiguous numeric brick target in the brief with a small study of 20 sequential Windows Copilot CLI requests on November 14, 2026, using the then-default model. Four synthetic lighthouse, dinosaur, spacecraft and garden briefs per target took: 20 bricks, 21.67–25.56 s; 100, 32.88–46.95 s; 500, 57.08–172.20 s; 2,000, 79.63–123.88 s; and 8,000, 119.91–182.94 s. Ranges shown are rounded outward; sizes between targets use the wider bracket of adjacent observations. Without a clear supported target, the estimate is unknown and displays the broad observed 20–183 s range. This is not a deadline or guarantee: conditions, prompts, models and actual generated brick counts vary, and the sample only checked schema, bounds and overlap—not connectivity, artistic quality or physical stability. No extra inference call is made for an estimate. Azure Foundry and Local AI are not calibrated by this Copilot study.
 

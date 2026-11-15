@@ -12,6 +12,16 @@ param frontDoorId string = ''
 @description('Object ID of the operator allowed to upload release packages.')
 param packageUploaderObjectId string
 
+@description('Public Azure planning requests per UTC day across all app instances; does not enable paid planning.')
+@minValue(1)
+@maxValue(100)
+param azureDailyCalls int = 12
+
+@description('Public Azure planning requests per verified principal per UTC day.')
+@minValue(1)
+@maxValue(3)
+param azureDailyClientCalls int = 3
+
 var suffix = uniqueString(subscription().id, resourceGroup().id)
 var webName = 'bricklab-${suffix}'
 var storageName = 'bricklab${suffix}'
@@ -51,6 +61,24 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
       minTlsVersion: '1.2'
       ftpsState: 'Disabled'
       appCommandLine: 'npm start'
+      appSettings: [
+        {
+          name: 'BRICKLAB_HOSTED'
+          value: '1'
+        }
+        {
+          name: 'BRICKLAB_AZURE_AI'
+          value: '0'
+        }
+        {
+          name: 'BRICKLAB_AZURE_DAILY_CALLS'
+          value: string(azureDailyCalls)
+        }
+        {
+          name: 'BRICKLAB_AZURE_DAILY_CLIENT_CALLS'
+          value: string(azureDailyClientCalls)
+        }
+      ]
       ipSecurityRestrictionsDefaultAction: 'Deny'
       scmIpSecurityRestrictionsDefaultAction: 'Deny'
       ipSecurityRestrictions: empty(frontDoorId) ? [] : [

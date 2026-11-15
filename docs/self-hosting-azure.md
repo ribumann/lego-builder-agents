@@ -58,7 +58,10 @@ For inference, the current gate verifies the
 [Sweden Central GPT-5.4 Data Zone retail meters](https://prices.azure.com/api/retail/prices?%24filter=productName%20eq%20%27Azure%20OpenAI%20GPT5%27%20and%20armRegionName%20eq%20%27swedencentral%27%20and%20%28skuName%20eq%20%275.4%20inp%20Dz%27%20or%20skuName%20eq%20%275.4%20opt%20Dz%27%29)
 before every call and reserves $0.55 against a $50 UTC-day budget. The default
 application limit is 12 calls per day (at most $6.60 of estimated reservations)
-and three calls per client per day. The global call and dollar counters and
+and three calls per verified principal per day. Daily request/client caps apply
+only to the public hosted deployment; local servers and Codespaces have no
+daily request quota. Explicit private spend-budget mode retains its monetary
+ceiling without request/client daily caps. The global call and dollar counters and
 pseudonymous client counters share the same private Blob state and use ETag
 conditional writes, so concurrent reservations from separate app instances
 cannot exceed those limits. legacy dollar-only state is read conservatively
@@ -76,8 +79,8 @@ hosting, storage, network and tax are outside the gate. Azure Cost Management
 budgets alert rather than stop spending; configure alerts separately. The
 Front Door WAF rate rule is also approximate, not authentication or a global
 spend limit. Do not scale the App Service above one worker without adding and
-verifying a shared in-flight semaphore; the existing `busy` lock is per
-process. See [budget limitations](azure-planner.md).
+verifying a shared in-flight semaphore; the bounded capacity (8 total, 2 per
+provider by default) is per process. See [budget limitations](azure-planner.md).
 
 ## Provision isolated resources
 
@@ -234,8 +237,13 @@ blocked paid planner the intended additional settings are
 `AZURE_OPENAI_RESOURCE_ID`, `AZURE_STORAGE_ACCOUNT`, and
 `BRICKLAB_AZURE_BUDGET_CONTAINER=usage`,
 `BRICKLAB_AZURE_CONTENT_FILTER_POLICY=bricklab-public-safe`,
-`BRICKLAB_AZURE_CLIENT_HASH_KEY`, and `BRICKLAB_AZURE_DAILY_CALLS` (default
-12; maximum 100). Resource identifiers and the content-filter policy name are
+`BRICKLAB_AZURE_CLIENT_HASH_KEY`, `BRICKLAB_AZURE_DAILY_CALLS` (default 12;
+integer 1-100), and `BRICKLAB_AZURE_DAILY_CLIENT_CALLS` (default 3; integer 1-3).
+The Bicep parameters `azureDailyCalls` and `azureDailyClientCalls` wire these
+quota settings into the web app while leaving `BRICKLAB_AZURE_AI=0`.
+Changing a quota does not enable paid planning. Invalid public quota settings
+fail startup; private local/Codespace settings are ignored. No deployment was
+performed to validate these settings on the live app. Resource identifiers and the content-filter policy name are
 not secrets. Store the client-hash key as a protected setting, never in source
 control or a browser. Configure the Entra settings
 `BRICKLAB_ENTRA_TENANT_ID`, `BRICKLAB_ENTRA_API_CLIENT_ID`,

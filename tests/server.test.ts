@@ -1,7 +1,8 @@
 import { test, type TestContext } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn, spawnSync, type ChildProcess } from 'node:child_process';
-import { createHmac } from 'node:crypto';
+import { createHmac, generateKeyPairSync } from 'node:crypto';
+import { SignJWT } from 'jose';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { request, createServer as createHttpServer } from 'node:http';
@@ -11,6 +12,7 @@ import { join, delimiter } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
 import { createPlanningCapacity } from '../planning-capacity.mjs';
+import { createPlanningQuota } from '../planning-quota.mjs';
 
 function fetchWithHost(url: string, options: { method?: string; headers: Record<string, string>; body?: string; stream?: boolean }) {
   return new Promise<Response>((resolve, reject) => {
@@ -106,6 +108,12 @@ import { promisify } from 'node:util';
 import http from 'node:http';
 import fs from 'node:fs/promises';
 import { basename, dirname } from 'node:path';
+import { Readable } from 'node:stream';
+import { createPublicKey } from 'node:crypto';
+import { createPlanningQuota } from ${JSON.stringify(new URL('../planning-quota.mjs', import.meta.url).href)};
+import { createAzureBudgetGate, createAzurePrincipalKey } from ${JSON.stringify(new URL('../azure-budget.mjs', import.meta.url).href)};
+import { createAzureAccessTokenVerifier } from ${JSON.stringify(new URL('../azure-auth.mjs', import.meta.url).href)};
+import { createAzurePlanner } from ${JSON.stringify(new URL('../azure-planner.mjs', import.meta.url).href)};
 const actualReadFile = fs.readFile;
 const actualMkdtemp = fs.mkdtemp;
 let imageDirectories = 0;
@@ -138,6 +146,34 @@ const reservations = [];
 const azurePlans = [];
 const jobEvents = [];
 const jobs = [];
+let budgetState = process.env.TEST_BUDGET_STATE
+  ? JSON.parse(process.env.TEST_BUDGET_STATE) : { day: '2026-11-14', reservedMicros: 0, calls: 0, clientCalls: {} };
+let budgetVersion = 0;
+let budgetReads = 0;
+let budgetConflicts = 0;
+let releaseBudgetReads;
+const budgetReadBarrier = new Promise(resolve => { releaseBudgetReads = resolve; });
+const synchronizedReads = Number(process.env.TEST_BUDGET_SYNCHRONIZED_READS || 0);
+const budgetBlob = {
+  async download() {
+    const contents = JSON.stringify(budgetState);
+    const etag = String(budgetVersion);
+    if (++budgetReads <= synchronizedReads) {
+      if (budgetReads === synchronizedReads) releaseBudgetReads();
+      await budgetReadBarrier;
+    }
+    return { etag, contentLength: Buffer.byteLength(contents), readableStreamBody: Readable.from([Buffer.from(contents)]) };
+  },
+  async upload(body, _length, options) {
+    if (options.abortSignal?.aborted) throw new Error('fixture cancelled');
+    if (options.conditions.ifMatch !== String(budgetVersion)) {
+      budgetConflicts++;
+      throw Object.assign(new Error('fixture CAS conflict'), { statusCode: 412 });
+    }
+    budgetState = JSON.parse(body);
+    budgetVersion++;
+  }
+};
 const notify = () => {
   for (const waiter of [...waiters]) if (waiter.ready()) {
     waiters.splice(waiters.indexOf(waiter), 1);
@@ -152,6 +188,18 @@ const boundary = (type, entries, details) => new Promise((resolve, reject) => {
 globalThis.azureBoundaries = {
   createAzurePlanner(config) {
     azureConfig.push({ type: 'planner', ...config });
+    if (process.env.TEST_AZURE_HTTP_ENDPOINT) {
+      const plan = createAzurePlanner({ ...config,
+        credential: { getToken: async () => ({ token: 'fixture-managed-identity' }) },
+        fetchImpl: (_url, options) => fetch(process.env.TEST_AZURE_HTTP_ENDPOINT, options),
+      });
+      return details => {
+        azureEvents.push({ type: 'plan', ...details });
+        const work = plan(details);
+        notify();
+        return work;
+      };
+    }
     return details => boundary('plan', azurePlans, details);
   },
   createAzureUsageGate(config) {
@@ -162,10 +210,24 @@ globalThis.azureBoundaries = {
     azureConfig.push({ type: 'budget', account: config.account, container: config.container,
       endpoint: config.endpoint, deployment: config.deployment, resourceId: config.resourceId,
       contentFilterPolicy: config.contentFilterPolicy, dailyCallLimit: config.dailyCallLimit,
+      dailyClientLimit: config.dailyClientLimit, enforceDailyCallQuota: config.enforceDailyCallQuota,
       requireClientKey: config.requireClientKey });
+    if (process.env.TEST_REAL_AZURE_BUDGET === '1') {
+      const gate = createAzureBudgetGate({ ...config, blobClient: budgetBlob,
+        now: () => new Date('2026-11-14T12:00:00Z'), verifyPrices: async () => {}, verifyConfig: async () => {} });
+      return { reserve(details) {
+        azureEvents.push({ type: 'reserve', ...details });
+        const work = gate.reserve(details);
+        notify();
+        return work;
+      } };
+    }
     return { reserve: details => boundary('reserve', reservations, details) };
   },
   createAzureAccessTokenVerifier(config) {
+    if (process.env.TEST_AZURE_PUBLIC_KEY) return createAzureAccessTokenVerifier(config, {
+      jwks: async () => createPublicKey(process.env.TEST_AZURE_PUBLIC_KEY)
+    });
     return async authorization => {
       if (authorization === 'Bearer fixture-forbidden')
         throw Object.assign(new Error('not authorized'), { statusCode: 403 });
@@ -189,28 +251,33 @@ registerHooks({
     if (context.parentURL?.endsWith('/server.mjs') && specifier === './src/windows-copilot-job-runner.mjs')
       return { url: 'fixture:windows-job', shortCircuit: true };
     if (context.parentURL?.endsWith('/server.mjs') && ['./azure-planner.mjs', './azure-usage.mjs',
-      './azure-budget.mjs', './azure-auth.mjs'].includes(specifier))
+      './azure-budget.mjs', './azure-auth.mjs', './planning-quota.mjs'].includes(specifier))
       return { url: 'fixture:' + specifier, shortCircuit: true };
     return next(specifier, context);
   },
   load(url, context, next) {
     if (url === 'fixture:windows-job') return { format: 'module', shortCircuit: true, source:
       'export const createWindowsCopilotJobRunner = () => globalThis.windowsJobBoundary;' };
+    if (url === 'fixture:./planning-quota.mjs') return { format: 'module', shortCircuit: true, source:
+      'export const createPlanningQuota = options => globalThis.fixturePlanningQuota(options);' };
     if (url === 'fixture:./azure-auth.mjs') return { format: 'module', shortCircuit: true, source:
       'export const getAzureAuthConfig = (env = process.env) => ({ tenantId: env.BRICKLAB_ENTRA_TENANT_ID, ' +
       'apiClientId: env.BRICKLAB_ENTRA_API_CLIENT_ID, spaClientId: env.BRICKLAB_ENTRA_SPA_CLIENT_ID, ' +
       'requiredScope: env.BRICKLAB_ENTRA_REQUIRED_SCOPE, requiredRole: env.BRICKLAB_ENTRA_REQUIRED_ROLE });' +
       'export const createAzureAccessTokenVerifier = config => globalThis.azureBoundaries.createAzureAccessTokenVerifier(config);' };
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
-      'import { createHmac } from "node:crypto";' +
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
       'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' +
       'export const createAzureBudgetGate = config => globalThis.azureBoundaries.createAzureBudgetGate(config);' +
-      'export const createAzurePrincipalKey = ({secret, tenantId, objectId}) => createHmac("sha256", secret)' +
-      '.update(tenantId.toLowerCase() + ":" + objectId.toLowerCase()).digest("hex");' };
+      'export const createAzurePrincipalKey = options => globalThis.fixturePrincipalKey(options);' };
     return next(url, context);
   }
 });
+// Only select the future public quota policy in explicit fixtures; the real
+// hosted paid-activation guard is never bypassed or changed.
+globalThis.fixturePlanningQuota = options => createPlanningQuota(process.env.TEST_PUBLIC_QUOTA === '1'
+  ? { ...options, hosted: true } : options);
+globalThis.fixturePrincipalKey = createAzurePrincipalKey;
 const streamingResponses = new Set();
 let heartbeatWrites = 0;
 const actualWrite = http.ServerResponse.prototype.write;
@@ -238,16 +305,19 @@ process.kill = (pid, signal) => {
   return true;
 };
 const actualExec = cp.execFile;
-let taskkillCallback;
 cp.execFile = (file, args, options, callback) => {
+  if (file === 'gh' && args[0] === 'codespace') {
+    process.nextTick(() => callback(null, JSON.stringify([{
+      sourcePort: Number(process.env.PORT), visibility: 'private',
+      browseUrl: 'https://' + process.env.CODESPACE_NAME + '-' + process.env.PORT + '.app.github.dev'
+    }]), ''));
+    return new EventEmitter();
+  }
   if (args[0] === '--version') {
     process.nextTick(() => callback(null, 'fixture-cli', ''));
     return new EventEmitter();
   }
-  if (!file.endsWith('taskkill.exe')) return actualExec(file, args, options, callback);
-  signals.push({ file, args, options });
-  taskkillCallback = callback;
-  return new EventEmitter();
+  return actualExec(file, args, options, callback);
 };
 cp.execFile[promisify.custom] = (...args) => new Promise((resolve, reject) =>
   cp.execFile(...args, (error, stdout, stderr) => error ? reject(error) : resolve({ stdout, stderr })));
@@ -255,6 +325,7 @@ syncBuiltinESMExports();
 process.on('message', message => {
   const reply = () => setImmediate(() => process.send({
     id: message.id, count: children.length, imageDirectories, signals, heartbeatWrites, azureConfig,
+    budgetState, budgetReads, budgetConflicts,
     prompts: children.map(child => child.args[1]), childArgs: children.map(child => child.args),
     azureEvents: azureEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
     jobEvents: jobEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
@@ -291,7 +362,6 @@ process.on('message', message => {
     for (const response of streamingResponses)
       Object.defineProperty(response, 'writableNeedDrain', { configurable: true, value: message.blocked });
   }
-  if (message.action === 'taskkill-done') taskkillCallback(message.fail ? new Error('private taskkill failure') : null, '', '');
   if (message.action === 'azure-reserve') reservations[message.index ?? 0].resolve(message.usage ?? { used: 1, limit: 5 });
   if (message.action === 'azure-refuse') reservations[message.index ?? 0].reject(Object.assign(new Error(message.error), { code: message.code }));
   if (message.action === 'azure-complete') azurePlans[message.index ?? 0].resolve(message.spec);
@@ -306,11 +376,15 @@ process.on('message', message => {
 `);
   const server = await startServer(t, { BRICKLAB_COPILOT_BIN: process.execPath, ...env }, ['--import', pathToFileURL(preload).href]);
   const hostedOrigin = env.BRICKLAB_HOSTED_ORIGIN ?? 'https://bricklab.liberatetheinnerchild.net';
-  const hostHeaders: Record<string, string> = env.BRICKLAB_HOSTED === '1' ? { Host: new URL(hostedOrigin).host } : {};
+  const codespaceOrigin = `https://${env.CODESPACE_NAME}-${server.port}.app.github.dev`;
+  const appPassword = server.output.match(/Temporary app password: ([a-f0-9]+)/)?.[1];
+  const hostHeaders: Record<string, string> = env.BRICKLAB_HOSTED === '1' ? { Host: new URL(hostedOrigin).host }
+    : env.BRICKLAB_CODESPACES === '1' ? { Host: new URL(codespaceOrigin).host,
+      Authorization: `Basic ${Buffer.from(`bricklab:${appPassword}`).toString('base64')}` } : {};
   const statusResponse = await fetchWithHost(server.base + '/api/status', { headers: hostHeaders });
   const status = await statusResponse.json() as { sessionKey: string };
   const headers: Record<string, string> = { ...hostHeaders, Origin: env.BRICKLAB_HOSTED === '1'
-    ? hostedOrigin : server.base, 'X-Bricklab-Key': status.sessionKey };
+    ? hostedOrigin : env.BRICKLAB_CODESPACES === '1' ? codespaceOrigin : server.base, 'X-Bricklab-Key': status.sessionKey };
   const azureHeaders = { ...headers, Authorization: 'Bearer fixture-token' };
   const body = JSON.stringify({ world: 'space', brief: 'A fixture sculpture' });
   const post = (extra: Record<string, string> = {}, payload = body) =>
@@ -397,7 +471,7 @@ test('Copilot permits one invocation, continues at 100s/200s, and responds at th
   await command({ action: 'complete', index: 1, spec: lifecycleSpec });
   const success = await second;
   assert.equal(success.status, 200);
-  assert.deepEqual(await success.json(), { spec: lifecycleSpec, calls: 2, limit: 12, source: 'copilot' });
+  assert.deepEqual(await success.json(), { spec: lifecycleSpec, calls: 2, limit: null, source: 'copilot' });
   const clean = await command({ action: 'inspect' });
   assert.deepEqual(clean.timers, []);
   await command({ action: 'advance', ms: 300_000 });
@@ -427,27 +501,45 @@ test('HTTP disconnect cancels the tree and retains the slot until the child clos
   assert.equal((await next).status, 200);
 });
 
-test('Windows cancellation uses native taskkill for the entire tree and waits for completion', async t => {
+test('Windows text timeout aborts a contained job at 300s and retains capacity until confirmed cleanup', async t => {
   const { post, command } = await startLifecycleServer(t, 'win32');
   const first = post();
-  await command({ action: 'started', count: 1 });
+  await command({ action: 'job-started', count: 1 });
   const state = await command({ action: 'advance', ms: 300_000 });
   assert.equal((await first).status, 504);
-  assert.equal(state.signals.length, 1);
-  assert.match(state.signals[0].file, /System32[/\\]taskkill\.exe$/);
-  assert.deepEqual(state.signals[0].args, ['/PID', '1000000', '/T', '/F']);
-  await command({ action: 'close' });
+  assert.equal(state.count, 0, 'Windows text never uses raw spawn or taskkill');
+  assert.equal(state.jobEvents[0].aborted, true);
+  assert.equal(state.jobEvents[0].timeoutMs, 300_000);
+  assert.equal(Object.hasOwn(state.jobEvents[0], 'image'), false, 'Text has no attachment or implicit image consent');
+  assert.deepEqual(state.signals, []);
   assert.equal((await post()).status, 429);
-  await command({ action: 'taskkill-done' });
+  await command({ action: 'job-fail', cleanupConfirmed: true });
   const second = post();
-  await command({ action: 'started', count: 2 });
-  await command({ action: 'complete', index: 1, spec: lifecycleSpec });
+  await command({ action: 'job-started', count: 2 });
+  await command({ action: 'job-complete', index: 1, output: imageJobOutput() });
   assert.equal((await second).status, 200);
 });
 
 const ndjson = { Accept: 'application/x-ndjson' };
 const streamEvents = (text: string) => text.trim().split('\n').map(line => JSON.parse(line));
 const defaultCapacity = { BRICKLAB_PLANNING_CONCURRENCY: undefined, BRICKLAB_PROVIDER_CONCURRENCY: undefined };
+
+test('daily quota policy is public-only, deployment-configurable and rejects unsafe public settings', () => {
+  assert.deepEqual(createPlanningQuota({ hosted: true, env: {} }),
+    { enabled: true, dailyCallLimit: 12, dailyClientLimit: 3 });
+  assert.deepEqual(createPlanningQuota({ hosted: true, env: {
+    BRICKLAB_AZURE_DAILY_CALLS: '7', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '2',
+  } }), { enabled: true, dailyCallLimit: 7, dailyClientLimit: 2 });
+  for (const env of [
+    { BRICKLAB_AZURE_DAILY_CALLS: '0' }, { BRICKLAB_AZURE_DAILY_CALLS: '101' },
+    { BRICKLAB_AZURE_DAILY_CALLS: '2.5' }, { BRICKLAB_AZURE_DAILY_CALLS: '' },
+    { BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '0' }, { BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '4' },
+  ]) {
+    assert.throws(() => createPlanningQuota({ hosted: true, env }), /Public Azure daily quotas/);
+    assert.deepEqual(createPlanningQuota({ hosted: false, env: { ...env, BRICKLAB_CODESPACES: '1' } }),
+      { enabled: false, dailyCallLimit: null, dailyClientLimit: null });
+  }
+});
 
 test('planning capacity rejects invalid bounds and an old release cannot free a newer request', () => {
   for (const options of [
@@ -485,9 +577,9 @@ test('default Copilot capacity runs two independent requests simultaneously and 
   assert.equal(status.calls, 2);
   const secondSpec = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Second result' } };
   await command({ action: 'complete', index: 1, spec: secondSpec });
-  assert.deepEqual(await (await second).json(), { spec: secondSpec, calls: 2, limit: 12, source: 'copilot' });
+  assert.deepEqual(await (await second).json(), { spec: secondSpec, calls: 2, limit: null, source: 'copilot' });
   await command({ action: 'complete', index: 0, spec: lifecycleSpec });
-  assert.deepEqual(await (await first).json(), { spec: lifecycleSpec, calls: 1, limit: 12, source: 'copilot' });
+  assert.deepEqual(await (await first).json(), { spec: lifecycleSpec, calls: 1, limit: null, source: 'copilot' });
   status = await (await get()).json() as any;
   assert.equal(status.planningCapacity.active, 0);
 });
@@ -516,19 +608,25 @@ test('aborting one Copilot request retains its slot through late cleanup without
   assert.equal((await third).status, 200);
 });
 
-test('simultaneous Copilot admission cannot exceed the daily counter even after abort', { timeout: 10_000 }, async t => {
+test('local Copilot is not daily-quota limited even when obsolete quota settings are supplied', { timeout: 10_000 }, async t => {
   const { post, command, get } = await startLifecycleServer(t, 'linux', { ...defaultCapacity, BRICKLAB_DAILY_CALLS: '1' });
   const first = post();
   await command({ action: 'started', count: 1 });
-  const denied = await post();
-  assert.equal(denied.status, 429);
-  assert.match((await denied.json() as any).error, /daily limit/);
+  const second = post();
+  await command({ action: 'started', count: 2 });
   await command({ action: 'advance', ms: 300_000 });
   assert.equal((await first).status, 504);
-  await command({ action: 'complete', spec: lifecycleSpec });
-  assert.equal((await post()).status, 429);
-  assert.equal((await (await get()).json() as any).calls, 1);
-  assert.equal((await command({})).count, 1);
+  assert.equal((await second).status, 504);
+  await command({ action: 'close', index: 0 });
+  await command({ action: 'close', index: 1 });
+  const third = post();
+  await command({ action: 'started', count: 3 });
+  await command({ action: 'complete', index: 2, spec: lifecycleSpec });
+  assert.equal((await third).status, 200);
+  const status = await (await get()).json() as any;
+  assert.equal(status.calls, 3);
+  assert.equal(status.limit, null);
+  assert.equal(status.planningQuota.enabled, false);
 });
 
 test('capacity also bounds incomplete request bodies and disconnect releases only those body slots', { timeout: 10_000 }, async t => {
@@ -584,7 +682,7 @@ test('NDJSON immediately sends waiting, heartbeats every 15s, and exactly one va
     if (chunk.done) break;
     rest += new TextDecoder().decode(chunk.value);
   }
-  assert.deepEqual(streamEvents(rest), [{ type: 'result', spec: lifecycleSpec, calls: 1, limit: 12, source: 'copilot' }]);
+  assert.deepEqual(streamEvents(rest), [{ type: 'result', spec: lifecycleSpec, calls: 1, limit: null, source: 'copilot' }]);
   assert.deepEqual((await command({ action: 'inspect' })).timers, []);
 });
 
@@ -682,7 +780,7 @@ test('NDJSON opt-in preserves JSON authentication, validation, busy and legacy r
     await command({ action: 'complete', index, spec: lifecycleSpec });
     const response = await pending;
     assert.equal(response.headers.get('content-type'), 'application/json');
-    assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: index + 1, limit: 12, source: 'copilot' });
+    assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: index + 1, limit: null, source: 'copilot' });
   }
 });
 
@@ -700,25 +798,64 @@ test('an output-limit failure cannot delay the HTTP result past 300s while clean
   assert.equal((await post({}, '{}')).status, 400);
 });
 
-test('tree termination failure fails closed without freeing the coordinator slot', { timeout: 10_000 }, async t => {
+test('Windows text cleanup failure fails closed without freeing capacity', { timeout: 10_000 }, async t => {
   const { post, command, get } = await startLifecycleServer(t, 'win32', defaultCapacity);
   const pending = post();
-  await command({ action: 'started', count: 1 });
+  await command({ action: 'job-started', count: 1 });
   await command({ action: 'advance', ms: 300_000 });
   assert.equal((await pending).status, 504);
-  await command({ action: 'taskkill-done', fail: true });
-  await command({ action: 'close' });
+  await command({ action: 'job-fail', cleanupConfirmed: false });
   const denied = await post();
   assert.equal(denied.status, 429);
-  assert.match((await denied.json() as any).error, /process-tree termination could not be confirmed.*operator/);
+  assert.match((await denied.json() as any).error, /process-tree cleanup could not be confirmed.*operator/);
   const status = await (await get()).json() as any;
   assert.equal(status.planningCapacity.quarantined, true);
-  assert.equal(status.planningCapacity.active, 1, 'Parent close is not proof that descendants stopped');
-  assert.match(status.planner.message, /process-tree termination/);
-  assert.equal((await command({ action: 'inspect' })).count, 1);
+  assert.equal(status.planningCapacity.active, 1, 'Unknown job cleanup must retain its reservation');
+  assert.match(status.planner.message, /process-tree cleanup/);
+  assert.equal((await command({ action: 'inspect' })).jobEvents.length, 1);
+});
+
+test('Windows text jobs overlap with isolated abort, late cleanup and independent validated output', async t => {
+  const server = await startLifecycleServer(t, 'win32', defaultCapacity);
+  const first = await server.post(ndjson);
+  await server.command({ action: 'job-started', count: 1 });
+  const second = server.post({}, JSON.stringify({ world: 'space', brief: 'Second text sculpture' }));
+  let state = await server.command({ action: 'job-started', count: 2 });
+  assert.equal(state.count, 0);
+  assert.equal(state.jobEvents.length, 2, 'Both native jobs start before either completes');
+  assert.equal((await server.post()).status, 429);
+  await first.body!.cancel();
+  state = await server.command({});
+  assert.deepEqual(state.jobEvents.map((event: { aborted: boolean }) => event.aborted), [true, false]);
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 2);
+  await server.command({ action: 'job-fail', index: 0, cleanupConfirmed: true });
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 1);
+  const otherSpec = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Second text result' } };
+  await server.command({ action: 'job-complete', index: 1, output: imageJobOutput(otherSpec) });
+  assert.deepEqual(await (await second).json(), { spec: otherSpec, calls: 2, limit: null, source: 'copilot' });
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
+});
+
+test('Windows text cleanup ambiguity aborts another job and late clean completion cannot release its slot', async t => {
+  const server = await startLifecycleServer(t, 'win32', defaultCapacity);
+  const first = server.post();
+  await server.command({ action: 'job-started', count: 1 });
+  const second = server.post();
+  await server.command({ action: 'job-started', count: 2 });
+  await server.command({ action: 'job-fail', index: 0, cleanupConfirmed: false });
+  assert.equal((await first).status, 502);
+  const state = await server.command({});
+  assert.equal(state.jobEvents[1].aborted, true);
+  await server.command({ action: 'job-complete', index: 1, output: imageJobOutput() });
+  assert.equal((await second).status, 502);
+  const status = await (await server.get()).json() as any;
+  assert.equal(status.planningCapacity.active, 1);
+  assert.equal(status.planningCapacity.quarantined, true);
+  assert.equal((await server.post()).status, 429);
 });
 
 const azureFixtureEnv = {
+  TEST_PUBLIC_QUOTA: '1',
   BRICKLAB_AZURE_AI: '1',
   AZURE_OPENAI_ENDPOINT: 'https://fixture.openai.azure.com',
   AZURE_OPENAI_DEPLOYMENT: 'fixture-deployment',
@@ -733,6 +870,243 @@ const azureFixtureEnv = {
   BRICKLAB_ENTRA_REQUIRED_SCOPE: 'BrickLab.Plan',
   BRICKLAB_ENTRA_REQUIRED_ROLE: 'BrickLab.Planner',
 };
+
+async function startSignedBudgetServer(t: TestContext, env: NodeJS.ProcessEnv = {}) {
+  const { privateKey, publicKey } = generateKeyPairSync('rsa', { modulusLength: 2048 });
+  const server = await startLifecycleServer(t, 'linux', {
+    ...azureFixtureEnv, ...defaultCapacity, TEST_REAL_AZURE_BUDGET: '1',
+    TEST_AZURE_PUBLIC_KEY: publicKey.export({ type: 'spki', format: 'pem' }).toString(),
+    BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+    BRICKLAB_AZURE_CLIENT_HASH_KEY: 'fixture principal hashing secret longer than thirty-two bytes',
+    ...env,
+  });
+  const token = (objectId: string, claims: Record<string, unknown> = {}) => new SignJWT({
+    tid: azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID, oid: objectId,
+    azp: azureFixtureEnv.BRICKLAB_ENTRA_SPA_CLIENT_ID, ver: '2.0',
+    scp: azureFixtureEnv.BRICKLAB_ENTRA_REQUIRED_SCOPE, roles: [azureFixtureEnv.BRICKLAB_ENTRA_REQUIRED_ROLE], ...claims,
+  }).setProtectedHeader({ alg: 'RS256', kid: 'route-fixture' })
+    .setIssuer(`https://login.microsoftonline.com/${azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID}/v2.0`)
+    .setAudience(azureFixtureEnv.BRICKLAB_ENTRA_API_CLIENT_ID)
+    .setIssuedAt().setExpirationTime('5m').sign(privateKey);
+  const principal = (index: number) => `00000000-0000-4000-8000-${String(index).padStart(12, '0')}`;
+  const key = (index: number) => createHmac('sha256', 'fixture principal hashing secret longer than thirty-two bytes')
+    .update(`${azureFixtureEnv.BRICKLAB_ENTRA_TENANT_ID}:${principal(index)}`).digest('hex');
+  return { ...server, token, principal, key };
+}
+
+test('signed distinct principals overlap on the public quota policy route with isolated abort and committed CAS reservations', { timeout: 15_000 }, async t => {
+  const server = await startSignedBudgetServer(t, { TEST_BUDGET_SYNCHRONIZED_READS: '2' });
+  const firstToken = await server.token(server.principal(1));
+  const secondToken = await server.token(server.principal(2));
+  const first = await server.azurePost({ ...ndjson, Authorization: `Bearer ${firstToken}` },
+    JSON.stringify({ world: 'space', brief: 'First signed plan' }));
+  const second = server.azurePost({ Authorization: `Bearer ${secondToken}` },
+    JSON.stringify({ world: 'space', brief: 'Second signed plan' }));
+  let state = await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+  assert.ok(state.budgetConflicts >= 1, 'Both reservations read the same ETag and the loser retries CAS');
+  assert.deepEqual(state.budgetState.clientCalls, { [server.key(1)]: 1, [server.key(2)]: 1 });
+  assert.equal(state.budgetState.calls, 2);
+  assert.equal(state.budgetState.reservedMicros, 1_100_000);
+  const denied = await server.azurePost({ Authorization: '' }, 'not JSON');
+  assert.equal(denied.status, 401, 'Auth is checked before capacity and body while both slots are active');
+  const wrongRole = await server.token(server.principal(3), { roles: [] });
+  assert.equal((await server.azurePost({ Authorization: `Bearer ${wrongRole}` }, 'not JSON')).status, 403);
+  const [header, encoded, signature] = firstToken.split('.');
+  const forgedClaims = JSON.parse(Buffer.from(encoded, 'base64url').toString());
+  forgedClaims.oid = server.principal(2);
+  const forged = `${header}.${Buffer.from(JSON.stringify(forgedClaims)).toString('base64url')}.${signature}`;
+  assert.equal((await server.azurePost({ Authorization: `Bearer ${forged}` })).status, 401);
+  await first.body!.cancel();
+  assert.equal((await server.azurePost({ Authorization: `Bearer ${secondToken}` })).status, 429);
+  state = await server.command({});
+  assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted),
+    [true, false]);
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'reserve').length, 2, 'Auth failures reserve nothing');
+  const other = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Independent signed result' } };
+  await server.command({ action: 'azure-complete', index: 1, spec: other });
+  assert.deepEqual(await (await second).json(), { spec: other, source: 'azure' });
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 1, 'Abort does not release unsettled work');
+  await server.command({ action: 'azure-complete', index: 0, spec: lifecycleSpec });
+  assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
+  state = await server.command({});
+  assert.equal(state.budgetState.calls, 2, 'Aborted/late calls are never refunded');
+  assert.equal(state.budgetState.reservedMicros, 1_100_000);
+});
+
+test('signed same-principal burst obeys atomic public per-principal quota without blocking another principal', { timeout: 15_000 }, async t => {
+  const server = await startSignedBudgetServer(t, {
+    BRICKLAB_PROVIDER_CONCURRENCY: '4', TEST_BUDGET_SYNCHRONIZED_READS: '4',
+    BRICKLAB_AZURE_DAILY_CALLS: '12',
+  });
+  const token = await server.token(server.principal(1));
+  const pending = Array.from({ length: 4 }, () => server.azurePost({ Authorization: `Bearer ${token}` }));
+  let state = await server.command({ action: 'azure-started', type: 'plan', count: 3 });
+  assert.equal(state.budgetState.calls, 3);
+  assert.equal(state.budgetState.clientCalls[server.key(1)], 3);
+  assert.ok(state.budgetConflicts >= 3);
+  for (let index = 0; index < 3; index++) await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
+  const responses = await Promise.all(pending);
+  assert.deepEqual(responses.map(response => response.status).sort(), [200, 200, 200, 429]);
+  const error = responses.find(response => response.status === 429)!;
+  assert.match((await error.json() as any).error, /This client.*daily planning limit/);
+  const otherToken = await server.token(server.principal(2));
+  const other = server.azurePost({ Authorization: `Bearer ${otherToken}` });
+  await server.command({ action: 'azure-started', type: 'plan', count: 4 });
+  await server.command({ action: 'azure-complete', index: 3, spec: lifecycleSpec });
+  assert.equal((await other).status, 200);
+  state = await server.command({});
+  assert.equal(state.budgetState.clientCalls[server.key(2)], 1);
+});
+
+test('signed concurrent public requests respect configured global, principal and dollar CAS boundaries before inference', { timeout: 20_000 }, async t => {
+  for (const mode of ['calls', 'client', 'dollars']) await t.test(mode, async t => {
+    const server = await startSignedBudgetServer(t, {
+      TEST_BUDGET_SYNCHRONIZED_READS: '2',
+      BRICKLAB_AZURE_DAILY_CALLS: mode === 'calls' ? '1' : '100',
+      BRICKLAB_AZURE_DAILY_CLIENT_CALLS: mode === 'client' ? '1' : '3',
+      ...(mode === 'dollars' ? { TEST_BUDGET_STATE: JSON.stringify({
+        day: '2026-11-14', reservedMicros: 49_450_000, calls: 89, clientCalls: {},
+      }) } : {}),
+    });
+    const tokens = await Promise.all([1, mode === 'client' ? 1 : 2].map(index => server.token(server.principal(index))));
+    const pending = tokens.map(token => server.azurePost({ Authorization: `Bearer ${token}` }));
+    const state = await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+    assert.ok(state.budgetConflicts >= 1);
+    assert.equal(state.budgetState.calls, mode === 'dollars' ? 90 : 1);
+    assert.equal(state.budgetState.reservedMicros, mode === 'dollars' ? 50_000_000 : 550_000);
+    await server.command({ action: 'azure-complete', spec: lifecycleSpec });
+    const replies = await Promise.all(pending);
+    assert.deepEqual(replies.map(reply => reply.status).sort(), [200, 429]);
+    assert.match((await replies.find(reply => reply.status === 429)!.json() as any).error,
+      mode === 'calls' ? /daily planning request limit/ : mode === 'client' ? /This client.*daily planning limit/ : /daily inference budget/);
+    assert.equal((await server.command({})).azureEvents.filter((event: any) => event.type === 'plan').length, 1);
+  });
+});
+
+test('private Azure routes do not apply public daily quota settings or contact quota storage', { timeout: 15_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    ...azureFixtureEnv, ...defaultCapacity, TEST_PUBLIC_QUOTA: '0',
+    BRICKLAB_AZURE_DAILY_CALLS: '0', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: 'invalid',
+  });
+  for (let index = 0; index < 3; index++) {
+    const response = server.azurePost();
+    await server.command({ action: 'azure-started', type: 'plan', count: index + 1 });
+    await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
+    assert.deepEqual(await (await response).json(), { spec: lifecycleSpec, source: 'azure' });
+  }
+  const state = await server.command({});
+  assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner']);
+  assert.equal(state.azureEvents.filter((entry: any) => entry.type === 'reserve').length, 0);
+  assert.deepEqual((await (await server.get()).json() as any).planningQuota,
+    { enabled: false, dailyCallLimit: null, dailyClientLimit: null });
+});
+
+test('private Codespace route has no daily request quota and keeps independent app authentication', { timeout: 15_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    ...defaultCapacity, BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    BRICKLAB_DAILY_CALLS: '1', BRICKLAB_AZURE_DAILY_CALLS: '0',
+    BRICKLAB_AZURE_DAILY_CLIENT_CALLS: 'invalid',
+  });
+  const status = await (await server.get()).json() as any;
+  assert.deepEqual(status.planningQuota, { enabled: false, dailyCallLimit: null, dailyClientLimit: null });
+  assert.equal((await server.post({ Authorization: '' })).status, 401);
+  for (let index = 0; index < 2; index++) {
+    const pending = server.post();
+    await server.command({ action: 'started', count: index + 1 });
+    await server.command({ action: 'complete', index, spec: lifecycleSpec });
+    assert.equal((await pending).status, 200);
+  }
+  assert.equal((await (await server.get()).json() as any).calls, 2);
+});
+
+test('private Azure spend-budget opt-in retains CAS dollar protection but no public call or client quota', { timeout: 15_000 }, async t => {
+  const server = await startSignedBudgetServer(t, {
+    TEST_PUBLIC_QUOTA: '0', BRICKLAB_AZURE_DAILY_CALLS: '1', BRICKLAB_AZURE_DAILY_CLIENT_CALLS: '1',
+    TEST_BUDGET_STATE: JSON.stringify({ day: '2026-11-14', reservedMicros: 48_900_000, calls: 12, clientCalls: {} }),
+  });
+  const token = await server.token(server.principal(1));
+  for (let index = 0; index < 2; index++) {
+    const pending = server.azurePost({ Authorization: `Bearer ${token}` });
+    await server.command({ action: 'azure-started', type: 'plan', count: index + 1 });
+    await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
+    assert.equal((await pending).status, 200);
+  }
+  const denied = await server.azurePost({ Authorization: `Bearer ${token}` });
+  assert.equal(denied.status, 429);
+  assert.match((await denied.json() as any).error, /daily inference budget/);
+  const state = await server.command({});
+  assert.equal(state.budgetState.calls, 14, 'Default 12-call cap is not enforced on private spend-budget mode');
+  assert.deepEqual(state.budgetState.clientCalls, {});
+  assert.equal(state.budgetState.reservedMicros, 50_000_000);
+  assert.equal(state.azureConfig[1].enforceDailyCallQuota, false);
+});
+
+test('300-second deadline actually closes Azure and compatible mock HTTP transports without aborting another request', { timeout: 25_000 }, async t => {
+  for (const adapter of ['azure', 'compatible']) await t.test(adapter, async t => {
+    const requests: import('node:http').ServerResponse[] = [];
+    let firstStarted!: () => void;
+    let bothStarted!: () => void;
+    let firstClosed!: () => void;
+    const started = new Promise<void>(resolve => { firstStarted = resolve; });
+    const overlap = new Promise<void>(resolve => { bothStarted = resolve; });
+    const closed = new Promise<void>(resolve => { firstClosed = resolve; });
+    const provider = createHttpServer(async (req, res) => {
+      for await (const _chunk of req) {}
+      requests.push(res);
+      if (requests.length === 1) {
+        res.once('close', firstClosed);
+        firstStarted();
+      } else bothStarted();
+    });
+    provider.listen(0, '127.0.0.1');
+    await once(provider, 'listening');
+    t.after(() => {
+      provider.closeAllConnections();
+      return new Promise<void>(resolve => provider.close(() => resolve()));
+    });
+    const address = provider.address();
+    assert.ok(address && typeof address === 'object');
+    const endpoint = `http://127.0.0.1:${address.port}/fixture`;
+    const signedServer = adapter === 'azure'
+      ? await startSignedBudgetServer(t, { TEST_AZURE_HTTP_ENDPOINT: endpoint }) : null;
+    const server = signedServer ?? await startLifecycleServer(t, 'linux', { ...defaultCapacity,
+      BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_COMPATIBLE_ENDPOINT: endpoint, BRICKLAB_COMPATIBLE_MODEL: 'fixture' });
+    const authorization = signedServer ? `Bearer ${await signedServer.token(signedServer.principal(1))}` : '';
+    const post = (payload = JSON.stringify({ world: 'space', brief: 'Deadline fixture' })) =>
+      fetchWithHost(`${server.base}/api/${adapter}-plan`, { method: 'POST',
+        headers: { ...server.headers, ...ndjson, ...(authorization ? { Authorization: authorization } : {}) },
+        body: payload, stream: true });
+    const first = await post();
+    const firstBody = first.text();
+    await started;
+    await server.command({ action: 'advance', ms: 100_000 });
+    const second = await post();
+    const secondBody = second.text();
+    await overlap;
+    await server.command({ action: 'advance', ms: 200_000 });
+    assert.match(streamEvents(await firstBody).at(-1).error, /300 seconds/);
+    await closed;
+    assert.equal(requests[0].destroyed, true, 'Provider socket is closed, not merely its HTTP client response');
+    assert.equal(requests[1].destroyed, false, 'The other request has a later independent deadline');
+    const deadline = Date.now() + 3000;
+    while ((await (await server.get()).json() as any).planningCapacity.active !== 1) {
+      assert.ok(Date.now() < deadline, 'Settled transport cleanup must release only the timed-out slot');
+      await new Promise(resolve => setTimeout(resolve, 5));
+    }
+    assert.equal((await post('{}')).status, 400, 'No lingering busy slot after confirmed transport cleanup');
+    requests[1].setHeader('Content-Type', 'application/json');
+    requests[1].end(JSON.stringify({ choices: [{ finish_reason: 'stop',
+      message: { role: 'assistant', content: JSON.stringify(lifecycleSpec) } }] }));
+    assert.equal(streamEvents(await secondBody).at(-1).type, 'result');
+    assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
+    if (adapter === 'azure') {
+      const state = await server.command({});
+      assert.equal(state.budgetState.calls, 2);
+      assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted),
+        [true, false]);
+    }
+  });
+});
 
 test('Azure reservations and requests overlap independently; cancelling one does not release it early or cancel another', { timeout: 10_000 }, async t => {
   const { azurePost, post, command, get } = await startLifecycleServer(t, 'linux', { ...azureFixtureEnv, ...defaultCapacity });
@@ -1103,10 +1477,8 @@ test('hosted public planning stays blocked and unsafe/incomplete startup configu
     [{ ...azureFixtureEnv }, []],
     [{ ...azureFixtureEnv, AZURE_OPENAI_ENDPOINT: 'http://localhost' }, ['--production']],
     [{ ...azureFixtureEnv, AZURE_OPENAI_DEPLOYMENT: '' }, ['--production']],
-    [{ ...azureFixtureEnv, AZURE_STORAGE_ACCOUNT: '' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_AZURE_USAGE_CONTAINER: '' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_AZURE_DAILY_CALLS: '0' }, ['--production']],
-    [{ ...azureFixtureEnv, BRICKLAB_AZURE_DAILY_CALLS: '101' }, ['--production']],
+    [{ BRICKLAB_HOSTED: '1', BRICKLAB_AZURE_DAILY_CALLS: '0' }, ['--production']],
+    [{ BRICKLAB_HOSTED: '1', BRICKLAB_AZURE_DAILY_CALLS: '101' }, ['--production']],
   ];
   for (const [extra, args] of cases) {
     const result = spawnSync(process.execPath, ['server.mjs', ...args], {
@@ -1184,8 +1556,9 @@ test('Copilot images fail closed without a supported Windows opt-in before attac
     assert.deepEqual(state.signals, []);
     assert.equal(((await (await server.get()).json()) as { calls: number }).calls, 0);
     const text = server.post();
-    await server.command({ action: 'started', count: 1 });
-    await server.command({ action: 'complete', spec: lifecycleSpec });
+    await server.command({ action: platform === 'win32' ? 'job-started' : 'started', count: 1 });
+    await server.command(platform === 'win32'
+      ? { action: 'job-complete', output: imageJobOutput() } : { action: 'complete', spec: lifecycleSpec });
     assert.equal((await text).status, 200, 'Text-only Copilot remains available');
   }
 });
@@ -1327,8 +1700,8 @@ test('two Windows images overlap and late clean completion cannot unlock a globa
   await server.command({ action: 'job-complete', index: 1, output: imageJobOutput() });
   assert.equal((await second).status, 502, 'A result after quarantine must not become a scene');
   const status = await (await server.get()).json() as any;
-  assert.equal(status.planningCapacity.active, 0);
-  assert.equal(status.planningCapacity.quarantined, true, 'Releasing all slots cannot clear quarantine');
+  assert.equal(status.planningCapacity.active, 1, 'The ambiguous job remains charged even after other jobs clean up');
+  assert.equal(status.planningCapacity.quarantined, true, 'Other slot releases cannot clear quarantine');
   assert.equal((await server.post()).status, 429);
   assert.equal((await server.azurePost()).status, 429);
   state = await server.command({});
@@ -1344,9 +1717,9 @@ test('concurrent Copilot image jobs return independent validated results in reve
   await server.command({ action: 'job-started', count: 2 });
   const otherSpec = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Second image result' } };
   await server.command({ action: 'job-complete', index: 1, output: imageJobOutput(otherSpec) });
-  assert.deepEqual(await (await second).json(), { spec: otherSpec, calls: 2, limit: 12, source: 'copilot' });
+  assert.deepEqual(await (await second).json(), { spec: otherSpec, calls: 2, limit: null, source: 'copilot' });
   await server.command({ action: 'job-complete', index: 0, output: imageJobOutput() });
-  assert.deepEqual(await (await first).json(), { spec: lifecycleSpec, calls: 1, limit: 12, source: 'copilot' });
+  assert.deepEqual(await (await first).json(), { spec: lifecycleSpec, calls: 1, limit: null, source: 'copilot' });
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
 });
 
@@ -1682,7 +2055,7 @@ test('Local AI is explicit, uses the same API protections and requires custom lo
   assert.equal(metadataRequests, 0);
   const planned = await post();
   assert.equal(planned.status, 200);
-  assert.deepEqual(await planned.json(), { spec: reply, calls: 0, limit: 12, source: 'local-ai' });
+  assert.deepEqual(await planned.json(), { spec: reply, calls: 0, limit: null, source: 'local-ai' });
   assert.equal(generated.length, 1);
   assert.ok(generated[0].prompt.endsWith(`User brief: ${JSON.stringify(brief)}`));
   reply = { world: 'jurassic', model: 'stegosaurus', color: 'blue', longTail: false, wideWings: false, budget: 700 };
@@ -1731,7 +2104,7 @@ test('Local vision metadata gate sends an image only after per-request consent a
   const response = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
     image: consentedTestImage, imageConsent: true }));
   assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 0, limit: 12, source: 'local-ai' });
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 0, limit: null, source: 'local-ai' });
   assert.deepEqual(requests.map(request => request.path),
     ['/api/tags', '/api/show', '/api/tags', '/api/show', '/api/generate']);
   assert.deepEqual(requests.at(-1)?.body.images, [consentedTestImage.data]);
@@ -1820,7 +2193,7 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const arbitraryBrief = 'An original observatory with a spiral bridge and a separate sculpture, not a spaceship.';
   const planned = await post({}, arbitraryBrief);
   assert.equal(planned.status, 200);
-  assert.deepEqual(await planned.json(), { spec, calls: 1, limit: 12, source: 'copilot' });
+  assert.deepEqual(await planned.json(), { spec, calls: 1, limit: null, source: 'copilot' });
   const args = JSON.parse(await readFile(callsFile, 'utf8')) as string[];
   assert.ok(args.includes('--available-tools='));
   assert.ok(args.includes('--disable-builtin-mcps'));

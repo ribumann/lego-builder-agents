@@ -112,7 +112,7 @@ export function createAzurePrincipalKey({ secret, tenantId, objectId }) {
 
 export function createAzureBudgetGate({ account, container, endpoint, deployment, resourceId, contentFilterPolicy,
   blobClient, dailyCallLimit = DEFAULT_DAILY_CALLS, dailyClientLimit = MAX_CLIENT_CALLS,
-  clientHashSecret, requireClientKey = false,
+  clientHashSecret, requireClientKey = false, enforceDailyCallQuota = true,
   credential = new ManagedIdentityCredential(), now = () => new Date(),
   verifyPrices = verifyRetailPrices, verifyConfig = verifyDeploymentConfig }) {
   const match = typeof resourceId === 'string' && /^\/subscriptions\/[0-9a-f-]{36}\/resourceGroups\/[\w().-]{1,90}\/providers\/Microsoft\.CognitiveServices\/accounts\/([a-z0-9][a-z0-9-]{0,62})$/i.exec(resourceId);
@@ -122,7 +122,8 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
       || typeof contentFilterPolicy !== 'string' || !POLICY_NAME_PATTERN.test(contentFilterPolicy))
     throw new Error('Azure budget requires a matching Azure OpenAI resource ID, endpoint, deployment and content filter policy.');
   if (!Number.isInteger(dailyCallLimit) || dailyCallLimit < 1 || dailyCallLimit > MAX_DAILY_CALLS
-      || !Number.isInteger(dailyClientLimit) || dailyClientLimit < 1 || dailyClientLimit > MAX_CLIENT_CALLS)
+      || !Number.isInteger(dailyClientLimit) || dailyClientLimit < 1 || dailyClientLimit > MAX_CLIENT_CALLS
+      || typeof enforceDailyCallQuota !== 'boolean')
     throw new Error(`Azure planning limits must be 1-${MAX_DAILY_CALLS} calls per day and 1-${MAX_CLIENT_CALLS} per client.`);
   if (requireClientKey && (typeof clientHashSecret !== 'string' || Buffer.byteLength(clientHashSecret) < 32))
     throw new Error('Hosted Azure planning requires a 32-byte client rate-limit secret.');
@@ -175,7 +176,7 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
           const previousClients = state?.clientCalls === undefined ? {} : state.clientCalls;
           // Legacy spend may include cheaper modalities, so it cannot safely imply a call count.
           const previousCalls = state?.calls === undefined
-            ? state?.day === today && state?.reservedMicros > 0 ? dailyCallLimit : 0 : state.calls;
+            ? enforceDailyCallQuota && state?.day === today && state?.reservedMicros > 0 ? dailyCallLimit : 0 : state.calls;
           if (!state || typeof state !== 'object' || Array.isArray(state)
               || typeof state.day !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(state.day)
               || !Number.isSafeInteger(state.reservedMicros) || state.reservedMicros < 0
@@ -192,9 +193,9 @@ export function createAzureBudgetGate({ account, container, endpoint, deployment
           const spent = state.day === today ? state.reservedMicros : 0;
           const calls = state.day === today ? previousCalls : 0;
           const clients = state.day === today ? previousClients : {};
-          if (calls >= dailyCallLimit)
+          if (enforceDailyCallQuota && calls >= dailyCallLimit)
             throw failure('BUDGET_CALL_LIMIT', 'The Azure daily planning request limit is exhausted.');
-          if (clientKey && (clients[clientKey] ?? 0) >= dailyClientLimit)
+          if (enforceDailyCallQuota && clientKey && (clients[clientKey] ?? 0) >= dailyClientLimit)
             throw failure('BUDGET_CLIENT_LIMIT', 'The Azure per-client planning limit is exhausted.');
           if (spent + RESERVATION > DAILY_LIMIT)
             throw failure('BUDGET_EXHAUSTED', 'The Azure daily inference budget is exhausted.');

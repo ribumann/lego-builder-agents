@@ -12,6 +12,7 @@ import { resolveSceneSize } from './src/scene-size.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
 import { createLocalPlanner } from './local-planner.mjs';
 import { createPlanningCapacity } from './planning-capacity.mjs';
+import { createPlanningQuota } from './planning-quota.mjs';
 import { createAzurePlanner } from './azure-planner.mjs';
 import { createAzureAccessTokenVerifier, getAzureAuthConfig } from './azure-auth.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
@@ -53,20 +54,19 @@ const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COM
   : {});
 const azureEnabled = process.env.BRICKLAB_AZURE_AI === '1';
 const azureMonetaryBudget = hosted || process.env.BRICKLAB_AZURE_BUDGET === '1';
+const planningQuota = createPlanningQuota({ hosted });
 if (azureEnabled && !production) throw new Error('BRICKLAB_AZURE_AI=1 requires production serving.');
 const azureAuthConfig = azureEnabled ? getAzureAuthConfig() : null;
 const verifyAzureAccessToken = azureAuthConfig
   ? createAzureAccessTokenVerifier(azureAuthConfig) : null;
-const azureLimit = process.env.BRICKLAB_AZURE_DAILY_CALLS === undefined
-  ? 12 : Number(process.env.BRICKLAB_AZURE_DAILY_CALLS);
 const planAzure = azureEnabled ? createAzurePlanner({
   endpoint: process.env.AZURE_OPENAI_ENDPOINT, deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
   contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
 }) : null;
-const azureUsage = azureEnabled && !azureMonetaryBudget ? createAzureUsageGate({
+const azureUsage = azureEnabled && planningQuota.enabled && !azureMonetaryBudget ? createAzureUsageGate({
   account: process.env.AZURE_STORAGE_ACCOUNT,
   container: process.env.BRICKLAB_AZURE_USAGE_CONTAINER,
-  limit: azureLimit,
+  limit: planningQuota.dailyCallLimit,
 }) : null;
 const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate({
   account: process.env.AZURE_STORAGE_ACCOUNT,
@@ -75,12 +75,14 @@ const azureBudget = azureEnabled && azureMonetaryBudget ? createAzureBudgetGate(
   deployment: process.env.AZURE_OPENAI_DEPLOYMENT,
   resourceId: process.env.AZURE_OPENAI_RESOURCE_ID,
   contentFilterPolicy: process.env.BRICKLAB_AZURE_CONTENT_FILTER_POLICY,
-  dailyCallLimit: azureLimit,
+  ...(planningQuota.enabled ? { dailyCallLimit: planningQuota.dailyCallLimit,
+    dailyClientLimit: planningQuota.dailyClientLimit } : {}),
+  enforceDailyCallQuota: planningQuota.enabled,
   clientHashSecret: process.env.BRICKLAB_AZURE_CLIENT_HASH_KEY,
-  requireClientKey: azureMonetaryBudget,
+  requireClientKey: planningQuota.enabled,
 }) : null;
 const azurePlannerStatus = azureEnabled
-  ? { enabled: true, state: 'configured', message: `Azure planning, Entra sign-in and ${azureMonetaryBudget ? 'inference budget' : 'durable quota'} are configured, not verified. Only an explicit Azure planning request reserves ${azureMonetaryBudget ? 'budget' : 'quota'} and sends a brief. No retries or refunds.` }
+  ? { enabled: true, state: 'configured', message: `Azure planning and Entra sign-in are configured, not verified. ${azureMonetaryBudget ? 'Explicit requests reserve the estimated-spend budget before inference; no refunds.' : planningQuota.enabled ? 'Explicit requests reserve durable public quota before inference; no refunds.' : 'No application daily request quota applies on this private server.'} Only an explicit planning request sends a brief. No retries.` }
   : { enabled: false, state: 'off', message: hosted
     ? 'Hosted Azure planning is blocked pending verified public edge protections. Only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
@@ -104,7 +106,10 @@ if (process.env.BRICKLAB_COPILOT_BIN
 const copilotImagesEnabled = liveEnabled && process.platform === 'win32'
   && process.env.BRICKLAB_COPILOT_IMAGES === '1'
   && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable);
-const windowsCopilotRunner = copilotImagesEnabled ? createWindowsCopilotJobRunner() : null;
+const windowsCopilotRunner = liveEnabled && process.platform === 'win32'
+  && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable)
+  ? createWindowsCopilotJobRunner() : null;
+const windowsContainmentMessage = 'Windows Copilot planning requires BRICKLAB_COPILOT_BIN to name an absolute native .exe and a trusted PowerShell 7 runtime for process containment. No brief was sent.';
 let planningQuarantined = false;
 const copilotImageLockMessage = 'Copilot image cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.';
 let planningQuarantineMessage = copilotImageLockMessage;
@@ -133,7 +138,7 @@ const allowedOrigins = new Set(hosted ? [hostedOrigin] : codespaces
 const appPassword = codespaces ? randomBytes(24).toString('hex') : null;
 const appAuthorization = codespaces ? `Basic ${Buffer.from(`bricklab:${appPassword}`).toString('base64')}` : null;
 const runFile = promisify(execFile);
-const limit = Math.max(1, Math.min(100, Number(process.env.BRICKLAB_DAILY_CALLS) || 12));
+const limit = null;
 const MAX_TEXT_BODY_BYTES = 4096;
 const MAX_REQUEST_BODY_BYTES = Math.ceil(MAX_IMAGE_BYTES / 3) * 4 + 16_384;
 const sessionKey = randomBytes(24).toString('hex');
@@ -231,6 +236,8 @@ async function plannerStatus() {
       ? missingCliStatus
       : { state: 'unavailable', message: 'Copilot CLI could not report its version. Check copilot --version and copilot login in the server terminal, then retry server status. No brief was sent.' };
   }
+  if (process.platform === 'win32' && !windowsCopilotRunner)
+    return { state: 'unavailable', message: windowsContainmentMessage };
   return plannerFailure?.state === 'needs-auth' ? plannerFailure
     : { state: 'ready', message: 'Copilot CLI is installed. Account authentication, subscription and live model access are not yet verified. Run copilot login in the server terminal if needed. Pressing Send brief to Copilot sends that brief; loading or selecting a mode sends none.' };
 }
@@ -248,6 +255,23 @@ export function extractSpec(text, provider = 'Copilot') {
 const copilotArguments = prompt => ['-p', prompt, '--output-format=json', '--stream=off',
   '--available-tools=', '--disable-builtin-mcps', '--no-custom-instructions',
   '--no-ask-user', '--no-auto-update', '--disable-client-telemetry'];
+
+function parseCopilotPlan(code, stdout, stderr) {
+  if (code !== 0) {
+    const authentication = /authenticat|not logged|login required|copilot login|unauthorized|401\b/i.test(stderr)
+      || copilotAuthenticationFailed(stdout);
+    console.error('Copilot planning failed, exit code:', code, authentication ? '(authentication)' : '');
+    plannerFailure = authentication
+      ? { state: 'needs-auth', message: 'Copilot reported an authentication failure. Run copilot login in the server terminal with a Copilot-enabled account, check token overrides and organization policy, then retry. BrickLab did not retry or fall back.' }
+      : { state: 'unavailable', message: 'Copilot CLI failed. Check copilot --version, copilot login, network access, subscription and quota in the server terminal, or select local mode. BrickLab did not retry or fall back.' };
+    throw new Error(plannerFailure.message);
+  }
+  try {
+    const spec = extractSpec(readCopilotResponse(stdout));
+    plannerFailure = null;
+    return spec;
+  } catch (error) { throw new Error(`Could not read the Copilot plan: ${error.message}`); }
+}
 
 function askCopilot(world, brief, signal, hollowInterior, target) {
   const workdir = resolve(root, '.agent-home');
@@ -276,37 +300,24 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
       if (settled) return;
       if (child?.pid) {
         stopping = true;
-        if (process.platform === 'win32') {
-          // taskkill is the native tree-termination primitive; never use a shell or PATH lookup.
-          execFile(resolve(process.env.SystemRoot || 'C:\\Windows', 'System32', 'taskkill.exe'),
-            ['/PID', String(child.pid), '/T', '/F'], { timeout: 5000, windowsHide: true }, error => {
-              if (error) {
-                quarantinePlanning('Copilot process-tree termination could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
-                return;
-              }
-              treeStopped = true;
-              cleanup();
-            });
-        } else {
-          // A detached POSIX child leads its own process group, including CLI descendants.
-          const killGroup = signalName => {
-            try { process.kill(-child.pid, signalName); return true; }
-            catch (error) {
-              if (error.code === 'ESRCH') return true;
-              console.error('Could not terminate Copilot process group.');
-              quarantinePlanning('Copilot process-tree termination could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
-              return false;
-            }
-          };
-          if (error.name === 'TimeoutError') treeStopped = killGroup('SIGKILL');
-          else {
-            killGroup('SIGTERM');
-            setTimeout(() => {
-              // Kill the group even if its leader already exited but descendants ignored SIGTERM.
-              treeStopped = killGroup('SIGKILL');
-              cleanup();
-            }, 2000);
+        // A detached POSIX child leads its own process group, including CLI descendants.
+        const killGroup = signalName => {
+          try { process.kill(-child.pid, signalName); return true; }
+          catch (error) {
+            if (error.code === 'ESRCH') return true;
+            console.error('Could not terminate Copilot process group.');
+            quarantinePlanning('Copilot process-tree termination could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
+            return false;
           }
+        };
+        if (error.name === 'TimeoutError') treeStopped = killGroup('SIGKILL');
+        else {
+          killGroup('SIGTERM');
+          setTimeout(() => {
+            // Kill the group even if its leader already exited but descendants ignored SIGTERM.
+            treeStopped = killGroup('SIGKILL');
+            cleanup();
+          }, 2000);
         }
       }
       finish(error);
@@ -321,7 +332,7 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
       // No shell interpolation and no agent tools. Only the brief and fixed schema go to the model.
       child = spawn(copilotExecutable, copilotArguments(prompt), {
         cwd: workdir, env: { ...process.env, COPILOT_ALLOW_ALL: 'false', COPILOT_PLUGIN_DIR_ONLY: 'true' },
-        stdio: ['ignore', 'pipe', 'pipe'], detached: process.platform !== 'win32',
+        stdio: ['ignore', 'pipe', 'pipe'], detached: true,
       });
       child.stdout.setEncoding('utf8');
       child.stderr.setEncoding('utf8');
@@ -344,18 +355,8 @@ function askCopilot(world, brief, signal, hollowInterior, target) {
         closed = true;
         cleanup();
         if (settled) return;
-        if (code !== 0) {
-          const authentication = /authenticat|not logged|login required|copilot login|unauthorized|401\b/i.test(stderr)
-            || copilotAuthenticationFailed(stdout);
-          console.error('Copilot planning failed, exit code:', code, authentication ? '(authentication)' : '');
-          plannerFailure = authentication
-            ? { state: 'needs-auth', message: 'Copilot reported an authentication failure. Run copilot login in the server terminal with a Copilot-enabled account, check token overrides and organization policy, then retry. BrickLab did not retry or fall back.' }
-            : { state: 'unavailable', message: 'Copilot CLI failed. Check copilot --version, copilot login, network access, subscription and quota in the server terminal, or select local mode. BrickLab did not retry or fall back.' };
-          finish(new Error(plannerFailure.message));
-        } else {
-          try { const spec = extractSpec(readCopilotResponse(stdout)); plannerFailure = null; finish(null, spec); }
-          catch (error) { finish(new Error(`Could not read the Copilot plan: ${error.message}`)); }
-        }
+        try { finish(null, parseCopilotPlan(code, stdout, stderr)); }
+        catch (error) { finish(error); }
       });
     }).catch(error => { finish(error); cleanup(); });
   });
@@ -401,6 +402,7 @@ const server = http.createServer(async (req, res) => {
         calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
         azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
         planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
+        planningQuota,
         copilotImages: copilotImagesEnabled && !planningQuarantined });
     }
     if (req.method === 'GET' && url.pathname === '/api/azure-auth-config') {
@@ -482,15 +484,16 @@ const server = http.createServer(async (req, res) => {
         return send(res, 403, { error: azureAI ? azurePlannerStatus.message
           : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
-      const azureClient = azureAI && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
-      if (azureAI && azureMonetaryBudget && !azureClient)
+      const azureClient = azureAI && planningQuota.enabled && azureMonetaryBudget ? azureClientKey(azurePrincipal) : undefined;
+      if (azureAI && planningQuota.enabled && azureMonetaryBudget && !azureClient)
         return send(res, 503, { error: 'Azure planning rate limits could not be verified; no model request was sent.' });
       if (copilotAI && image && !copilotImagesEnabled)
         return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
+      if (copilotAI && process.platform === 'win32' && !windowsCopilotRunner)
+        return send(res, 503, { error: windowsContainmentMessage });
       const today = new Date().toISOString().slice(0, 10);
       if (today !== day) { day = today; calls = 0; }
       if (planningQuarantined) return send(res, 429, { error: planningQuarantineMessage });
-      if (copilotAI && calls >= limit) return send(res, 429, { error: `Session daily limit of ${limit} Copilot calls reached. Offline templates and configured Local AI are separate options.` });
       const controller = new AbortController();
       activeControllers.add(controller);
       const interrupted = new Promise(resolvePromise => controller.signal.addEventListener('abort', resolvePromise, { once: true }));
@@ -541,9 +544,12 @@ const server = http.createServer(async (req, res) => {
           if (azureAI) {
             const work = (async () => {
               controller.signal.throwIfAborted();
-              try { azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({
-                signal: controller.signal, ...(azureClient ? { clientKey: azureClient } : {}),
-              }); }
+              try {
+                if (azureMonetaryBudget || planningQuota.enabled)
+                  azureReservation = await (azureMonetaryBudget ? azureBudget : azureUsage).reserve({
+                    signal: controller.signal, ...(azureClient ? { clientKey: azureClient } : {}),
+                  });
+              }
               catch (error) {
                 controller.signal.throwIfAborted();
                 if (azureMonetaryBudget) {
@@ -584,7 +590,13 @@ const server = http.createServer(async (req, res) => {
             })();
             finished = work.then(() => {}, () => {});
             spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-          } else if (image) {
+          } else if (image || process.platform === 'win32') {
+            let cleanupUnconfirmed = false;
+            const quarantine = () => {
+              cleanupUnconfirmed = true;
+              quarantinePlanning(image ? copilotImageLockMessage
+                : 'Copilot process-tree cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
+            };
             const work = (async () => {
               const workdir = resolve(root, '.agent-home');
               await mkdir(workdir, { recursive: true });
@@ -594,27 +606,27 @@ const server = http.createServer(async (req, res) => {
                 output = await windowsCopilotRunner.run({
                   executable: copilotExecutable,
                   args: copilotArguments(planningPrompt(world, brief, hollowInterior, target)),
-                  cwd: workdir, image: body.image, imageConsent: body.imageConsent,
+                  cwd: workdir, ...(image ? { image: body.image, imageConsent: body.imageConsent } : {}),
                   signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
                 });
               } catch (error) {
-                if (error?.cleanupConfirmed !== true) quarantinePlanning();
+                if (error?.cleanupConfirmed !== true) quarantine();
                 throw error;
               }
               if (output?.cleanupConfirmed !== true) {
-                quarantinePlanning();
-                throw new Error('Copilot image cleanup could not be confirmed.');
+                quarantine();
+                throw new Error('Copilot process-tree cleanup could not be confirmed.');
               }
               controller.signal.throwIfAborted();
-              if (output.privateAclVerified !== true || output.exitCode !== 0
+              if (output.privateAclVerified !== true || !Number.isInteger(output.exitCode)
                   || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
                   || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
-                throw new Error('Copilot image planning failed closed.');
-              const parsed = extractSpec(readCopilotResponse(output.stdout));
-              plannerFailure = null;
-              return parsed;
+                throw new Error('Copilot planning failed closed.');
+              return parseCopilotPlan(output.exitCode, output.stdout, output.stderr);
             })();
-            finished = work.then(() => {}, () => {});
+            // An ambiguous job remains charged to capacity until operator recovery;
+            // another job's eventual cleanup cannot free or unquarantine it.
+            finished = work.then(() => {}, () => cleanupUnconfirmed ? new Promise(() => {}) : undefined);
             spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
           } else {
             const invocation = askCopilot(world, brief, controller.signal, hollowInterior, target);
@@ -624,7 +636,7 @@ const server = http.createServer(async (req, res) => {
         }
         controller.signal.throwIfAborted();
         if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
-        respond(200, { spec, ...((azureAI && azureMonetaryBudget) || compatibleAI ? {}
+        respond(200, { spec, ...((azureAI && (azureMonetaryBudget || !planningQuota.enabled)) || compatibleAI ? {}
           : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
         source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
       } catch (error) {
@@ -663,7 +675,7 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404).end('Not found'); }
 });
 server.listen(port, host, () => {
-  console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: ${limit} (Copilot) | Local AI: ${localPlanner.status().state}`);
+  console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'} | Local AI: ${localPlanner.status().state}`);
   if (hosted) console.warn('Hosted public static/offline mode only: all planning providers are disabled. Paid Azure planning is blocked pending a verified public edge. Deployment and platform protections have NOT been verified by this server.');
   if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });

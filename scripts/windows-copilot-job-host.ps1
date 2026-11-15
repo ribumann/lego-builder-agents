@@ -320,8 +320,11 @@ public static class BrickLabJobHost
                 throw new Win32Exception(Marshal.GetLastWin32Error());
 
             List<string> fullArguments = new List<string>(arguments);
-            fullArguments.Add("--attachment");
-            fullArguments.Add(attachment);
+            if (!String.IsNullOrEmpty(attachment))
+            {
+                fullArguments.Add("--attachment");
+                fullArguments.Add(attachment);
+            }
             StringBuilder command = new StringBuilder(QuoteArgument(executable));
             foreach (string argument in fullArguments) command.Append(' ').Append(QuoteArgument(argument));
             if (command.Length > 30000) throw new InvalidOperationException("Command line is too large.");
@@ -543,20 +546,23 @@ try {
     $requestLine = [Console]::In.ReadLine()
     if ([string]::IsNullOrEmpty($requestLine) -or $requestLine.Length -gt 2000000) { throw 'invalid-request' }
     $request = $requestLine | ConvertFrom-Json -ErrorAction Stop
+    $hasImage = $null -ne $request.imageMimeType -or $null -ne $request.imageBase64
     if ($request.timeoutMs -lt 1 -or $request.timeoutMs -gt 300000 -or
         $request.maxOutputBytes -lt 1024 -or $request.maxOutputBytes -gt 1048576 -or
-        $request.imageMimeType -notin @('image/png', 'image/jpeg') -or
-        [string]::IsNullOrEmpty($request.imageBase64) -or
-        $request.imageBase64.Length -gt 1333336 -or
+        ($hasImage -and ($request.imageMimeType -notin @('image/png', 'image/jpeg') -or
+            [string]::IsNullOrEmpty($request.imageBase64) -or
+            $request.imageBase64.Length -gt 1333336)) -or
         [string]::IsNullOrEmpty($request.executable) -or
         [string]::IsNullOrEmpty($request.cwd) -or
         $request.cwd -notmatch '^[A-Za-z]:\\') {
         throw 'invalid-request'
     }
 
-    $stage = 'validate-image'
-    $imageBytes = [Convert]::FromBase64String($request.imageBase64)
-    if ($imageBytes.Length -lt 1 -or $imageBytes.Length -gt 1000000) { throw 'invalid-image' }
+    if ($hasImage) {
+        $stage = 'validate-image'
+        $imageBytes = [Convert]::FromBase64String($request.imageBase64)
+        if ($imageBytes.Length -lt 1 -or $imageBytes.Length -gt 1000000) { throw 'invalid-image' }
+    }
     $stage = 'get-temp-root'
     $tempRoot = [IO.Path]::GetTempPath()
     if ($request.directoryName -notmatch '^bricklab-copilot-[a-f0-9]{32}$' -or
@@ -588,20 +594,23 @@ try {
     $actualDirectoryAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl([IO.DirectoryInfo]$directory)
     if (-not $actualDirectoryAcl.AreAccessRulesProtected) { throw 'private-storage-unavailable' }
     Assert-PrivateAcl $actualDirectoryAcl $sid
-    $path = Join-Path $directory $(if ($request.imageMimeType -eq 'image/png') { 'image.png' } else { 'image.jpg' })
-    $stage = 'create-attachment'
-    $fileStream = New-Object IO.FileStream($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
-    try {
-        $stage = 'verify-private-acl'
-        if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
-            throw 'private-storage-unavailable'
-        }
-        $fileAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl($fileStream)
-        Assert-PrivateAcl $fileAcl $sid
-        $stage = 'write-attachment'
-        $fileStream.Write($imageBytes, 0, $imageBytes.Length)
-        $fileStream.Flush($true)
-    } finally { $fileStream.Dispose() }
+    $path = $null
+    if ($hasImage) {
+        $path = Join-Path $directory $(if ($request.imageMimeType -eq 'image/png') { 'image.png' } else { 'image.jpg' })
+        $stage = 'create-attachment'
+        $fileStream = New-Object IO.FileStream($path, [IO.FileMode]::CreateNew, [IO.FileAccess]::Write, [IO.FileShare]::None)
+        try {
+            $stage = 'verify-private-acl'
+            if (([IO.File]::GetAttributes($path) -band [IO.FileAttributes]::ReparsePoint) -ne 0) {
+                throw 'private-storage-unavailable'
+            }
+            $fileAcl = [System.IO.FileSystemAclExtensions]::GetAccessControl($fileStream)
+            Assert-PrivateAcl $fileAcl $sid
+            $stage = 'write-attachment'
+            $fileStream.Write($imageBytes, 0, $imageBytes.Length)
+            $fileStream.Flush($true)
+        } finally { $fileStream.Dispose() }
+    }
 
     $cancelled = [Func[bool]] { [IO.File]::Exists($cancelSignalPath) }
     if ($cancelled.Invoke()) {
