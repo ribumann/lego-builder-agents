@@ -121,6 +121,8 @@ const allowedOrigins = new Set(hosted ? [hostedOrigin] : codespaces
   ? [forwardedOrigin] : [`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
 const appPassword = codespaces ? randomBytes(24).toString('hex') : null;
 const appAuthorization = codespaces ? `Basic ${Buffer.from(`bricklab:${appPassword}`).toString('base64')}` : null;
+const codespacesDiagnostics = codespaces && process.env.BRICKLAB_CODESPACES_DIAGNOSTICS === '1';
+let diagnosticRequests = 0;
 const runFile = promisify(execFile);
 const limit = null;
 const MAX_TEXT_BODY_BYTES = 4096;
@@ -182,17 +184,23 @@ function safePlanningError(error) {
 }
 
 async function verifyPrivatePort() {
+  let stdout;
   try {
-    const { stdout } = await runFile('gh', ['codespace', 'ports', '--codespace', codespaceName,
+    ({ stdout } = await runFile('gh', ['codespace', 'ports', '--codespace', codespaceName,
       '--json', 'sourcePort,visibility,browseUrl'], {
       timeout: 15_000, maxBuffer: 64_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' },
-    });
-    const ports = JSON.parse(stdout);
-    if (Array.isArray(ports) && ports.some(entry => entry?.sourcePort === port
-        && entry.visibility === 'private' && entry.browseUrl === forwardedOrigin)) return;
-  } catch {
-    throw new Error('Cannot verify private port visibility. Check gh authentication and gh codespace ports in the Codespace terminal; access is denied.');
+    }));
+  } catch (error) {
+    const reason = error?.code === 'ENOENT' ? 'GitHub CLI (gh) was not found.'
+      : error?.killed ? 'GitHub CLI timed out after 15 seconds.'
+      : 'GitHub CLI failed; authentication, scope, connectivity or command errors may be responsible.';
+    throw new Error(`${reason} Cannot verify private port visibility. Run the documented bounded checks in the Codespace terminal; access is denied.`);
   }
+  let ports;
+  try { ports = JSON.parse(stdout); }
+  catch { throw new Error('GitHub CLI returned invalid port data; access is denied.'); }
+  if (Array.isArray(ports) && ports.some(entry => entry?.sourcePort === port
+      && entry.visibility === 'private' && entry.browseUrl === forwardedOrigin)) return;
   throw new Error(`Port ${port} must be forwarded with Private visibility and its expected HTTPS URL. Public and organization visibility are not supported.`);
 }
 
@@ -356,6 +364,18 @@ const server = http.createServer(async (req, res) => {
   catch { return send(res, 400, { error: 'Invalid request URL.' }); }
   if (codespaces) {
     res.setHeader('Cache-Control', 'no-store');
+    if (codespacesDiagnostics && diagnosticRequests++ < 20) {
+      const classify = (value, expected) => value === undefined ? 'absent'
+        : value === expected ? 'expected' : 'other';
+      console.error('Codespace request diagnostics:', JSON.stringify({
+        host: [`localhost:${port}`, `127.0.0.1:${port}`].includes(req.headers.host)
+          ? 'loopback' : classify(req.headers.host, new URL(forwardedOrigin).host),
+        origin: classify(req.headers.origin, forwardedOrigin),
+        forwardedHost: classify(req.headers['x-forwarded-host'], new URL(forwardedOrigin).host),
+        forwardedProto: classify(req.headers['x-forwarded-proto'], 'https'),
+        forwarded: req.headers.forwarded === undefined ? 'absent' : 'present',
+      }));
+    }
     if (!allowedHosts.has(req.headers.host)
         || (req.headers.origin && !allowedOrigins.has(req.headers.origin)))
       return send(res, 403, { error: 'Use this Codespace port\'s exact HTTPS URL and origin.' });

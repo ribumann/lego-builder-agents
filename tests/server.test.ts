@@ -306,6 +306,12 @@ process.kill = (pid, signal) => {
 const actualExec = cp.execFile;
 cp.execFile = (file, args, options, callback) => {
   if (file === 'gh' && args[0] === 'codespace') {
+    if (process.env.TEST_GH_FAILURE) {
+      const error = Object.assign(new Error('secret CLI output'), process.env.TEST_GH_FAILURE === 'missing'
+        ? { code: 'ENOENT' } : process.env.TEST_GH_FAILURE === 'timeout' ? { killed: true } : { code: 1 });
+      process.nextTick(() => callback(error, '', 'secret CLI stderr'));
+      return new EventEmitter();
+    }
     process.nextTick(() => callback(null, JSON.stringify([{
       sourcePort: Number(process.env.PORT), visibility: 'private',
       browseUrl: 'https://' + process.env.CODESPACE_NAME + '-' + process.env.PORT + '.app.github.dev'
@@ -2222,6 +2228,46 @@ test('Local vision metadata gate sends an image only after per-request consent a
     ['/api/tags', '/api/show', '/api/tags', '/api/show', '/api/generate']);
   assert.deepEqual(requests.at(-1)?.body.images, [consentedTestImage.data]);
   assert.ok(requests.at(-1)?.body.prompt.endsWith('User brief: "A tiny observatory"'));
+});
+
+test('Codespace diagnostics redact headers and never trust forwarded values', { timeout: 15_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    BRICKLAB_CODESPACES_DIAGNOSTICS: '1', TEST_STATIC_FIXTURE: '1',
+  });
+  assert.ok(server.child.stderr);
+  let diagnostics = '';
+  server.child.stderr.on('data', chunk => { diagnostics += chunk; });
+  const origin = server.headers.Origin;
+  assert.equal((await server.get('/')).status, 200);
+  assert.equal((await server.post({}, '{')).status, 400, 'Authenticated same-origin API request reaches body validation');
+  assert.equal((await server.get('/api/status', {
+    Host: 'attacker.example', 'X-Forwarded-Host': new URL(origin).host,
+    'X-Forwarded-Proto': 'https', Forwarded: 'secret-forwarded-value',
+  })).status, 403);
+  assert.equal((await server.get('/api/status', { Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await server.post({ Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await server.post({ Host: `localhost:${server.port}`, 'X-Forwarded-Host': new URL(origin).host })).status, 403);
+  await new Promise(resolve => setImmediate(resolve));
+  assert.match(diagnostics, /"host":"other"/);
+  assert.match(diagnostics, /"host":"loopback"/);
+  assert.match(diagnostics, /"forwardedHost":"expected"/);
+  assert.match(diagnostics, /"forwardedProto":"expected"/);
+  assert.match(diagnostics, /"forwarded":"present"/);
+  assert.doesNotMatch(diagnostics, /attacker\.example|secret-forwarded-value|Basic |fixture-space|bricklab-key/i);
+});
+
+test('Codespace private-port errors distinguish missing CLI and timeout without exposing output', { timeout: 15_000 }, async t => {
+  for (const [failure, expected] of [['missing', /not found/], ['timeout', /timed out/], ['other', /authentication, scope, connectivity/]] as const) {
+    const server = await startLifecycleServer(t, 'linux', {
+      BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space', TEST_GH_FAILURE: failure,
+    });
+    const response = await server.get();
+    assert.equal(response.status, 503);
+    const body = await response.text();
+    assert.match(body, expected);
+    assert.doesNotMatch(body, /secret CLI/);
+  }
 });
 
 test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {
