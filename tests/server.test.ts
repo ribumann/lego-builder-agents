@@ -1652,6 +1652,8 @@ test('hosted paid planning defaults off and unsafe/incomplete public configurati
       'https://127.0.0.1', 'https://localhost', 'https://LAB.example.org', 'https://lab.example.org.']
       .map((origin): [NodeJS.ProcessEnv, string[]] => [{ BRICKLAB_HOSTED: '1', BRICKLAB_HOSTED_ORIGIN: origin }, ['--production']]),
     [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1' }, ['--production']],
+    [{ ...azureFixtureEnv, BRICKLAB_HOSTED: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget',
+      BRICKLAB_AZURE_CONTENT_FILTER_POLICY: '' }, ['--production']],
     [{ ...azureFixtureEnv, BRICKLAB_AZURE_BUDGET: '1', BRICKLAB_AZURE_BUDGET_CONTAINER: 'fixture-budget', AZURE_OPENAI_RESOURCE_ID: '' }, ['--production']],
     [{ ...azureFixtureEnv }, []],
     [{ ...azureFixtureEnv, AZURE_OPENAI_ENDPOINT: 'http://localhost' }, ['--production']],
