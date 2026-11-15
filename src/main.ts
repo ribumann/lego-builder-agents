@@ -354,7 +354,7 @@ brief.addEventListener('input', updateSceneSize);
 $<HTMLSelectElement>('#scene-size').addEventListener('change', updateSceneSize);
 imageInput = createPlanningImageInput({
   container: $('#image-input'), chooser: $<HTMLButtonElement>('#image-choose'), privacy: $('#image-privacy'),
-  target: () => hosted ? azureImagesEnabled ? 'azure' : 'hosted' : mode,
+  target: () => mode === 'local' ? 'local' : hosted && mode !== 'azure' ? 'hosted' : mode,
   copilotImages: () => copilotImagesEnabled, azureImages: () => azureImagesEnabled,
 });
 const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
