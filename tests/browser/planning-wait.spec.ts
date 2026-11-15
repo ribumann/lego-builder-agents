@@ -88,7 +88,7 @@ test('planning estimates use only the explicit brief and only the measured provi
   await page.getByRole('button', { name: 'Change mode' }).click();
   await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
-  await expect(dialog).toContainText('Estimate unknown; Azure Foundry was not measured in the Copilot study');
+  await expect(dialog).toContainText('One Azure Foundry request is running. It may take up to 300 seconds.');
   await expect(dialog).not.toContainText('55–175');
   await dialog.getByRole('button', { name: 'Abort planning' }).click();
 });

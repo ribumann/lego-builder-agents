@@ -89,7 +89,7 @@ test('hosted and offline routes do not send selected images', async ({ page }) =
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
@@ -111,7 +111,7 @@ test('Copilot image planning stays unavailable without verified process containm
   await page.locator('#media-privacy > summary').click();
   await expect(page.locator('#image-destination')).toContainText('unavailable');
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
@@ -168,9 +168,9 @@ test('a stale Windows image capability cannot enable hosted image planning', asy
   await page.route('**/api/*plan', route => { requests++; return route.abort(); });
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
-  await expect(page.locator('#image-destination')).toContainText('Hosted image planning is unavailable');
+  await expect(page.locator('#image-destination')).toContainText('Hosted Azure image planning is not enabled');
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#plan').click();
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
@@ -215,13 +215,18 @@ test('image disclosure and destination change with language and planner', async 
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#language').selectOption('de');
   await expect(page.locator('#image-disclosure')).toContainText('Metadaten');
   await page.locator('#settings').click();
   await page.locator('#choose-local-ai').click();
   await expect(page.locator('#image-destination')).toContainText('Ollama');
   await expect(page.locator('#image-consent')).not.toBeChecked();
+  await page.locator('#image-consent').check();
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await expect(page.locator('#image-consent')).not.toBeChecked();
+  await expect(page.locator('#image-consent')).toBeDisabled();
 });
 
 test('image privacy disclosure is available in all six languages', async ({ page }) => {
