@@ -197,13 +197,21 @@ test('a stale Windows image capability cannot enable hosted image planning', asy
   } }));
   await page.route('**/api/*plan', route => { requests++; return route.abort(); });
   await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#plan').click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  expect(saved).not.toBeNull();
+  await page.locator('#settings').click();
+  await page.locator('#choose-azure').click();
   await page.locator('#media-privacy > summary').click();
-  await expect(page.locator('#image-destination')).toContainText('Hosted Azure image planning is not enabled');
+  await expect(page.locator('#image-destination')).toContainText('Azure image planning is unavailable on this server.');
   await page.locator('#image-file').setInputFiles(image);
   await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#plan').click();
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
 });
 
 test('Copilot image planning has no text-only timing estimate and abort preserves the scene', async ({ page }) => {
