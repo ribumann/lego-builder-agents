@@ -21,7 +21,7 @@ param azureDailyCalls int = 50
 @minValue(1)
 param plannerCapacity int = 200
 
-@description('Selected startup deployment output; does not create that deployment or enable paid planning. Provision Terra separately with terra-planner.bicep before selecting it.')
+@description('Selected startup deployment app setting and output; does not create that deployment or enable paid planning. Provision Terra separately with terra-planner.bicep before enabling planning.')
 @allowed([
   'bricklab-planner-terra'
   'bricklab-planner-gpt54'
@@ -75,6 +75,10 @@ resource web 'Microsoft.Web/sites@2023-12-01' = {
         {
           name: 'BRICKLAB_AZURE_AI'
           value: '0'
+        }
+        {
+          name: 'AZURE_OPENAI_DEPLOYMENT'
+          value: plannerDeploymentName
         }
         {
           name: 'BRICKLAB_AZURE_DAILY_CALLS'

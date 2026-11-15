@@ -115,8 +115,9 @@ template still creates the retained GPT-5.4 deployment at capacity 200, but its
 `plannerDeploymentName` parameter and `openAiDeployment` output default to
 `bricklab-planner-terra`. That output is selection metadata, not proof the
 deployment exists: new installations must provision the isolated Terra
-template first. The parameter does not enable paid planning or change any
-resource or app setting. Do not copy the retained GPT-5.4 resource name into
+template first. The parameter sets the actual `AZURE_OPENAI_DEPLOYMENT` app setting as well
+as the output, but keeps `BRICKLAB_AZURE_AI=0`. It does not create a deployment
+or enable paid planning. Do not copy the retained GPT-5.4 resource name into
 startup settings or redeploy the whole base stack to switch a model.
 After an authorized restart verify the intended package,
 an available allowance snapshot and one separately authorized guarded
@@ -124,6 +125,41 @@ submission. A configured status or successful ARM deployment is not proof of
 inference, valid geometry, or a completed local build. One submission may
 make at most two model requests under the bounded correction flow; never
 retry transport, authentication or 429 failures automatically.
+
+For an existing app, a full base-template deployment is unnecessary and may
+overwrite other runtime settings. After the separately authorized idle check,
+the exact selection-only operation is:
+
+```powershell
+az webapp config appsettings set --subscription $Subscription `
+  --resource-group $Group --name $Web `
+  --settings AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra --output none
+```
+
+`$Web` is the existing app name. This merges just the named setting; it does
+not reset the package pointer, existing ledger aliases, allowance or security
+settings. The current live app already has this value: **do not run it again
+merely to retain the working default**.
+
+For a new installation, provision the isolated Terra deployment and finish
+the managed-identity, endpoint, existing/new usage-container, origin and
+network setup below before a separately authorized paid opt-in. The explicit
+opt-in is a different operation and is not part of a routine package update:
+
+```powershell
+az webapp config appsettings set --subscription $Subscription `
+  --resource-group $Group --name $Web `
+  --settings BRICKLAB_AZURE_AI=1 --output none
+az webapp config appsettings list --subscription $Subscription `
+  --resource-group $Group --name $Web `
+  --query "[?name=='AZURE_OPENAI_DEPLOYMENT' || name=='BRICKLAB_AZURE_AI'].{name:name,value:value}" `
+  --output table
+```
+
+Verify the two selected values are `bricklab-planner-terra` and `1`;
+`/api/status` must then report Azure configured. This is configuration
+verification only, not authorization for an inference probe. Never use a
+fresh-container setting to replace an existing usage ledger.
 
 Do not delete the selected default deployment. Only after a separately
 authorized replacement has been selected and active requests have finished,
