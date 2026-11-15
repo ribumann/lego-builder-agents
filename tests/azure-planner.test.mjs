@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createAzurePlanner } from '../azure-planner.mjs';
+import { createAzurePlanner, getAzurePlannerDiagnostic } from '../azure-planner.mjs';
 import { validateCustomSpec } from '../src/custom-design.mjs';
 import { planningPrompt } from '../planning-prompt.mjs';
 
@@ -192,5 +192,70 @@ test('Azure planner exposes sanitized distinct identity, access, quota and servi
     const plan = createPlanner({ endpoint, deployment: 'model', credential,
       fetchImpl: async () => new Response('sensitive details', { status }) });
     await assert.rejects(plan({ prompt: 'brief' }), error => message.test(error.message) && !error.message.includes('sensitive'));
+  }
+});
+
+test('Azure errors expose only allowlisted categories and bounded numeric rate headers without retrying', async () => {
+  let requests = 0;
+  const plan = createPlanner({ endpoint, deployment: 'model', credential,
+    fetchImpl: async () => {
+      requests++;
+      return new Response(JSON.stringify({ error: {
+        code: '429', message: 'private prompt: exceeded token rate limit; private request id',
+        innererror: { code: 'private-output' }, token: 'private-credential',
+      } }), { status: 429, headers: {
+        'retry-after': '60', 'x-ms-retry-after-ms': '60000',
+        'x-ratelimit-limit-tokens': '200000', 'x-ratelimit-remaining-tokens': '0',
+        'x-ratelimit-limit-requests': '200', 'x-ratelimit-remaining-requests': '199',
+        'request-id': 'private-id', 'authorization': 'private-credential',
+        'x-unrecognized-header': 'private-output',
+      } });
+    } });
+  await assert.rejects(plan({ prompt: 'Synthetic fixture' }), error => {
+    assert.equal(error.statusCode, 429);
+    assert.deepEqual(getAzurePlannerDiagnostic(error), {
+      status: 429, category: 'token-rate-limit', details: 'parsed', code: '429',
+      retryAfterSeconds: 60, retryAfterMs: 60000,
+      requestLimit: 200, requestsRemaining: 199, tokenLimit: 200000, tokensRemaining: 0,
+    });
+    assert.doesNotMatch(JSON.stringify(getAzurePlannerDiagnostic(error)), /private/);
+    return true;
+  });
+  assert.equal(requests, 1);
+});
+
+test('Azure diagnostic decoding is byte/time bounded and ignores untrusted codes and header values', async () => {
+  for (const [body, details] of [
+    ['private invalid JSON', 'invalid-json'],
+    ['x'.repeat(16_385), 'too-large'],
+    [JSON.stringify({ error: { code: 'private-code', message: 'private-output' } }), 'parsed'],
+    [new ReadableStream({ start(controller) { controller.error(new Error('private-error')); } }), 'unavailable'],
+    [new ReadableStream({ pull(controller) { controller.enqueue(new Uint8Array()); } }), 'too-many-chunks'],
+    [new ReadableStream({ start() {} }), 'timeout'],
+  ]) {
+    const plan = createPlanner({ endpoint, deployment: 'model', credential,
+      fetchImpl: async () => new Response(body, { status: 429, headers: {
+        'retry-after': 'private-output', 'retry-after-ms': '-1',
+        'x-ratelimit-limit-tokens': '1000000001', 'x-ratelimit-remaining-tokens': '1.5',
+      } }) });
+    await assert.rejects(plan({ prompt: 'Synthetic fixture' }), error => {
+      assert.deepEqual(getAzurePlannerDiagnostic(error), { status: 429, category: 'rate-limit', details });
+      return true;
+    });
+  }
+});
+
+test('Azure diagnostics distinguish fixed quota and API compatibility codes without reflecting raw messages', async () => {
+  for (const [status, code, category] of [
+    [429, 'insufficient_quota', 'quota'],
+    [400, 'OperationNotSupported', 'unsupported-operation'],
+    [400, 'InvalidApiVersionParameter', 'unsupported-api-version'],
+  ]) {
+    const plan = createPlanner({ endpoint, deployment: 'model', credential,
+      fetchImpl: async () => new Response(JSON.stringify({ error: { code, message: 'private-output' } }), { status }) });
+    await assert.rejects(plan({ prompt: 'Synthetic fixture' }), error => {
+      assert.deepEqual(getAzurePlannerDiagnostic(error), { status, code, category, details: 'parsed' });
+      return true;
+    });
   }
 });

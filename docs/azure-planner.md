@@ -97,6 +97,15 @@ Malformed metadata reports only failed field names, never raw model values.
 Before each explicit external Plan, the browser refreshes uncached server status
 and captures the current process token. A failed refresh sends no brief, and
 neither a token rejection nor invalid output automatically retries inference.
+Provider HTTP errors include an optional `providerDiagnostic` in the existing
+JSON or NDJSON error payload: status, fixed allowlisted category/code, and
+bounded numeric retry/rate-limit counts only. No raw provider message/body,
+request IDs, prompts, output, credentials or arbitrary headers are returned.
+Diagnostic decoding is limited to 16 KiB, 128 chunks and one second; its
+`details` classification identifies missing, malformed or unavailable evidence.
+These hints distinguish provider failures from the shared application counter;
+they never trigger retries, capacity changes or fallback. Non-streamed provider
+429 is HTTP 429; an already-started NDJSON stream carries a terminal error.
 At 300 seconds, the request AbortSignal cancels the upstream transport;
 disconnect cancels only that request. Capacity stays held until the adapter
 settles, and a late count admission cannot start cancelled inference. Transport

@@ -13,7 +13,7 @@ import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-outp
 import { createLocalPlanner } from './local-planner.mjs';
 import { createPlanningCapacity } from './planning-capacity.mjs';
 import { createPlanningQuota } from './planning-quota.mjs';
-import { createAzurePlanner } from './azure-planner.mjs';
+import { createAzurePlanner, getAzurePlannerDiagnostic } from './azure-planner.mjs';
 import { createAzureAccessTokenVerifier, getAzureAuthConfig } from './azure-auth.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
@@ -626,7 +626,9 @@ const server = http.createServer(async (req, res) => {
         { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
           : planningQuarantined ? planningQuarantineMessage
           : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
-            : safePlanningError(error) });
+            : safePlanningError(error),
+          ...(azureAI && getAzurePlannerDiagnostic(error) ? { providerDiagnostic: getAzurePlannerDiagnostic(error) } : {}),
+        });
       } finally {
         clearTimeout(deadline);
         clearTimeout(heartbeat);

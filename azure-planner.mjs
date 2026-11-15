@@ -8,6 +8,78 @@ const SCOPE = 'https://cognitiveservices.azure.com/.default';
 
 class AzurePlannerError extends Error {}
 
+const providerCodes = new Map([
+  ['429', 'rate-limit'], ['RateLimitExceeded', 'rate-limit'], ['RateLimitReached', 'rate-limit'],
+  ['TooManyRequests', 'rate-limit'], ['rate_limit_exceeded', 'rate-limit'],
+  ['insufficient_quota', 'quota'], ['QuotaExceeded', 'quota'],
+  ['DeploymentNotFound', 'deployment'], ['OperationNotSupported', 'unsupported-operation'],
+  ['InvalidApiVersionParameter', 'unsupported-api-version'],
+  ['BadRequest', 'invalid-request'], ['invalid_request_error', 'invalid-request'],
+  ['content_filter', 'content-filter'], ['ResponsibleAIPolicyViolation', 'content-filter'],
+]);
+
+export function getAzurePlannerDiagnostic(error) {
+  return error instanceof AzurePlannerError ? error.providerDiagnostic : undefined;
+}
+
+async function providerDiagnostic(response) {
+  const diagnostic = { status: response.status,
+    category: response.status === 429 ? 'rate-limit' : 'http-error' };
+  for (const [header, field] of [
+    ['retry-after', 'retryAfterSeconds'], ['retry-after-ms', 'retryAfterMs'],
+    ['x-ms-retry-after-ms', 'retryAfterMs'],
+    ['x-ratelimit-limit-requests', 'requestLimit'], ['x-ratelimit-remaining-requests', 'requestsRemaining'],
+    ['x-ratelimit-limit-tokens', 'tokenLimit'], ['x-ratelimit-remaining-tokens', 'tokensRemaining'],
+  ]) {
+    const value = response.headers.get(header);
+    if (value !== null && /^\d{1,10}$/.test(value) && Number(value) <= 1_000_000_000)
+      diagnostic[field] = Number(value);
+  }
+  if (!response.body) return { ...diagnostic, details: 'missing' };
+  const reader = response.body.getReader();
+  let timeout;
+  try {
+    const read = async () => {
+      const chunks = [];
+      let size = 0;
+      for (let reads = 0; reads < 128; reads++) {
+        const { done, value } = await reader.read();
+        if (done) {
+          try {
+            return { details: 'parsed', error: JSON.parse(
+              new TextDecoder('utf-8', { fatal: true }).decode(Buffer.concat(chunks, size)))?.error };
+          } catch { return { details: 'invalid-json' }; }
+        }
+        size += value.byteLength;
+        if (size > 16_384) return { details: 'too-large' };
+        chunks.push(value);
+      }
+      return { details: 'too-many-chunks' };
+    };
+    const result = await Promise.race([
+      read().catch(() => ({ details: 'unavailable' })),
+      new Promise(resolve => { timeout = setTimeout(() => resolve({ details: 'timeout' }), 1000); }),
+    ]);
+    diagnostic.details = result.details;
+    for (const [value, field] of [
+      [result.error?.code, 'code'], [result.error?.innererror?.code ?? result.error?.inner_error?.code, 'innerCode'],
+    ]) {
+      if (providerCodes.has(value)) {
+        diagnostic[field] = value;
+        diagnostic.category = providerCodes.get(value);
+      }
+    }
+    if (response.status === 429 && typeof result.error?.message === 'string') {
+      if (/\btoken rate limit\b/i.test(result.error.message)) diagnostic.category = 'token-rate-limit';
+      else if (/\b(?:request|call) rate limit\b/i.test(result.error.message)) diagnostic.category = 'request-rate-limit';
+    }
+    return diagnostic;
+  } finally {
+    clearTimeout(timeout);
+    void reader.cancel().catch(() => {});
+  }
+}
+
 const objectSchema = properties => ({
   type: 'object', properties, required: Object.keys(properties), additionalProperties: false,
 });
@@ -76,12 +148,15 @@ export function createAzurePlanner({ endpoint, deployment,
         }),
       });
       if (!response.ok || !response.body) {
-        response.body?.cancel().catch(() => {});
+        const diagnostic = await providerDiagnostic(response);
+        const failure = message => Object.assign(new AzurePlannerError(message), {
+          providerDiagnostic: diagnostic, ...(response.status === 429 ? { statusCode: 429 } : {}),
+        });
         if (response.status === 401 || response.status === 403)
-          throw new AzurePlannerError('Azure OpenAI denied model access. Check the managed identity role and resource configuration.');
+          throw failure('Azure OpenAI denied model access. Check the managed identity role and resource configuration.');
         if (response.status === 429)
-          throw new AzurePlannerError('Azure OpenAI rate or quota limit reached. No retry was attempted.');
-        throw new AzurePlannerError('Azure OpenAI service is unavailable. No retry was attempted.');
+          throw failure('Azure OpenAI rate or quota limit reached. No retry was attempted.');
+        throw failure('Azure OpenAI service is unavailable. No retry was attempted.');
       }
       const reader = response.body.getReader();
       const chunks = [];

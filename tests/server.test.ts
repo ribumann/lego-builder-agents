@@ -113,7 +113,7 @@ import { createPublicKey } from 'node:crypto';
 import { createPlanningQuota } from ${JSON.stringify(new URL('../planning-quota.mjs', import.meta.url).href)};
 import { createAzureUsageGate } from ${JSON.stringify(new URL('../azure-usage.mjs', import.meta.url).href)};
 import { createAzureAccessTokenVerifier } from ${JSON.stringify(new URL('../azure-auth.mjs', import.meta.url).href)};
-import { createAzurePlanner } from ${JSON.stringify(new URL('../azure-planner.mjs', import.meta.url).href)};
+import { createAzurePlanner, getAzurePlannerDiagnostic } from ${JSON.stringify(new URL('../azure-planner.mjs', import.meta.url).href)};
 import { createWindowsCopilotJobRunner } from ${JSON.stringify(new URL('../src/windows-copilot-job-runner.mjs', import.meta.url).href)};
 const actualReadFile = fs.readFile;
 const actualMkdtemp = fs.mkdtemp;
@@ -187,6 +187,7 @@ const boundary = (type, entries, details) => new Promise((resolve, reject) => {
   notify();
 });
 globalThis.azureBoundaries = {
+  getAzurePlannerDiagnostic,
   createAzurePlanner(config) {
     azureConfig.push({ type: 'planner', ...config });
     if (process.env.TEST_AZURE_HTTP_ENDPOINT) {
@@ -269,6 +270,7 @@ registerHooks({
       'export const createAzureAccessTokenVerifier = config => globalThis.azureBoundaries.createAzureAccessTokenVerifier(config);' };
     if (url.startsWith('fixture:')) return { format: 'module', shortCircuit: true, source:
       'export const createAzurePlanner = config => globalThis.azureBoundaries.createAzurePlanner(config);' +
+      'export const getAzurePlannerDiagnostic = error => globalThis.azureBoundaries.getAzurePlannerDiagnostic(error);' +
       'export const createAzureUsageGate = config => globalThis.azureBoundaries.createAzureUsageGate(config);' };
     return next(url, context);
   }
@@ -1234,6 +1236,41 @@ test('obsolete private spend-budget settings add no monetary or daily gate', { t
   const state = await server.command({});
   assert.equal(state.budgetState.calls, 12, 'Private routes do not contact obsolete monetary storage');
   assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner']);
+});
+
+test('Azure provider diagnostics survive JSON and NDJSON without exposing upstream bodies or retrying', { timeout: 15_000 }, async t => {
+  let requests = 0;
+  const provider = createHttpServer(async (req, res) => {
+    for await (const _chunk of req) {}
+    requests++;
+    res.writeHead(429, { 'Content-Type': 'application/json', 'retry-after': '60',
+      'x-ratelimit-remaining-tokens': '0', 'request-id': 'private-id' });
+    res.end(JSON.stringify({ error: { code: '429', message: 'private prompt exceeded call rate limit' } }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => {
+    provider.closeAllConnections();
+    return new Promise<void>(resolve => provider.close(() => resolve()));
+  });
+  const address = provider.address();
+  assert.ok(address && typeof address === 'object');
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
+    TEST_AZURE_HTTP_ENDPOINT: `http://127.0.0.1:${address.port}/fixture`,
+  });
+  for (const streaming of [false, true]) {
+    const response = await server.azurePost({ Authorization: '', ...(streaming ? ndjson : {}) });
+    assert.equal(response.status, streaming ? 200 : 429);
+    const text = await response.text();
+    assert.doesNotMatch(text, /private/);
+    const result = streaming ? streamEvents(text).at(-1) : JSON.parse(text);
+    assert.deepEqual(result.providerDiagnostic, {
+      status: 429, category: 'request-rate-limit', code: '429', details: 'parsed',
+      retryAfterSeconds: 60, tokensRemaining: 0,
+    });
+  }
+  assert.equal(requests, 2, 'Exactly one transport per admitted request, no retries');
+  assert.equal((await (await server.get()).json() as any).publicAllowance.used, 2);
 });
 
 test('300-second deadline actually closes Azure and compatible mock HTTP transports without aborting another request', { timeout: 25_000 }, async t => {
