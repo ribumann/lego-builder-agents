@@ -643,6 +643,10 @@ async function planningResponse(response: Response): Promise<{ spec?: unknown; e
     const event: unknown = JSON.parse(line);
     if (!event || typeof event !== 'object' || !('type' in event)) throw new Error('Invalid planning stream event.');
     if (event.type === 'waiting') return;
+    if (event.type === 'correcting') {
+      $('#planning-description').textContent = translate('Correcting the generated design once. The same submission, deadline and daily allowance apply; transport failures are not retried.');
+      return;
+    }
     if (event.type === 'result' && 'spec' in event) result = { spec: event.spec };
     else if (event.type === 'error' && 'error' in event && typeof event.error === 'string') result = { error: event.error };
     else throw new Error('Invalid planning stream event.');
@@ -710,7 +714,7 @@ async function makePlan(demo = false) {
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': planningKey,
-          ...(localAI ? {} : { Accept: 'application/x-ndjson' }),
+          Accept: 'application/x-ndjson',
           ...(azureAccessToken ? { Authorization: `Bearer ${azureAccessToken}` } : {}) },
         body: JSON.stringify({ world, brief: planningBrief,
           sceneSize: selectedSize,
@@ -875,8 +879,8 @@ function answer(question: string, agent?: AgentId) {
   let response = responses[id];
   if (/who.*what/.test(q)) response = 'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.';
   else if (/cost|money|price/.test(q)) response = hosted
-    ? `The hosted demo uses a shared daily request allowance; it does not display a per-request dollar estimate.${publicAllowance ? ` ${publicAllowance}` : ''}`
-    : 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
+    ? `The hosted demo uses a shared daily request allowance; it does not display a per-request dollar estimate. ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}${publicAllowance ? ` ${publicAllowance}` : ''}`
+    : `${translate('Offline templates make no model calls. Local AI uses server compute. Model and hosting charges may apply; no dollar estimate is available.')} ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}`;
   else if (/hollow|interior|cavity/.test(q)) response = 'The hollow-interior preference asks custom planning to leave an empty space and a usable opening when the design supports it. Use Cutaway view to inspect the cross-section. It is a preference, not a guarantee.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
@@ -988,11 +992,13 @@ $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
     ${hosted || azurePlanner.enabled ? `<p><strong>${hosted ? 'Hosted Azure demo' : 'Azure Foundry planner'}</strong> — a separate service from GitHub Copilot. ${hosted ? 'No visitor sign-in is required. Pressing Plan sends your brief and any explicitly consented image to Azure. Audio stays in the browser; only reviewed text you apply to the brief is included. No input is sent on page load or when selecting media.' : 'Private Azure planning requires Entra sign-in. An explicit planning action sends the brief to Azure. No model request happens on load. Do not enter personal information.'}</p>
     <p id="azure-planner-status" role="status">${esc(translate(azurePlanner.message))}</p>
+    <p>${esc(translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.'))}</p>
     ${hosted && publicAllowance ? `<p id="public-allowance" role="status">${esc(publicAllowance)}</p>` : ''}
     <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
     ${!hosted ? `
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
-    <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Local servers and Codespaces have no application daily request quota; provider subscription quotas still apply. Daily application request quotas apply only to the public Azure deployment.</p>
+    <p>${esc(translate('Your brief is sent through the authenticated Copilot CLI to GitHub’s model service. No agent tools are allowed. The app does not know the model’s dollar cost. Local servers and Codespaces have no application daily request quota; provider subscription quotas still apply.'))}</p>
+    <p>${esc(translate('Each planning submission allows one initial design and at most one correction of invalid geometry, using the same provider and deadline. Network, authentication, rate-limit and timeout failures are not replayed. No template fallback is used. Hosted allowance counts submissions, not model requests: 50 submissions can make up to 100 model requests per UTC day. Copilot CLI may retry internally.'))}</p>
     <p id="planner-status" role="status">${esc(translate(plannerMessage))}</p>
     <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Pressing <strong>Send brief to Copilot</strong> consents to sending that brief. Selecting a mode or loading the page sends no brief; readiness does not verify login, subscription, or live access. Do not enter personal information.</p>
     <button id="choose-copilot" class="button primary">Use Copilot planning</button>

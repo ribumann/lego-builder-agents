@@ -90,8 +90,12 @@ See [App Service retail prices](https://prices.azure.com/api/retail/prices?%24fi
 [Private Link](https://azure.microsoft.com/pricing/details/private-link/)
 and [DNS](https://azure.microsoft.com/pricing/details/dns/).
 
-The preview requires a shared, count-only limit of 50 Azure calls per UTC day,
+The preview requires a shared, count-only limit of 50 explicit planning submissions per UTC day,
 backed by private Blob state and conditional writes across app instances.
+Each submission may make one initial Azure model request and at most one
+correction of a completed invalid design: up to 100 model requests per day.
+Both share one reservation, deadline and capacity slot. Network/authentication/
+429/timeout failures are not replayed; no usage is refunded or reset.
 It also limits hosted planning to 20 in-flight requests. Keep one worker and
 one Node process unless a shared in-flight semaphore is added and verified.
 Public visitors are anonymous; no per-client fairness or identity is claimed.

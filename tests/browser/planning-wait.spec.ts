@@ -138,6 +138,49 @@ test('a streamed planning result uses the same single request', async ({ page })
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).prompt)).toBe('The submitted sculpture');
 });
 
+test('one internal design correction is visible and a second invalid result preserves the accepted scene', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    hosted: true, sessionKey: 'fixture', copilot: false,
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+  } }));
+  await page.addInitScript(() => {
+    const original = window.fetch;
+    const state = window as Window & { finishCorrection?: () => void; planCount?: number };
+    window.fetch = (input, init) => {
+      if (String(input) !== '/api/azure-plan') return original(input, init);
+      state.planCount = (state.planCount ?? 0) + 1;
+      const encoder = new TextEncoder();
+      return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"type":"waiting"}\n{"type":"correcting"}\n'));
+          state.finishCorrection = () => {
+            controller.enqueue(encoder.encode(JSON.stringify({ type: 'error',
+              error: 'The design is still invalid after one correction: Custom bricks overlap after expansion. No new build was started. Simplify the brief or reduce scene size before a new submission; no further correction was attempted.',
+              designCorrection: { providerAttempts: 2, attempted: true, outcome: 'failed' },
+            }) + '\n'));
+            controller.close();
+          };
+        },
+      }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use offline templates' }).click();
+  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await page.getByRole('button', { name: 'Build one step' }).click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await expect(page.getByRole('dialog')).toContainText('One submission may use two model requests');
+  await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('dialog', { name: 'Planning in progress' })).toContainText('Correcting the generated design once');
+  await page.evaluate(() => (window as Window & { finishCorrection?: () => void }).finishCorrection!());
+  await expect(page.getByRole('alert')).toContainText('still invalid after one correction');
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+  expect(await page.evaluate(() => (window as Window & { planCount?: number }).planCount)).toBe(1);
+});
+
 test('compatible AI is explicit, localized and preserves attribution', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {

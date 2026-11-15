@@ -417,6 +417,49 @@ const catalog: Record<string, Translations> = {
   ],
   'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.': ['BuildBot koordiniert, PlanBot prüft Abhängigkeiten, FrameBot und DetailBot bauen, und CheckBot prüft und leitet Reparaturen.', 'BuildBot coordonne, PlanBot vérifie les dépendances, FrameBot et DetailBot construisent, et CheckBot inspecte et dirige les réparations.', 'BuildBot coordina, PlanBot verifica le dipendenze, FrameBot e DetailBot costruiscono e CheckBot ispeziona e dirige le riparazioni.', 'BuildBot coordina, PlanBot verifica dependencias, FrameBot y DetailBot construyen y CheckBot inspecciona y dirige las reparaciones.', 'BuildBot coordena, PlanBot verifica dependências, FrameBot e DetailBot constroem e CheckBot inspeciona e dirige os reparos.'],
   'Why wait?': ['Warum warten?', 'Pourquoi attendre ?', 'Perché aspettare?', '¿Por qué esperar?', 'Por que esperar?'],
+  'Correcting the generated design once. The same submission, deadline and daily allowance apply; transport failures are not retried.': [
+    'Der erzeugte Entwurf wird einmal korrigiert. Anfrage, Zeitlimit und Tageskontingent bleiben gleich; Übertragungsfehler werden nicht wiederholt.',
+    'Correction unique du plan généré. Même soumission, délai et quota quotidien ; les erreurs de transport ne sont pas réessayées.',
+    'Unica correzione del progetto generato. Stessa richiesta, scadenza e quota giornaliera; nessun nuovo tentativo per errori di trasporto.',
+    'Corrigiendo el diseño generado una vez. Misma solicitud, plazo y cuota diaria; no se reintentan errores de transporte.',
+    'Corrigindo o projeto gerado uma vez. Mesma solicitação, prazo e cota diária; falhas de transporte não são repetidas.',
+  ],
+  'Each planning submission allows one initial design and at most one correction of invalid geometry, using the same provider and deadline. Network, authentication, rate-limit and timeout failures are not replayed. No template fallback is used. Hosted allowance counts submissions, not model requests: 50 submissions can make up to 100 model requests per UTC day. Copilot CLI may retry internally.': [
+    'Jede Planungsanfrage erlaubt einen Entwurf und höchstens eine Geometriekorrektur beim selben Anbieter innerhalb desselben Zeitlimits. Netzwerk-, Anmelde-, Ratenlimit- und Zeitüberschreitungsfehler werden nicht wiederholt. Keine Ersatzvorlagen. Das gehostete Kontingent zählt Anfragen, nicht Modellaufrufe: 50 Anfragen können bis zu 100 Modellaufrufe pro UTC-Tag auslösen. Die Copilot CLI kann intern wiederholen.',
+    'Chaque soumission permet un plan initial et au plus une correction géométrique, avec le même fournisseur et délai. Aucun nouvel essai après une erreur réseau, d’authentification, de quota ou de délai. Aucun modèle prédéfini de secours. Le quota hébergé compte les soumissions : 50 peuvent produire jusqu’à 100 appels au modèle par jour UTC. Copilot CLI peut réessayer en interne.',
+    'Ogni richiesta consente un progetto iniziale e al massimo una correzione geometrica, con lo stesso provider e scadenza. Nessun nuovo tentativo per errori di rete, autenticazione, limite o timeout. Nessun modello predefinito alternativo. La quota ospitata conta le richieste: 50 possono generare fino a 100 chiamate al modello per giorno UTC. Copilot CLI può riprovare internamente.',
+    'Cada solicitud permite un diseño inicial y como máximo una corrección geométrica, con el mismo proveedor y plazo. No se repiten fallos de red, autenticación, cuota ni tiempo de espera. No se sustituyen plantillas. La cuota alojada cuenta solicitudes: 50 pueden generar hasta 100 llamadas al modelo por día UTC. Copilot CLI puede reintentar internamente.',
+    'Cada solicitação permite um projeto inicial e no máximo uma correção geométrica, com o mesmo provedor e prazo. Falhas de rede, autenticação, limite e tempo não são repetidas. Sem modelo predefinido alternativo. A cota hospedada conta solicitações: 50 podem gerar até 100 chamadas ao modelo por dia UTC. O Copilot CLI pode repetir internamente.',
+  ],
+  'One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.': [
+    'Eine Anfrage kann zwei Modellaufrufe für eine Entwurfskorrektur nutzen; das Tageskontingent zählt Anfragen.',
+    'Une soumission peut utiliser deux appels au modèle pour corriger un plan ; le quota quotidien compte les soumissions.',
+    'Una richiesta può usare due chiamate al modello per correggere un progetto; la quota giornaliera conta le richieste.',
+    'Una solicitud puede usar dos llamadas al modelo para corregir un diseño; la cuota diaria cuenta solicitudes.',
+    'Uma solicitação pode usar duas chamadas ao modelo para corrigir um projeto; a cota diária conta solicitações.',
+  ],
+  'Design still invalid after one correction.': ['Entwurf nach einer Korrektur weiterhin ungültig.', 'Plan toujours invalide après une correction.', 'Progetto ancora non valido dopo una correzione.', 'Diseño aún inválido tras una corrección.', 'Projeto ainda inválido após uma correção.'],
+  'Offline templates make no model calls. Local AI uses server compute. Model and hosting charges may apply; no dollar estimate is available.': [
+    'Offline-Vorlagen rufen kein Modell auf. Lokale KI nutzt Server-Rechenleistung. Modell- und Hostingkosten sind möglich; kein Dollarpreis wird geschätzt.',
+    'Les modèles hors ligne n’appellent aucun modèle. L’IA locale utilise le serveur. Des frais de modèle et d’hébergement sont possibles ; aucun prix estimé.',
+    'I modelli offline non chiamano modelli linguistici. L’IA locale usa il server. Sono possibili costi del modello e di hosting; nessuna stima in dollari.',
+    'Las plantillas sin conexión no llaman a modelos. La IA local usa el servidor. Puede haber costes de modelo y alojamiento; no se estima un precio.',
+    'Modelos offline não chamam modelos. A IA local usa o servidor. Pode haver custos de modelo e hospedagem; sem estimativa em dólares.',
+  ],
+  'Your brief is sent through the authenticated Copilot CLI to GitHub’s model service. No agent tools are allowed. The app does not know the model’s dollar cost. Local servers and Codespaces have no application daily request quota; provider subscription quotas still apply.': [
+    'Dein Auftrag wird über die angemeldete Copilot CLI an GitHubs Modelldienst gesendet. Agentenwerkzeuge sind nicht erlaubt. Die App kennt die Dollarkosten nicht. Lokale Server und Codespaces haben kein tägliches Anfragekontingent der App; Anbieterabonnements begrenzen die Nutzung weiterhin.',
+    'Votre consigne est envoyée au service de modèles GitHub via Copilot CLI authentifié. Aucun outil d’agent n’est autorisé. Le coût en dollars est inconnu. Les serveurs locaux et Codespaces n’ont pas de quota quotidien de requêtes de l’application ; les quotas du fournisseur restent applicables.',
+    'La richiesta viene inviata al servizio modelli GitHub tramite Copilot CLI autenticato. Nessuno strumento per agenti è consentito. Il costo in dollari è sconosciuto. Server locali e Codespaces non hanno quote giornaliere dell’app; restano i limiti del provider.',
+    'Tus instrucciones se envían al servicio de modelos de GitHub mediante Copilot CLI autenticado. No se permiten herramientas de agentes. Se desconoce el coste en dólares. Servidores locales y Codespaces no tienen cuota diaria de la app; siguen los límites del proveedor.',
+    'Seu pedido é enviado ao serviço de modelos GitHub pelo Copilot CLI autenticado. Ferramentas de agentes não são permitidas. O custo em dólares é desconhecido. Servidores locais e Codespaces não têm cota diária do aplicativo; os limites do provedor continuam válidos.',
+  ],
+  'No new build was started. Simplify the brief or reduce scene size before a new submission; no further correction was attempted.': [
+    'Kein neuer Bau gestartet. Vereinfache den Auftrag oder verkleinere die Szene vor einer neuen Anfrage; keine weitere Korrektur wurde versucht.',
+    'Aucune nouvelle construction lancée. Simplifiez la consigne ou réduisez la scène avant une nouvelle soumission ; aucune autre correction tentée.',
+    'Nessuna nuova costruzione avviata. Semplifica la richiesta o riduci la scena prima di inviarla di nuovo; nessun’altra correzione tentata.',
+    'No se inició una nueva construcción. Simplifica las instrucciones o reduce la escena antes de otra solicitud; no se intentó otra corrección.',
+    'Nenhuma nova construção iniciada. Simplifique o pedido ou reduza a cena antes de nova solicitação; nenhuma outra correção foi tentada.',
+  ],
   'Choose a question above or ask in English.': ['Wähle oben eine Frage oder frage auf Englisch.', 'Choisissez une question ci-dessus ou demandez en anglais.', 'Scegli una domanda sopra o chiedi in inglese.', 'Elige una pregunta arriba o pregunta en inglés.', 'Escolha uma pergunta acima ou pergunte em inglês.'],
   'I turn your goal into tasks and coordinate the crew. A language model is optional here: our local agents follow explicit rules.': ['Ich teile dein Ziel in Aufgaben und koordiniere das Team. Ein Sprachmodell ist optional: Unsere lokalen Agenten folgen festen Regeln.', 'Je transforme votre objectif en tâches et coordonne l’équipe. Un modèle de langage est facultatif : nos agents locaux suivent des règles explicites.', 'Divido il tuo obiettivo in attività e coordino la squadra. Un modello linguistico è opzionale: i nostri agenti locali seguono regole esplicite.', 'Divido tu objetivo en tareas y coordino al equipo. Un modelo de lenguaje es opcional: nuestros agentes locales siguen reglas explícitas.', 'Divido seu objetivo em tarefas e coordeno a equipe. Um modelo de linguagem é opcional: nossos agentes locais seguem regras explícitas.'],
   'I review the task graph for missing dependencies and cycles before the build starts, and warn if the planned bricks are disconnected.': ['Ich prüfe vor dem Bau fehlende Abhängigkeiten und Zyklen und warne bei unverbundenen Steinen.', 'Avant la construction, je vérifie les dépendances manquantes et les cycles, et signale les briques déconnectées.', 'Prima di costruire controllo dipendenze mancanti e cicli e segnalo mattoncini scollegati.', 'Antes de construir reviso dependencias ausentes y ciclos y aviso si los bloques están desconectados.', 'Antes da construção verifico dependências ausentes e ciclos e aviso se os blocos estão desconectados.'],
@@ -691,6 +734,11 @@ export function translateTaskName(name: string, localTemplate: boolean, objectNa
 export function translateActivity(message: string, localTemplate = false, objectNames?: string[], nested = false): string {
   const index = languages.indexOf(language);
   if (!index) return message;
+  const corrected = /^The design is still invalid after one correction: (.*) No new build was started\. Simplify the brief or reduce scene size before a new submission; no further correction was attempted\.$/.exec(message);
+  if (corrected)
+    return `${translate('Design still invalid after one correction.')} ${corrected[1].startsWith('The design is still invalid after one correction:') ? corrected[1] : translateActivity(corrected[1], localTemplate, objectNames, true)} ${translate('No new build was started. Simplify the brief or reduce scene size before a new submission; no further correction was attempted.')}`;
+  const collision = /^Custom bricks overlap after expansion \((object \d+, brick \d+, repeat \d+ intersects object \d+, brick \d+, repeat \d+)\)\.$/.exec(message);
+  if (collision) return `${translate('Custom bricks overlap after expansion.')} (${collision[1]}).`;
   if (message.startsWith('AI mission decision:')) return message;
   const taskName = (name: string) => {
     if (localTemplate) return name.split(', ').map(translate).join(', ');

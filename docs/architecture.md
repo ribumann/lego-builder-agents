@@ -78,10 +78,14 @@ planner is deployed or that real Azure inference has been verified.
   upstream capacity guarantee. Private mode defaults to 8 total
   and 2 per provider. Local and Codespaces have no application daily-call
   quota.
-- Public Azure planning targets an atomic shared limit of 50 calls per UTC
-  day. The revised design removes the estimated-dollar reservation, price
+- Public Azure planning targets an atomic shared limit of 50 user submissions per UTC
+  day; each allows at most two same-provider requests, with one correction only
+  for a completed invalid design. Up to 100 Azure model requests can therefore
+  follow 50 submissions, without a second reservation or reset. Both attempts
+  share one slot and deadline; transport/auth/429/timeout failures are not
+  replayed. The revised design removes the estimated-dollar reservation, price
   verification, pinned model/version/region/price constraints, and six-minute
-  day-boundary blackout. A call limit is not a billing cap.
+  day-boundary blackout. A submission limit is not a billing cap.
 - The design retains managed identity, network protections, bounded
   request/response sizes, and the approved native Azure content policy.
   Consented and validated Azure image requests are implemented in source. Actual

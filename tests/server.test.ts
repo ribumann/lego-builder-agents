@@ -469,7 +469,7 @@ test('Copilot permits one invocation, continues at 100s/200s, and responds at th
   const timedOut = await command({ action: 'advance', ms: 1 });
   const response = await first;
   assert.equal(response.status, 504);
-  assert.match((await response.json() as { error: string }).error, /300 seconds.*did not retry or fall back/);
+  assert.match((await response.json() as { error: string }).error, /300 seconds.*No transport retry or fallback/);
   assert.deepEqual(timedOut.signals, [{ pid: -1000000, signal: 'SIGKILL' }], 'The hard deadline has no extra grace period');
   assert.equal((await post()).status, 429, 'An HTTP timeout does not free a live CLI slot');
   await command({ action: 'advance', ms: 2000 });
@@ -707,7 +707,7 @@ test('NDJSON timeout has bounded waiting lines and one error by 300s, ignoring l
   assert.equal(events.length, 21, 'At most 20 tiny waiting lines, then a terminal error');
   assert.deepEqual(events.slice(0, -1), Array.from({ length: 20 }, () => ({ type: 'waiting' })));
   assert.deepEqual(events.at(-1), { type: 'error',
-    error: 'Copilot took longer than 300 seconds. BrickLab did not retry or fall back.' });
+    error: 'Planning took longer than 300 seconds. No transport retry or fallback was attempted.' });
   await command({ action: 'error' });
   assert.equal((await post()).status, 429, 'A late result cannot bypass process-tree cleanup');
   await command({ action: 'complete', spec: lifecycleSpec });
@@ -752,22 +752,23 @@ test('NDJSON errors are terminal, sanitized, and retain geometry/world validatio
   ];
   for (const [index, reply] of replies.entries()) {
     const response = await post(ndjson);
-    await command({ action: 'started', count: index + 1 });
-    await command({ action: 'complete', index, spec: reply.spec });
+    await command({ action: 'started', count: index * 2 + 1 });
+    await command({ action: 'complete', index: index * 2, spec: reply.spec });
+    await command({ action: 'started', count: index * 2 + 2 });
+    await command({ action: 'complete', index: index * 2 + 1, spec: reply.spec });
     const events = streamEvents(await response.text());
     assert.deepEqual(events[0], { type: 'waiting' });
-    assert.equal(events.length, 2);
-    assert.equal(events[1].type, 'error');
-    assert.match(events[1].error, reply.match);
+    assert.deepEqual(events.map(event => event.type), ['waiting', 'correcting', 'error']);
+    assert.match(events.at(-1).error, reply.match);
   }
   const response = await post(ndjson);
-  await command({ action: 'started', count: 4 });
-  await command({ action: 'error', index: 3 });
-  await command({ action: 'close', index: 3, code: 1 });
+  await command({ action: 'started', count: 7 });
+  await command({ action: 'error', index: 6 });
+  await command({ action: 'close', index: 6, code: 1 });
   const failure = streamEvents(await response.text());
   assert.equal(failure.at(-1).type, 'error');
   assert.equal(JSON.stringify(failure).includes('private late process error'), false);
-  assert.equal((await command({ action: 'inspect' })).count, 4, 'Failures never retry');
+  assert.equal((await command({ action: 'inspect' })).count, 7, 'Transport failures never replay');
 });
 
 test('NDJSON opt-in preserves JSON authentication, validation, busy and legacy response behavior', { timeout: 10_000 }, async t => {
@@ -1011,11 +1012,13 @@ test('hosted stale-token rejection is uncounted while a separate invalid model r
   const admitted = server.azurePost({ Authorization: '' });
   await server.command({ action: 'azure-started', type: 'plan', count: 1 });
   await server.command({ action: 'azure-complete', spec: { ...lifecycleSpec, longTail: true } });
+  await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+  await server.command({ action: 'azure-complete', index: 1, spec: { ...lifecycleSpec, longTail: true } });
   const response = await admitted;
   assert.equal(response.status, 502);
-  assert.equal((await response.json() as any).error, 'Custom specification has invalid fields: longTail.');
+  assert.match((await response.json() as any).error, /still invalid after one correction: Custom specification has invalid fields: longTail/);
   state = await server.command({});
-  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 1);
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 2);
   assert.deepEqual(state.budgetState, { day: '2026-11-14', count: 1 });
   assert.equal((await (await server.get()).json() as any).publicAllowance.remaining, 49);
 });
@@ -1138,7 +1141,8 @@ test('signed distinct principals overlap on the public quota policy route with i
   assert.equal(state.azureEvents.filter((event: any) => event.type === 'reserve').length, 2, 'Auth failures reserve nothing');
   const other = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Independent signed result' } };
   await server.command({ action: 'azure-complete', index: 1, spec: other });
-  assert.deepEqual(await (await second).json(), { spec: other, calls: 2, limit: 5, source: 'azure' });
+  assert.deepEqual(await (await second).json(), { spec: other, calls: 2, limit: 5, source: 'azure',
+    designCorrection: { providerAttempts: 1, attempted: false, outcome: 'not-attempted' } });
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 1, 'Abort does not release unsettled work');
   await server.command({ action: 'azure-complete', index: 0, spec: lifecycleSpec });
   assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
@@ -1194,7 +1198,8 @@ test('private Azure routes do not apply public daily quota settings or contact q
     const response = server.azurePost();
     await server.command({ action: 'azure-started', type: 'plan', count: index + 1 });
     await server.command({ action: 'azure-complete', index, spec: lifecycleSpec });
-    assert.deepEqual(await (await response).json(), { spec: lifecycleSpec, source: 'azure' });
+    assert.deepEqual(await (await response).json(), { spec: lifecycleSpec, source: 'azure',
+      designCorrection: { providerAttempts: 1, attempted: false, outcome: 'not-attempted' } });
   }
   const state = await server.command({});
   assert.deepEqual(state.azureConfig.map((entry: any) => entry.type), ['planner']);
@@ -1273,8 +1278,81 @@ test('Azure malformed geometry is rejected with a safe exact field reason at the
   assert.match(result.error, /no automatic retry/);
   assert.doesNotMatch(result.error, /private-model-name/);
   assert.equal(result.spec, undefined);
-  assert.equal(requests, 1);
+  assert.equal(requests, 2);
+  assert.deepEqual(result.designCorrection, { providerAttempts: 2, attempted: true, outcome: 'failed' });
+  assert.match(result.error, /still invalid after one correction/);
   assert.equal((await (await server.get()).json() as any).publicAllowance.used, 1);
+});
+
+test('Azure corrects overlap and boundary designs once under one shared reservation and capacity slot', { timeout: 15_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
+    BRICKLAB_PLANNING_CONCURRENCY: '1', BRICKLAB_PROVIDER_CONCURRENCY: '1',
+  });
+  const invalid = [
+    { ...lifecycleSpec, design: { name: 'Synthetic overlap', bricks: [
+      { x: 0, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
+      { x: 1, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
+    ] } },
+    { ...lifecycleSpec, design: { name: 'Synthetic boundary', bricks: [
+      { x: 63, y: 0, z: 0, width: 2, height: 1, depth: 1, color: 'blue', part: 'frame' },
+    ] } },
+  ];
+  for (const [index, rejected] of invalid.entries()) {
+    const pending = server.azurePost(ndjson);
+    await server.command({ action: 'azure-started', type: 'plan', count: index * 2 + 1 });
+    await server.command({ action: 'azure-complete', index: index * 2, spec: rejected });
+    await server.command({ action: 'azure-started', type: 'plan', count: index * 2 + 2 });
+    const during = await server.command({});
+    assert.equal(during.azureEvents.filter((event: any) => event.type === 'reserve').length, index + 1);
+    assert.match(during.azureEvents.filter((event: any) => event.type === 'plan').at(-1).prompt,
+      index ? /occupied-extent-above-maximum/ : /overlap after expansion/);
+    assert.equal((await server.azurePost()).status, 429);
+    await server.command({ action: 'azure-complete', index: index * 2 + 1, spec: lifecycleSpec });
+    const events = streamEvents(await (await pending).text());
+    assert.deepEqual(events.map(event => event.type), ['waiting', 'correcting', 'result']);
+    assert.deepEqual(events.at(-1).designCorrection, { providerAttempts: 2, attempted: true, outcome: 'succeeded' });
+    assert.deepEqual(events.at(-1).spec, lifecycleSpec);
+  }
+  assert.equal((await (await server.get()).json() as any).publicAllowance.used, 2);
+});
+
+test('Azure correction shares the original deadline and disconnect signal, never starting a third request', { timeout: 15_000 }, async t => {
+  for (const disconnect of [false, true]) {
+    const server = await startLifecycleServer(t, 'linux', anonymousHostedEnv);
+    const response = await server.azurePost(ndjson);
+    await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+    await server.command({ action: 'advance', ms: 290_000 });
+    await server.command({ action: 'azure-complete', spec: { ...lifecycleSpec, longTail: true } });
+    await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+    if (disconnect) await response.body!.cancel();
+    else await server.command({ action: 'advance', ms: 10_000 });
+    if (!disconnect) {
+      const event = streamEvents(await response.text()).at(-1);
+      assert.match(event.error, /300 seconds/);
+      assert.deepEqual(event.designCorrection, { providerAttempts: 2, attempted: true, outcome: 'failed' });
+    }
+    await server.command({ action: 'azure-complete', index: 1, spec: lifecycleSpec });
+    const state = await server.command({});
+    assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 2);
+    assert.equal(state.azureEvents.filter((event: any) => event.type === 'reserve').length, 1);
+  }
+});
+
+test('the last daily submission can correct once without exceeding or releasing the shared boundary', { timeout: 10_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { ...anonymousHostedEnv,
+    TEST_BUDGET_STATE: JSON.stringify({ day: '2026-11-14', count: 49 }),
+  });
+  const pending = server.azurePost();
+  await server.command({ action: 'azure-started', type: 'plan', count: 1 });
+  await server.command({ action: 'azure-complete', spec: { ...lifecycleSpec, longTail: true } });
+  await server.command({ action: 'azure-started', type: 'plan', count: 2 });
+  assert.equal((await server.azurePost()).status, 429);
+  await server.command({ action: 'azure-complete', index: 1, spec: lifecycleSpec });
+  assert.equal((await pending).status, 200);
+  const state = await server.command({});
+  assert.equal(state.budgetState.count, 50);
+  assert.equal(state.azureEvents.filter((event: any) => event.type === 'plan').length, 2);
+  assert.equal((await server.azurePost()).status, 429);
 });
 
 test('Azure provider diagnostics survive JSON and NDJSON without exposing upstream bodies or retrying', { timeout: 15_000 }, async t => {
@@ -1401,7 +1479,8 @@ test('Azure reservations and requests overlap independently; cancelling one does
   assert.deepEqual(state.azureEvents.filter((event: any) => event.type === 'plan').map((event: any) => event.aborted), [true, false]);
   const independent = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: 'Second Azure result' } };
   await command({ action: 'azure-complete', index: 1, spec: independent });
-  assert.deepEqual(await (await second).json(), { spec: independent, calls: 2, limit: 5, source: 'azure' });
+  assert.deepEqual(await (await second).json(), { spec: independent, calls: 2, limit: 5, source: 'azure',
+    designCorrection: { providerAttempts: 1, attempted: false, outcome: 'not-attempted' } });
   await command({ action: 'complete', spec: lifecycleSpec });
   assert.equal((await copilot).status, 200);
   assert.equal((await (await get()).json() as any).planningCapacity.active, 1);
@@ -1491,7 +1570,8 @@ test('Azure reserves once before one provider call, shares the coordinator lock,
   const response = await pending;
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('content-type'), 'application/json');
-  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 3, limit: 5, source: 'azure' });
+  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 3, limit: 5, source: 'azure',
+    designCorrection: { providerAttempts: 1, attempted: false, outcome: 'not-attempted' } });
   const after = await (await get()).json() as any;
   assert.equal(after.calls, 0, 'Azure usage does not change the Copilot daily counter');
   const copilot = post();
@@ -1544,7 +1624,7 @@ test('Azure quota rejection fails closed before the model and never retries a re
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents.map((event: any) => event.type), ['reserve', 'reserve']);
 });
 
-test('Azure validation and model failures consume their reservation with no retry or refund', { timeout: 10_000 }, async t => {
+test('Azure validation allows one correction but model failures never replay or refund the reservation', { timeout: 10_000 }, async t => {
   const { azurePost, command } = await startLifecycleServer(t, 'linux', azureFixtureEnv);
   const specs = [
     { ...lifecycleSpec, world: 'jurassic' },
@@ -1553,19 +1633,26 @@ test('Azure validation and model failures consume their reservation with no retr
       bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } },
     null,
   ];
+  let planIndex = 0;
   for (const [index, spec] of specs.entries()) {
     const pending = azurePost(ndjson);
     const response = await pending;
     await command({ action: 'azure-started', type: 'reserve', count: index + 1 });
     await command({ action: 'azure-reserve', index, usage: { used: index + 1, limit: 5 } });
-    await command({ action: 'azure-started', type: 'plan', count: index + 1 });
-    await command(spec ? { action: 'azure-complete', index, spec } : { action: 'azure-fail', index });
+    await command({ action: 'azure-started', type: 'plan', count: planIndex + 1 });
+    await command(spec ? { action: 'azure-complete', index: planIndex, spec } : { action: 'azure-fail', index: planIndex });
+    planIndex++;
+    if (spec) {
+      await command({ action: 'azure-started', type: 'plan', count: planIndex + 1 });
+      await command({ action: 'azure-complete', index: planIndex, spec });
+      planIndex++;
+    }
     const events = streamEvents(await response.text());
-    assert.deepEqual(events.map(event => event.type), ['waiting', 'error']);
-    assert.match(events[1].error, [/wrong world/, /original custom design/, /overlap/i, /No retry/][index]);
+    assert.deepEqual(events.map(event => event.type), spec ? ['waiting', 'correcting', 'error'] : ['waiting', 'error']);
+    assert.match(events.at(-1).error, [/wrong world/, /original custom design/, /overlap/i, /No retry/][index]);
   }
   assert.deepEqual((await command({ action: 'inspect' })).azureEvents.map((event: any) => event.type),
-    Array.from({ length: 4 }, () => ['reserve', 'plan']).flat());
+    [...Array.from({ length: 3 }, () => ['reserve', 'plan', 'plan']).flat(), 'reserve', 'plan']);
 });
 
 test('Azure quota and provider share the 300s deadline, NDJSON heartbeats and safe late-result handling', { timeout: 10_000 }, async t => {
@@ -1584,7 +1671,8 @@ test('Azure quota and provider share the 300s deadline, NDJSON heartbeats and sa
   assert.equal(events.length, 21);
   assert.deepEqual(events.slice(0, -1), Array.from({ length: 20 }, () => ({ type: 'waiting' })));
   assert.deepEqual(events.at(-1), { type: 'error',
-    error: 'Azure planning took longer than 300 seconds. BrickLab did not retry or fall back.' });
+    error: 'Planning took longer than 300 seconds. No transport retry or fallback was attempted.',
+    designCorrection: { providerAttempts: 1, attempted: false, outcome: 'not-attempted' } });
   assert.equal((await azurePost()).status, 429, 'An adapter ignoring abort cannot free the slot prematurely');
   await command({ action: 'azure-complete', spec: lifecycleSpec });
   assert.equal((await azurePost({}, '{}')).status, 400);
@@ -1615,9 +1703,11 @@ test('disconnecting an Azure stream aborts the provider and retains the slot unt
   assert.equal((await azurePost()).status, 429);
   const state = await command({ action: 'inspect' });
   assert.ok(state.azureEvents.every((event: any) => event.aborted));
-  await command({ action: 'azure-complete', spec: lifecycleSpec });
+  await command({ action: 'azure-complete', spec: { ...lifecycleSpec, longTail: true } });
   assert.equal((await azurePost({}, '{}')).status, 400);
   assert.deepEqual((await command({ action: 'inspect' })).timers, []);
+  assert.equal((await command({})).azureEvents.filter((event: any) => event.type === 'plan').length, 1,
+    'A late invalid result after cancellation cannot trigger correction');
 });
 
 test('production serves WebAssembly runtime assets with module-safe MIME types', { timeout: 10_000 }, async t => {
@@ -1828,7 +1918,34 @@ test('consented Windows image planning uses one bounded job and the strict custo
   assert.equal((await server.post({}, '{}')).status, 400, 'Confirmed cleanup releases concurrency');
 });
 
-test('Windows image output, geometry and ACL failures never become a scene or leak provider content', async t => {
+test('Copilot text and images correct once only after the previous invocation has cleaned up', { timeout: 15_000 }, async t => {
+  for (const image of [false, true]) {
+    const server = await startLifecycleServer(t, image ? 'win32' : 'linux', image ? windowsImageConfig : {});
+    const response = await server.post(ndjson, image ? windowsImageBody : JSON.stringify({ world: 'space', brief: 'Synthetic sculpture' }));
+    const invalid = { ...lifecycleSpec, design: { ...lifecycleSpec.design,
+      bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } };
+    if (image) {
+      await server.command({ action: 'job-started', count: 1 });
+      await server.command({ action: 'job-complete', output: imageJobOutput(invalid) });
+      const state = await server.command({ action: 'job-started', count: 2 });
+      assert.match(state.jobEvents[1].args[1], /intersects object 1, brick 1, repeat 1/);
+      assert.deepEqual(state.jobEvents[1].image, consentedTestImage);
+      await server.command({ action: 'job-complete', index: 1, output: imageJobOutput() });
+    } else {
+      await server.command({ action: 'started', count: 1 });
+      await server.command({ action: 'complete', spec: invalid });
+      await server.command({ action: 'started', count: 2 });
+      await server.command({ action: 'complete', index: 1, spec: lifecycleSpec });
+    }
+    const events = streamEvents(await response.text());
+    assert.deepEqual(events.map(event => event.type), ['waiting', 'correcting', 'result']);
+    assert.equal(events.at(-1).calls, 1, 'Internal correction is not a new user submission');
+    assert.deepEqual(events.at(-1).spec, lifecycleSpec);
+    assert.deepEqual(events.at(-1).designCorrection, { providerAttempts: 2, attempted: true, outcome: 'succeeded' });
+  }
+});
+
+test('Windows image output, geometry and ACL failures never become a scene or leak provider content', { timeout: 15_000 }, async t => {
   const server = await startLifecycleServer(t, 'win32', windowsImageConfig);
   const invalid = [
     { ...imageJobOutput(), stdout: 'private invalid JSONL C:\\private\\image.png' },
@@ -1838,14 +1955,19 @@ test('Windows image output, geometry and ACL failures never become a scene or le
     { ...imageJobOutput(), privateAclVerified: false },
     { ...imageJobOutput(), exitCode: 1, stderr: 'private provider content' },
   ];
+  let jobIndex = 0;
   for (const [index, output] of invalid.entries()) {
     const response = server.post({}, windowsImageBody);
-    await server.command({ action: 'job-started', count: index + 1 });
-    await server.command({ action: 'job-complete', index, output });
+    await server.command({ action: 'job-started', count: jobIndex + 1 });
+    await server.command({ action: 'job-complete', index: jobIndex++, output });
+    if (index === 1 || index === 2) {
+      await server.command({ action: 'job-started', count: jobIndex + 1 });
+      await server.command({ action: 'job-complete', index: jobIndex++, output });
+    }
     const result = await response;
     assert.equal(result.status, 502);
     const body = await result.text();
-    assert.match(body, /Image planning failed/);
+    assert.match(body, index === 1 || index === 2 ? /still invalid after one correction/ : /Image planning failed/);
     assert.doesNotMatch(body, /private|data:image|tiny observatory/);
   }
 });
@@ -2016,13 +2138,14 @@ setInterval(() => {}, 1000);
 test('Compatible AI uses the protected lifecycle and never exposes server credentials', async t => {
   const calls: string[] = [];
   let reply: unknown = lifecycleSpec;
+  const replies: unknown[] = [];
   const provider = createHttpServer(async (req, res) => {
     let raw = '';
     for await (const chunk of req) raw += chunk;
     calls.push(raw);
     assert.equal(req.headers.authorization, 'Bearer fixture-secret');
     res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(reply) } }] }));
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(replies.length ? replies.shift() : reply) } }] }));
   });
   provider.listen(0, '127.0.0.1');
   await once(provider, 'listening');
@@ -2054,7 +2177,14 @@ test('Compatible AI uses the protected lifecycle and never exposes server creden
   assert.match(calls[0], /A blue sculpture/);
   reply = { ...lifecycleSpec, model: 'explorer' };
   assert.equal((await post()).status, 502);
-  assert.equal(calls.length, 2);
+  assert.equal(calls.length, 3, 'One invalid-design correction, no transport replay');
+  replies.push({ ...lifecycleSpec, design: { ...lifecycleSpec.design,
+    bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } }, lifecycleSpec);
+  const corrected = await (await post()).json() as any;
+  assert.deepEqual(corrected.spec, lifecycleSpec);
+  assert.deepEqual(corrected.designCorrection, { providerAttempts: 2, attempted: true, outcome: 'succeeded' });
+  assert.equal(calls.length, 5);
+  assert.match(calls[4], /intersects object 1, brick 1, repeat 1/);
 });
 
 test('Compatible vision forwards only a consented image when its separate opt-in is enabled', async t => {
@@ -2227,6 +2357,7 @@ test('Hosted planning rejects image and malformed image-only requests before any
 
 test('Local AI is explicit, uses the same API protections and requires custom local geometry', async t => {
   const generated: { prompt: string }[] = [];
+  const replies: unknown[] = [];
   let metadataRequests = 0;
   let remote = false;
   let reply: unknown = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
@@ -2245,7 +2376,7 @@ test('Local AI is explicit, uses the same API protections and requires custom lo
     let raw = '';
     for await (const chunk of req) raw += chunk;
     generated.push(JSON.parse(raw));
-    res.end(JSON.stringify({ done: true, response: JSON.stringify(reply) }));
+    res.end(JSON.stringify({ done: true, response: JSON.stringify(replies.length ? replies.shift() : reply) }));
   });
   provider.listen(0, '127.0.0.1');
   await once(provider, 'listening');
@@ -2277,11 +2408,18 @@ test('Local AI is explicit, uses the same API protections and requires custom lo
   const template = await post();
   assert.equal(template.status, 502);
   assert.match((await template.json() as { error: string }).error, /original custom design is required/i);
-  assert.equal(generated.length, 2, 'No retries or alternate-provider/template fallback');
+  assert.equal(generated.length, 3, 'One design correction, no alternate-provider/template fallback');
+  replies.push({ ...lifecycleSpec, world: 'jurassic', design: { ...lifecycleSpec.design,
+    bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } }, { ...lifecycleSpec, world: 'jurassic' });
+  const corrected = await (await post()).json() as any;
+  assert.deepEqual(corrected.spec, { ...lifecycleSpec, world: 'jurassic' });
+  assert.deepEqual(corrected.designCorrection, { providerAttempts: 2, attempted: true, outcome: 'succeeded' });
+  assert.equal(generated.length, 5);
+  assert.match(generated[4].prompt, /intersects object 1, brick 1, repeat 1/);
   remote = true;
   const cloudModel = await post();
   assert.equal(cloudModel.status, 502);
-  assert.equal(generated.length, 2, 'Remote metadata is rejected before sending a brief');
+  assert.equal(generated.length, 5, 'Remote metadata is rejected before sending a brief');
 });
 
 test('Local vision metadata gate sends an image only after per-request consent and verified capabilities', async t => {
@@ -2472,7 +2610,7 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const templatePlan = await post();
   assert.equal(templatePlan.status, 502);
   assert.match((await templatePlan.json() as { error: string }).error, /original custom design is required/i);
-  assert.equal((await readFile(invocationsFile, 'utf8')).trim().split('\n').length, beforeTemplate + 1, 'Template rejection does not retry or fall back');
+  assert.equal((await readFile(invocationsFile, 'utf8')).trim().split('\n').length, beforeTemplate + 2, 'At most one design correction and no template fallback');
   await writeFile(specFile, JSON.stringify({ ...custom, design: { ...custom.design,
     bricks: [custom.design.bricks[0], custom.design.bricks[0]] } }));
   const overlappingPlan = await post();

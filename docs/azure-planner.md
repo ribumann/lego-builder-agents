@@ -20,7 +20,7 @@ Set `BRICKLAB_HOSTED=1`, production serving, the exact HTTPS
 | `AZURE_STORAGE_ACCOUNT` | Storage account holding the existing shared counter |
 | `BRICKLAB_AZURE_BUDGET_CONTAINER` | Migration alias: continue the existing `daily-budget.json` blob |
 | `BRICKLAB_AZURE_USAGE_CONTAINER` | Fresh-install container for `daily-usage.json`, when no migration alias is set |
-| `BRICKLAB_AZURE_DAILY_CALLS` | Shared UTC-day call limit; default **50**, integer 1-100 |
+| `BRICKLAB_AZURE_DAILY_CALLS` | Shared UTC-day submission limit; default **50**, integer 1-100 (legacy setting name) |
 | `BRICKLAB_PLANNING_CONCURRENCY` | Hosted default **20**, integer 1-20 |
 | `BRICKLAB_PROVIDER_CONCURRENCY` | Hosted default **20**, integer 1-20, not above total |
 
@@ -29,13 +29,36 @@ identity needs Cognitive Services OpenAI User and Storage Blob Data Contributor
 on the counter container. Runtime admission needs no ARM policy/model/region
 verification or pricing-reader permission.
 
-Every valid admitted provider call increments a shared count using a Blob ETag
+Every valid admitted user planning submission increments a shared count once using a Blob ETag
 conditional write. There is no monetary ledger, estimated-cost reservation,
-per-visitor limit or midnight blackout. Failed/cancelled admitted calls remain
-counted so cancellation cannot bypass the 50-call allowance. Invalid input,
+per-visitor limit or midnight blackout. Failed/cancelled admitted submissions remain
+counted so cancellation cannot bypass the 50-submission allowance. Invalid input,
 missing consent and capacity rejection do not count. Missing/corrupt state or
 unresolved bounded CAS contention returns an explicit unavailable error before
-inference. There are no model retries or hidden fallback.
+inference. There are no transport retries or hidden fallback.
+
+A completed, parsed but invalid model design gets at most **one correction**
+from the same provider. The rejected JSON and precise validation feedback are
+sent transiently with the original instructions; they are never logged. Both
+attempts use the same held capacity slot, cancellation signal and overall
+300-second deadline (90 seconds for local AI). There is no correction after
+network/authentication/429/timeout failure or client cancellation. JSON parsing,
+incomplete responses and content filtering also fail without replay.
+The correction prompt remains capped at 32,000 bytes; a larger rejected design
+fails explicitly, without truncating or fabricating geometry.
+
+Thus **50 submissions can make up to 100 Azure model requests per UTC day**,
+not 50 provider calls. No second reservation, refund or counter reset occurs.
+This is the maximum attributable to submissions admitted that day, not a
+provider billing-window limit: in-flight work can cross UTC midnight.
+The old ledger and environment names are unchanged. Each attempt retains the
+existing response/token bounds and full geometry validation; no clipping,
+deduplication, moved bricks or template substitution is performed.
+Streaming clients receive `{"type":"correcting"}` before the second attempt.
+Azure terminal results include `designCorrection` with `providerAttempts`
+(0-2 adapter attempts, not proof that an upstream service received them),
+`attempted` and `outcome` (`not-attempted`, `succeeded` or `failed`). Only these
+fixed categories/counts are exposed, never the rejected JSON.
 
 Keep one App Service worker and one Node server process for a whole-app
 20-request upper bound: in-flight capacity is process-local, not distributed.

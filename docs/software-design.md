@@ -71,7 +71,7 @@ spec validation, and tests. The current boundaries are:
   and private temporary files.
 - Azure uses backend managed identity; hosted visitors remain anonymous. The
   last verified live planner was off. The simplified source adapter enforces a
-  shared atomic limit of 50 public calls per UTC day and accepts
+  shared atomic limit of 50 public submissions per UTC day (up to 100 model requests with one invalid-design correction per submission) and accepts
   validated images only with explicit consent. Mock checks do not establish
   deployment or live inference. It removes the estimated-dollar gate, live price verification,
   model/version/region/price pins, and six-minute day-boundary blackout while

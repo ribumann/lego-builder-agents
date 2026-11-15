@@ -96,15 +96,20 @@ export function validateCustomSpec(value) {
     return result;
   }) }));
   if (count > s.budget) throw new Error('Custom design exceeds its expanded brick budget.');
-  const occupied = new Set();
-  for (const b of canonicalObjects.flatMap(object => expandCustomBricks(object.bricks)))
-    for (let x = b.x; x < b.x + b.width; x++)
-      for (let y = b.y; y < b.y + b.height; y++)
-        for (let z = b.z; z < b.z + b.depth; z++) {
-          const key = `${x},${y},${z}`;
-          if (occupied.has(key)) throw new Error('Custom bricks overlap after expansion.');
-          occupied.add(key);
-        }
+  const occupied = new Map();
+  for (const [objectIndex, object] of canonicalObjects.entries())
+    for (const [recordIndex, record] of object.bricks.entries())
+      for (const [repeatIndex, b] of expandCustomBricks([record]).entries()) {
+        const location = `object ${objectIndex + 1}, brick ${recordIndex + 1}, repeat ${repeatIndex + 1}`;
+        for (let x = b.x; x < b.x + b.width; x++)
+          for (let y = b.y; y < b.y + b.height; y++)
+            for (let z = b.z; z < b.z + b.depth; z++) {
+              const key = `${x},${y},${z}`;
+              if (occupied.has(key))
+                throw new Error(`Custom bricks overlap after expansion (${location} intersects ${occupied.get(key)}).`);
+              occupied.set(key, location);
+            }
+      }
   return { world: s.world, model: 'custom', color: s.color, longTail: false, wideWings: false,
     budget: s.budget, design: multi ? { name: d.name.trim(), objects: canonicalObjects }
       : { name: d.name.trim(), bricks: canonicalObjects[0].bricks } };

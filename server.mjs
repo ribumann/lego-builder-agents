@@ -6,7 +6,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { timingSafeEqual, randomBytes } from 'node:crypto';
 import { isIP } from 'node:net';
-import { validateCustomSpec } from './src/custom-design.mjs';
+import { GeneratedDesignError, validateGeneratedDesign, designCorrectionPrompt, exhaustedDesignCorrection } from './generated-design.mjs';
 import { planningPrompt } from './planning-prompt.mjs';
 import { resolveSceneSize } from './src/scene-size.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
@@ -66,7 +66,7 @@ const azureUsage = azureEnabled && planningQuota.enabled ? createAzureUsageGate(
 }) : null;
 const azurePlannerStatus = azureEnabled
   ? { enabled: true, state: 'configured', authentication: hosted ? 'anonymous' : 'entra',
-    message: `Azure planning uses the server managed identity.${hosted ? ' No visitor sign-in is required. Shared daily request limits apply.' : ' Private Azure planning requires Entra sign-in.'} Only an explicit planning request sends a brief or consented image. No retries.` }
+    message: `Azure planning uses the server managed identity.${hosted ? ' No visitor sign-in is required. Shared daily submission limits apply.' : ' Private Azure planning requires Entra sign-in.'} An explicit submission makes at most two model requests: one initial design and, only if invalid, one correction. No transport retries.` }
   : { enabled: false, state: 'off', message: hosted
     ? 'Azure planning is off; only static/offline mode is available.'
     : 'Azure planning is off. Server configuration and BRICKLAB_AZURE_AI=1 are required to opt in.' };
@@ -230,9 +230,7 @@ export function extractSpec(text, provider = 'Copilot') {
   let parsed;
   try { parsed = JSON.parse(clean); }
   catch { throw new Error(`${provider} returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or explicitly choose offline templates.`); }
-  if (parsed?.model !== 'custom')
-    throw new Error(`${provider} returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.`);
-  return validateCustomSpec(parsed);
+  return validateGeneratedDesign(parsed, undefined, provider);
 }
 
 const copilotArguments = prompt => ['-p', prompt, '--output-format=json', '--stream=off',
@@ -253,12 +251,14 @@ function parseCopilotPlan(code, stdout, stderr) {
     const spec = extractSpec(readCopilotResponse(stdout));
     plannerFailure = null;
     return spec;
-  } catch (error) { throw new Error(`Could not read the Copilot plan: ${error.message}`); }
+  } catch (error) {
+    if (error instanceof GeneratedDesignError) throw error;
+    throw new Error(`Could not read the Copilot plan: ${error.message}`);
+  }
 }
 
-function askCopilot(world, brief, signal, hollowInterior, target) {
+function askCopilot(prompt, signal) {
   const workdir = resolve(root, '.agent-home');
-  const prompt = planningPrompt(world, brief, hollowInterior, target);
   let release;
   const finished = new Promise(resolvePromise => { release = resolvePromise; });
   const result = new Promise((resolvePromise, reject) => {
@@ -498,9 +498,13 @@ const server = http.createServer(async (req, res) => {
       let finished;
       let azureReservation;
       let copilotCall;
+      let providerAttempts = 0;
+      let correctionOutcome = 'not-attempted';
       const respond = (code, body) => {
         clearTimeout(heartbeat);
         if (res.destroyed || res.writableEnded) return;
+        if (azureAI || providerAttempts > 1)
+          body.designCorrection = { providerAttempts, attempted: providerAttempts > 1, outcome: correctionOutcome };
         if (streaming) res.end(JSON.stringify({ type: code === 200 ? 'result' : 'error', ...body }) + '\n');
         else send(res, code, body);
       };
@@ -508,13 +512,13 @@ const server = http.createServer(async (req, res) => {
         if (res.destroyed || controller.signal.aborted) return;
         if (copilotAI) copilotCall = ++calls;
         let spec;
-        if (localAI) spec = extractSpec(await localPlanner.plan(planningPrompt(world, brief, hollowInterior, target), {
-          image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
-        }), 'Local AI');
-        else {
-          deadline = setTimeout(() => controller.abort(Object.assign(
-            new Error(`${azureAI ? 'Azure planning' : compatibleAI ? 'Compatible AI' : 'Copilot'} took longer than 300 seconds. BrickLab did not retry or fall back.`),
-            { name: 'TimeoutError' })), 300_000);
+        const originalPrompt = planningPrompt(world, brief, hollowInterior, target);
+        let prompt = originalPrompt;
+        const timeoutSeconds = localAI ? 90 : 300;
+        deadline = setTimeout(() => controller.abort(Object.assign(
+          new Error(`Planning took longer than ${timeoutSeconds} seconds. No transport retry or fallback was attempted.`),
+          { name: 'TimeoutError' })), timeoutSeconds * 1000);
+        {
           streaming = (req.headers.accept || '').split(',').some(entry => {
             const [type, ...parameters] = entry.split(';');
             return type.trim().toLowerCase() === 'application/x-ndjson'
@@ -532,88 +536,109 @@ const server = http.createServer(async (req, res) => {
             };
             waiting();
           }
-          if (azureAI) {
-            const work = (async () => {
-              controller.signal.throwIfAborted();
-              try {
-                if (planningQuota.enabled)
-                  azureReservation = await azureUsage.reserve({ signal: controller.signal });
-              }
-              catch (error) {
+        }
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            controller.signal.throwIfAborted();
+            if (!azureAI) providerAttempts++;
+            if (providerAttempts === 2) correctionOutcome = 'failed';
+            if (localAI) spec = extractSpec(await localPlanner.plan(prompt, {
+              image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
+            }), 'Local AI');
+            else if (azureAI) {
+              const work = (async () => {
                 controller.signal.throwIfAborted();
-                const exhausted = error?.message === 'Azure daily planning limit reached.';
-                throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
-                  : 'Azure planning usage could not be reserved; no model request was sent.'),
-                { statusCode: exhausted ? 429 : 503 });
-              }
-              // A reservation that completes after cancellation must never start a late model call.
-              controller.signal.throwIfAborted();
-              const parsed = await planAzure({ prompt: planningPrompt(world, brief, hollowInterior, target), world,
-                image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
-              controller.signal.throwIfAborted();
-              if (parsed?.model !== 'custom')
-                throw new Error('Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.');
-              return validateCustomSpec(parsed);
-            })();
-            // Hold this slot until the adapter actually settles, even if it ignores abort.
-            finished = work.then(() => {}, () => {});
-            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-          } else if (compatibleAI) {
-            const work = (async () => {
-              const parsed = await compatiblePlanner.plan({ prompt: planningPrompt(world, brief, hollowInterior, target),
-                image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
-              controller.signal.throwIfAborted();
-              if (parsed?.model !== 'custom') throw new Error('Compatible AI returned a template or omitted custom geometry. No retry or template fallback was made.');
-              return validateCustomSpec(parsed);
-            })();
-            finished = work.then(() => {}, () => {});
-            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-          } else if (image || process.platform === 'win32') {
-            let cleanupUnconfirmed = false;
-            const quarantine = () => {
-              cleanupUnconfirmed = true;
-              quarantinePlanning(image ? copilotImageLockMessage
-                : 'Copilot process-tree cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
-            };
-            const work = (async () => {
-              const workdir = resolve(root, '.agent-home');
-              await mkdir(workdir, { recursive: true });
-              controller.signal.throwIfAborted();
-              let output;
-              try {
-                output = await windowsCopilotRunner.run({
-                  executable: copilotExecutable,
-                  args: copilotArguments(planningPrompt(world, brief, hollowInterior, target)),
-                  cwd: workdir, ...(image ? { image: body.image, imageConsent: body.imageConsent } : {}),
-                  signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
-                });
-              } catch (error) {
-                if (error?.cleanupConfirmed !== true) quarantine();
-                throw error;
-              }
-              if (output?.cleanupConfirmed !== true) {
-                quarantine();
-                throw new Error('Copilot process-tree cleanup could not be confirmed.');
-              }
-              controller.signal.throwIfAborted();
-              if (output.privateAclVerified !== true || !Number.isInteger(output.exitCode)
-                  || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
-                  || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
-                throw new Error('Copilot planning failed closed.');
-              return parseCopilotPlan(output.exitCode, output.stdout, output.stderr);
-            })();
-            // An ambiguous job remains charged to capacity until operator recovery;
-            // another job's eventual cleanup cannot free or unquarantine it.
-            finished = work.then(() => {}, () => cleanupUnconfirmed ? new Promise(() => {}) : undefined);
-            spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-          } else {
-            const invocation = askCopilot(world, brief, controller.signal, hollowInterior, target);
-            finished = invocation.finished;
-            spec = await invocation.result;
+                try {
+                  if (planningQuota.enabled && !azureReservation)
+                    azureReservation = await azureUsage.reserve({ signal: controller.signal });
+                }
+                catch (error) {
+                  controller.signal.throwIfAborted();
+                  const exhausted = error?.message === 'Azure daily planning limit reached.';
+                  throw Object.assign(new Error(exhausted ? 'Azure daily planning limit reached.'
+                    : 'Azure planning usage could not be reserved; no model request was sent.'),
+                  { statusCode: exhausted ? 429 : 503 });
+                }
+                // A reservation that completes after cancellation must never start a late model call.
+                controller.signal.throwIfAborted();
+                providerAttempts++;
+                if (providerAttempts === 2) correctionOutcome = 'failed';
+                const parsed = await planAzure({ prompt, world,
+                  image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
+                controller.signal.throwIfAborted();
+                return validateGeneratedDesign(parsed, world, 'Azure');
+              })();
+              // Hold this slot until the adapter actually settles, even if it ignores abort.
+              finished = work.then(() => {}, () => {});
+              spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+            } else if (compatibleAI) {
+              const work = (async () => {
+                const parsed = await compatiblePlanner.plan({ prompt,
+                  image: body.image, imageConsent: body.imageConsent, signal: controller.signal });
+                controller.signal.throwIfAborted();
+                return validateGeneratedDesign(parsed, world, 'Compatible AI');
+              })();
+              finished = work.then(() => {}, () => {});
+              spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+            } else if (image || process.platform === 'win32') {
+              let cleanupUnconfirmed = false;
+              const quarantine = () => {
+                cleanupUnconfirmed = true;
+                quarantinePlanning(image ? copilotImageLockMessage
+                  : 'Copilot process-tree cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
+              };
+              const work = (async () => {
+                const workdir = resolve(root, '.agent-home');
+                await mkdir(workdir, { recursive: true });
+                controller.signal.throwIfAborted();
+                let output;
+                try {
+                  output = await windowsCopilotRunner.run({
+                    executable: copilotExecutable,
+                    args: copilotArguments(prompt),
+                    cwd: workdir, ...(image ? { image: body.image, imageConsent: body.imageConsent } : {}),
+                    signal: controller.signal, timeoutMs: 300_000, maxOutputBytes: 1_048_576,
+                  });
+                } catch (error) {
+                  if (error?.cleanupConfirmed !== true) quarantine();
+                  throw error;
+                }
+                if (output?.cleanupConfirmed !== true) {
+                  quarantine();
+                  throw new Error('Copilot process-tree cleanup could not be confirmed.');
+                }
+                controller.signal.throwIfAborted();
+                if (output.privateAclVerified !== true || !Number.isInteger(output.exitCode)
+                    || typeof output.stdout !== 'string' || typeof output.stderr !== 'string'
+                    || Buffer.byteLength(output.stdout) + Buffer.byteLength(output.stderr) > 1_048_576)
+                  throw new Error('Copilot planning failed closed.');
+                return parseCopilotPlan(output.exitCode, output.stdout, output.stderr);
+              })();
+              // An ambiguous job remains charged to capacity until operator recovery;
+              // another job's eventual cleanup cannot free or unquarantine it.
+              finished = work.then(() => {}, () => cleanupUnconfirmed ? new Promise(() => {}) : undefined);
+              spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+            } else {
+              const invocation = askCopilot(prompt, controller.signal);
+              finished = invocation.finished;
+              spec = await invocation.result;
+            }
+            controller.signal.throwIfAborted();
+            spec = validateGeneratedDesign(spec, world);
+            if (providerAttempts === 2) correctionOutcome = 'succeeded';
+            break;
+          } catch (error) {
+            if (controller.signal.aborted || !(error instanceof GeneratedDesignError)) throw error;
+            if (attempt === 1) throw exhaustedDesignCorrection(error);
+            // A second invocation must never overlap the first one's real cleanup.
+            await Promise.race([finished, interrupted]);
+            controller.signal.throwIfAborted();
+            if (planningQuarantined) throw new Error(planningQuarantineMessage);
+            prompt = designCorrectionPrompt(originalPrompt, error);
+            if (streaming && !res.destroyed && !res.writableEnded && !res.writableNeedDrain)
+              res.write('{"type":"correcting"}\n');
           }
         }
-        controller.signal.throwIfAborted();
-        if (spec.world !== world) throw new Error('The planner chose the wrong world. No build was started.');
         respond(200, { spec, ...((azureAI && !planningQuota.enabled) || compatibleAI ? {}
           : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
         source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
@@ -625,7 +650,7 @@ const server = http.createServer(async (req, res) => {
           : azureAI && error?.statusCode === 503 ? 503 : 502,
         { error: controller.signal.reason?.name === 'TimeoutError' ? controller.signal.reason.message
           : planningQuarantined ? planningQuarantineMessage
-          : image ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
+          : image && !(error instanceof GeneratedDesignError) ? 'Image planning failed at the configured provider. Verify image support and server configuration; no image or brief content is included.'
             : safePlanningError(error),
           ...(azureAI && getAzurePlannerDiagnostic(error) ? { providerDiagnostic: getAzurePlannerDiagnostic(error) } : {}),
         });
