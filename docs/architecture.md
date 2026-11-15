@@ -104,8 +104,9 @@ operator responsibilities, not product deliverables or release blockers.
 - **MVP:** offline templates, the deterministic team and inspector, custom
   planning subject to validation, scene append, replay, local persistence, and
   the documented local/Codespaces/Azure deployment boundaries.
-- **Stretch:** improve and validate voice input; refactor existing code only
-  where required to meet MVP behavior and reliability.
+- **Stretch:** improve and validate voice input; automatic onset/silence handling
+  is not implemented and real-microphone usability is not accepted. Refactor
+  existing code only where required to meet MVP behavior and reliability.
 - **Backlog:** OpenAI-compatible custom endpoints and Ollama/local-model
   planning. Code and older setup notes may exist, but these paths are not MVP
   support commitments.

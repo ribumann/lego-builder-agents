@@ -14,7 +14,7 @@ passed manual acceptance.
 | Azure deployment | In scope, constrained | The HTTPS Front Door app endpoint is live, but its exact deployed revision is not freshly confirmed; the last recorded deployment is offline-only. Public Azure planning remains blocked until its controls and long-request behavior are verified. |
 | Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
 | Planning optimization | In integration | Capacity/concurrency changes are pending final integrated verification. No 2x speed or throughput gain is measured or promised. |
-| Voice | Stretch | Opt-in browser-local transcription exists; real-microphone accuracy and device behavior are not guaranteed. See [voice limitations](docs/voice-integration.md). |
+| Voice | Stretch | Opt-in browser-local transcription uses manual start/stop with a 30-second cap. Automatic onset/silence handling is not implemented, and real-microphone usability has not been accepted. See [voice limitations](docs/voice-integration.md) and #15. |
 | Refactoring | Stretch | Refactor only where needed for MVP correctness or reliability. |
 | Custom LLM and Ollama | Backlog | The compatible-provider and local-model adapters/setup notes are not MVP support commitments. |
 

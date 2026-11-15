@@ -83,10 +83,12 @@ Image selection does not upload an image. Planning requires explicit consent;
 the original image, including embedded metadata, may reach the selected
 provider. The currently documented hosted and Azure modes do not accept images.
 
-Voice input is an opt-in browser capability, separate from planning. The user
-reviews and applies the transcript before it changes the brief; submitting that
-brief is another explicit action. Voice quality, device support, and real
-microphone behavior are not guaranteed and remain stretch validation.
+Voice input is an opt-in browser capability, separate from planning. Recording
+starts and stops through explicit user actions, has a 30-second bound, and the
+user reviews and applies the transcript before it changes the brief; submitting
+that brief is another explicit action. Automatic onset/silence handling is not
+implemented. Real-microphone usability has not been accepted; voice quality
+and device support remain stretch validation.
 
 ## Validation and release checks
 
