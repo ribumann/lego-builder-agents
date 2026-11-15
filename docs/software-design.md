@@ -70,10 +70,10 @@ spec validation, and tests. The current boundaries are:
   image requests are a separate Windows-only opt-in with process containment
   and private temporary files.
 - Azure uses backend managed identity; hosted visitors remain anonymous. The
-  last verified live planner was off. A simplified adapter is in implementation:
-  it targets a shared atomic limit of 50 public calls per UTC day and accepts
-  validated images only with explicit consent. Its final revision and tests
-  are pending. It removes the estimated-dollar gate, live price verification,
+  last verified live planner was off. The simplified source adapter enforces a
+  shared atomic limit of 50 public calls per UTC day and accepts
+  validated images only with explicit consent. Mock checks do not establish
+  deployment or live inference. It removes the estimated-dollar gate, live price verification,
   model/version/region/price pins, and six-minute day-boundary blackout while
   retaining the approved native Azure content policy and network protections.
   The application call limit is not an invoice cap. Local and Codespaces have
@@ -85,19 +85,19 @@ spec validation, and tests. The current boundaries are:
 
 Planning is explicit, bounded, and fail-closed: input size and schema are
 checked, provider output is validated, and provider errors do not trigger a
-template fallback. The previous candidate defaults to 20 total/20 per provider
+template fallback. The backend defaults to 20 total/20 per provider
 in hosted mode and 8 total/2 per provider in private mode. It configures
 `BRICKLAB_PLANNING_CONCURRENCY` and `BRICKLAB_PROVIDER_CONCURRENCY` from 1 to
 20, keeping the provider limit no higher than total. A 20-slot hosted
 deployment requires one worker and one Node process; this is not an upstream
 capacity guarantee. The revised design retains 20 hosted in-flight requests;
-verify its exact configuration against the final revision. In the previous
-candidate, slots cover request-body reading, provider work, and cleanup; full
+verify its exact deployment configuration. Slots cover
+request-body reading, provider work, and cleanup; full
 shared capacity returns HTTP 429 rather than queuing work, with no
 application-level retry or provider fallback.
 
-Cancellation and cleanup are critical correctness properties. The prior
-candidate applies a 300-second HTTP deadline to Copilot, Azure, and compatible
+Cancellation and cleanup are critical correctness properties. The backend
+applies a 300-second HTTP deadline to Copilot, Azure, and compatible
 planning; Local AI has a separate 90-second limit. Capacity remains held until
 provider and process cleanup settle; this cannot prove remote model computation
 or billing stopped. Native Windows Copilot text/image jobs use Job containment;
@@ -117,7 +117,7 @@ throughput improvement has been measured.
 
 Image selection does not upload an image. Planning requires explicit consent;
 the original image, including embedded metadata, may reach the selected
-provider. Consented, validated Azure image support is in implementation; live
+provider. Consented, validated Azure image support is implemented in source; live
 Azure vision behavior is not verified.
 
 Voice input is an opt-in browser capability, separate from planning. Recording

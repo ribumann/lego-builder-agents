@@ -53,9 +53,29 @@ test('migrates the same legacy ledger atomically without losing calls or retaini
     '{"day":"2026-11-14","reservedMicros":2766667}'), now });
   await assert.rejects(ambiguous.reserve(), /no model request was sent/);
   assert.equal((await ambiguous.status()).available, false);
+  for (const invalid of [{ count: null, reservedMicros: 0 }, { count: 1, calls: 2 }]) {
+    await assert.rejects(createAzureUsageGate({
+      blobClient: fakeBlob(JSON.stringify({ day: '2026-11-14', ...invalid })), now,
+    }).reserve(), /no model request was sent/);
+  }
   const priorDay = fakeBlob('{"day":"2026-11-13","reservedMicros":2766667}');
   await createAzureUsageGate({ blobClient: priorDay, now }).reserve();
   assert.deepEqual(priorDay.state(), { day: '2026-11-14', count: 1 });
+});
+
+test('a count write completing across UTC midnight cannot admit uncounted inference', async () => {
+  const blob = fakeBlob('{"day":"2026-11-14","count":49}');
+  let time = new Date('2026-11-14T23:59:59Z');
+  const upload = blob.upload;
+  blob.upload = async (...args) => {
+    await upload(...args);
+    time = new Date('2026-11-15T00:00:00Z');
+  };
+  const gate = createAzureUsageGate({ blobClient: blob, now: () => time });
+  await assert.rejects(gate.reserve(), /no model request was sent/);
+  assert.deepEqual(blob.state(), { day: '2026-11-14', count: 50 });
+  assert.deepEqual(await gate.reserve(), { used: 1, limit: 50 });
+  assert.deepEqual(blob.state(), { day: '2026-11-15', count: 1 });
 });
 
 test('admits near UTC midnight and never refunds a committed cancelled call', async () => {

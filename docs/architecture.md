@@ -86,10 +86,10 @@ checks but implemented a different contract.
   day-boundary blackout. A call limit is not a billing cap.
 - The design retains managed identity, network protections, bounded
   request/response sizes, and the approved native Azure content policy.
-  Consented and validated Azure image requests are in implementation. Actual
+  Consented and validated Azure image requests are implemented in source. Actual
   attachment, live provider behavior, and final configuration need
   verification.
-- The prior candidate applies a 300-second HTTP deadline to Copilot, Azure, and
+- The backend applies a 300-second HTTP deadline to Copilot, Azure, and
   compatible-provider planning; Local AI has a separate 90-second limit. On
   timeout it aborts the provider request; capacity remains held until cleanup
   settles. Its tests cover the HTTP-to-Windows text-job timeout path, slot
@@ -125,7 +125,7 @@ remain unverified. No 2x speed or throughput increase has been measured.
 - A submitted brief is sent only after the user explicitly starts planning.
   Depending on the selected provider, it goes to GitHub, a configured local or
   compatible service, or Azure. Consented, validated Azure image planning is
-  in implementation. Image planning requires explicit consent; original
+  implemented in source. Image planning requires explicit consent; original
   image metadata is not stripped.
 - Voice transcription runs in the browser after explicit microphone consent.
   First use downloads the model from its publisher; audio and transcript are

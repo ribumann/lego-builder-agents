@@ -246,14 +246,12 @@ opt-in paid planner the additional settings are
 `BRICKLAB_AZURE_AI=1`, `AZURE_OPENAI_ENDPOINT`, `AZURE_OPENAI_DEPLOYMENT`,
 `AZURE_STORAGE_ACCOUNT`,
 `BRICKLAB_AZURE_USAGE_CONTAINER=usage` for a new deployment,
-`BRICKLAB_AZURE_CONTENT_FILTER_POLICY=bricklab-public-safe`,
 `BRICKLAB_AZURE_DAILY_CALLS=50`,
 `BRICKLAB_PLANNING_CONCURRENCY=20` and `BRICKLAB_PROVIDER_CONCURRENCY=20`.
 The Bicep parameter `azureDailyCalls` wires the global daily allowance
 into the web app while leaving `BRICKLAB_AZURE_AI=0`; use 50 for this preview.
 Changing a quota does not enable paid planning. No deployment was
-performed to validate these settings on the live app. Resource identifiers and the content-filter policy name are
-not secrets. Public visitors do not sign in; the server's managed identity
+performed to validate these settings on the live app. Public visitors do not sign in; the server's managed identity
 authenticates to model and storage APIs. No model credential
 is sent to the browser. The Entra/MSAL option remains for separately configured
 private Azure servers, not the anonymous public lab.

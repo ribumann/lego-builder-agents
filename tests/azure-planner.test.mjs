@@ -135,6 +135,16 @@ test('Azure image input requires consent and sends one supported multimodal requ
   ] }]);
 });
 
+test('late managed-identity completion after cancellation cannot start Azure transport', async () => {
+  const controller = new AbortController();
+  let requests = 0;
+  const plan = createAzurePlanner({ endpoint, deployment: 'model',
+    credential: { async getToken() { controller.abort(); return { token: 'late' }; } },
+    fetchImpl: async () => { requests++; return new Response(envelope()); } });
+  await assert.rejects(plan({ prompt: 'A cancelled plan', signal: controller.signal }), /cancelled/);
+  assert.equal(requests, 0);
+});
+
 test('Azure planner exposes sanitized distinct identity, access, quota and service failures', async () => {
   const missingIdentity = createPlanner({ endpoint, deployment: 'model',
     credential: { async getToken() { throw new Error('private token'); } } });

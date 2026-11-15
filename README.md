@@ -11,7 +11,7 @@ passed manual acceptance.
 | --- | --- | --- |
 | Local server | In scope | Offline templates need no provider. Copilot planning requires an explicit submission and separate server-side CLI setup. One earlier local candidate completed real text and consented synthetic-image requests; current-candidate manual UAT and general provider reliability are not established. |
 | Private Codespaces | In scope | Keep the forwarded port private and use the production server. Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. |
-| Azure deployment | In scope, constrained | The last verified anonymous HTTPS Front Door app is offline-only with Azure planning off. A simplified hosted planner with backend managed identity and consented images is in implementation; its final revision, tests, and live availability are not yet verified. |
+| Azure deployment | In scope, constrained | The last verified anonymous HTTPS Front Door app is offline-only with Azure planning off. The source now implements simplified shared call limits, backend managed identity and consented images; this does not establish live deployment or provider availability. |
 | Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
 | Planning optimization | In integration | Bounded shared capacity and request cleanup were tested in an earlier candidate; the revised candidate needs its own verification. No 2x speed or throughput gain is measured or promised. |
 | Voice | Stretch | Opt-in browser-local transcription uses manual start/stop with a 30-second cap. Automatic onset/silence handling is not implemented, and real-microphone usability has not been accepted. See [voice limitations](docs/voice-integration.md) and #15. |
@@ -84,12 +84,12 @@ guarantees of model throughput.
 Local servers and Codespaces have no daily request quota, even if those settings
 or the obsolete `BRICKLAB_DAILY_CALLS` are supplied. Copilot `calls` is informational
 and `limit` is null. Provider subscription quotas and compute costs still apply.
-Explicit private Azure spend-budget opt-in retains its atomic monetary
-reservation ceiling without daily request/client caps; reservations are never
-refunded on cancellation or failure. Public Azure also requires this monetary
-gate, which fails closed before inference if state, pricing, deployment or
-the actually attached blocking policy cannot be verified. Managed identity
-authenticates the server to Azure; no model credential is sent to the browser.
+There is no application monetary ledger, price lookup, per-client allowance
+or midnight blackout. Valid admitted public calls remain counted on failure or
+cancellation; invalid input and capacity rejection do not count. Existing
+legacy call counts migrate in the same Blob without resetting usage. The
+approved native Azure content filter and network protections remain.
+Managed identity authenticates the server; no model credential reaches the browser.
 The infrastructure default remains `BRICKLAB_AZURE_AI=0`; code readiness
 does not establish live deployment readiness or authorize paid activation.
 
@@ -107,7 +107,7 @@ attachment/cancellation artifacts with the operator before authorizing
 recovery. A missing parent process is not proof that descendants exited.
 There is no API unlock or automatic quarantine expiry. Restarting also resets
 the informational process-local Copilot counter, but cannot reset public Azure's
-durable quota/spend reservations.
+durable daily call count.
 
 ### Backlog: OpenAI-compatible provider (not MVP support)
 
@@ -173,8 +173,8 @@ imported model attribution is genuine.
 The separate **Azure Foundry** adapter uses a managed identity, not a personal
 Copilot credential. At the last verification the public hosted app served
 offline templates only, with paid hosted planning disabled. The revised
-planner is in implementation; real tenant/storage/policy and public-edge
-verification, final testing, and deployment remain outstanding. Azure service
+planner is implemented in source; real tenant/storage/policy and public-edge
+verification and deployment remain outstanding. Azure service
 usage can incur charges. See [Azure planner setup](docs/azure-planner.md).
 
 ## Run in a private GitHub Codespace
@@ -362,7 +362,7 @@ Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 second
 
 Private local servers and Codespaces default to **8 total planning slots and 2 per provider**. `BRICKLAB_PLANNING_CONCURRENCY` and `BRICKLAB_PROVIDER_CONCURRENCY` can set each limit from 1 to 20, with the provider limit no higher than total. A 20-slot hosted deployment requires one worker and one Node process; none of these bounds guarantees upstream throughput. Slots cover request-body reading, provider work, and cleanup. Full shared capacity returns HTTP 429 rather than queuing work, and application requests are not retried or sent to a fallback provider. Cancellation and timeout do not release a slot until cleanup is confirmed; ambiguous Copilot process cleanup locks all planning until an operator verifies before restarting.
 
-Local servers and Codespaces have **no application daily request quota**, even if the obsolete `BRICKLAB_DAILY_CALLS` setting is supplied. Copilot `calls` is informational and `limit` is null. The revised hosted Azure design targets a shared atomic limit of 50 calls per UTC day; final configuration and implementation are pending verification. It is not a billing cap. See [architecture and deployment boundaries](docs/architecture.md). Copilot service costs and quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
+Local servers and Codespaces have **no application daily request quota**, even if the obsolete `BRICKLAB_DAILY_CALLS` setting is supplied. Copilot `calls` is informational and `limit` is null. Hosted Azure uses a shared atomic limit of 50 calls per UTC day; it is not a billing cap or a claim that the source is deployed. See [architecture and deployment boundaries](docs/architecture.md). Copilot service costs and quotas depend on your subscription; the app cannot determine dollars. The post's reported $0.022 castle cost is not claimed here. Offline templates use zero model calls. Local AI uses host compute, not Copilot quota. No gated SLM is required.
 
 The estimate compares an unambiguous numeric brick target in the brief with a small study of 20 sequential Windows Copilot CLI requests on November 14, 2026, using the then-default model. Four synthetic lighthouse, dinosaur, spacecraft and garden briefs per target took: 20 bricks, 21.67–25.56 s; 100, 32.88–46.95 s; 500, 57.08–172.20 s; 2,000, 79.63–123.88 s; and 8,000, 119.91–182.94 s. Ranges shown are rounded outward; sizes between targets use the wider bracket of adjacent observations. Without a clear supported target, the estimate is unknown and displays the broad observed 20–183 s range. This is not a deadline or guarantee: conditions, prompts, models and actual generated brick counts vary, and the sample only checked schema, bounds and overlap—not connectivity, artistic quality or physical stability. No extra inference call is made for an estimate. Azure Foundry and Local AI are not calibrated by this Copilot study.
 
@@ -428,7 +428,7 @@ Architecture: `src/engine.ts` (typed specs, task graph, five-agent loop, inspect
 
 Models use stylized solid bricks, not official LEGO part geometry. Face connectivity is not a clutch, collision, stability, flight or physical safety simulation. No physical construction instructions or product compatibility are promised. Browser storage stays on the device; downloads include the brief. Clearing site data clears saves. The local rule-based application works without network access after it loads; Copilot planning requires network access. No analytics, accounts, telemetry code or public sharing is included by the app.
 
-Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The existing server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates do not accept images. Consented, validated Azure image planning is in implementation and is not yet verified or live. Local Ollama must report vision support; a compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
+Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates do not accept images. The Azure backend supports consented, validated multimodal requests; actual live vision behavior remains unverified. Local Ollama must report vision support; a compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
 
 ### Brief, images and voice
 

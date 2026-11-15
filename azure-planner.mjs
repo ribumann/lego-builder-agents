@@ -21,10 +21,12 @@ export function createAzurePlanner({ endpoint, deployment,
       throw new Error('Azure planning prompt is invalid or too large.');
     const image = validatePlanningImage(rawImage, imageConsent);
     try {
+      signal?.throwIfAborted();
       let token;
       try { token = await credential.getToken(SCOPE, { abortSignal: signal }); }
       catch { throw new AzurePlannerError('Azure managed identity is unavailable. Check the hosting identity configuration.'); }
       if (!token?.token) throw new AzurePlannerError('Azure managed identity is unavailable. Check the hosting identity configuration.');
+      signal?.throwIfAborted();
       const response = await fetchImpl(url, {
         method: 'POST',
         redirect: 'error',
