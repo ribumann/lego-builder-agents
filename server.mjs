@@ -405,7 +405,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: 'Use this Codespace port\'s exact HTTPS URL and origin.' });
     if (!sameSecret(req.headers.authorization, appAuthorization)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="BrickLab private Codespace", charset="UTF-8"');
-      return send(res, 401, { error: 'Sign in as bricklab with the temporary app password printed in the server terminal.' });
+      return send(res, 401, { error: 'Sign in as bricklab with the temporary app password shown in your private Codespace terminal (npm run codespace:connect for automated startup).' });
     }
     // Independent app authentication also protects against a visibility change after this check.
     try { await verifyPrivatePort(); }
@@ -706,6 +706,8 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'} | Local AI: ${localPlanner.status().state}`);
   if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with a shared daily request allowance' : 'static/offline only; Azure planning is off'}.`);
-  if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
+  if (codespaces && process.env.BRICKLAB_CODESPACES_STARTUP === '1' && process.send)
+    process.send({ type: 'bricklab-listening', port, password: appPassword });
+  else if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });
 for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(); vite?.close().then(() => process.exit(0)); });

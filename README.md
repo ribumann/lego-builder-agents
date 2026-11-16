@@ -197,34 +197,100 @@ demonstrate faster plans. Azure usage can incur charges. See
 
 [Create a Codespace for BrickLab](https://codespaces.new/ribumann/lego-builder-agents).
 GitHub will show the creation options and applicable usage limits or charges before you create it.
-The Codespace installs dependencies during creation. Once that finishes, run in its terminal:
+On creation and each container start, an unattended worker runs `npm ci`,
+installs **Copilot CLI 1.0.112 only if `copilot` is missing**, builds the app,
+and starts the loopback-only production server with private Codespaces and
+Copilot planning enabled. An existing CLI (including `BRICKLAB_COPILOT_BIN`)
+is checked, never replaced. Enabling planning does not send a model request.
+Installation/build run in the background, not as an interactive creation hook.
 
-```sh
-npm run build
-npm start
-```
+Allow VS Code's automatic workspace tasks **only if you trust this repository**.
+The **BrickLab Codespace** terminal task opens on folder open/reconnect, waits
+for startup, displays this server's unique temporary app password, and offers
+**GitHub Copilot CLI device login**. Confirm `y` only when you want to sign in;
+the default is to skip, preserving an existing login. This is terminal login,
+not a BrickLab browser login or VS Code Copilot extension sign-in. Complete
+GitHub's authorization yourself in your browser. Never paste device codes,
+tokens or passwords into chat. Linux may ask whether to store credentials in
+plaintext when no keychain is available; that is your decision, not automated.
 
-In the **Ports** tab, open port **4173 (BrickLab)** in a browser. Forwarded ports are private by default; keep this port private. Use the production server above rather than `npm run dev`, which can reject the forwarded hostname. Stop the Codespace when finished to avoid unnecessary usage.
+**Explicit step when automatic tasks are disabled, not offered, or no VS Code
+client is attached:** open a private Codespace terminal and run
+`npm run codespace:connect` (or **Tasks: Run Task -> BrickLab Codespace**).
+Lifecycle hooks do not provide a reliable interactive TTY; they never run login
+or print the password. VS Code's automatic-task approval cannot be bypassed.
+Closing the terminal helper does not stop the server. Reconnecting does not
+reinstall, rebuild, relogin, or rotate the password of an already-running server.
 
-The rule-based builder runs in the browser after explicitly choosing offline templates. The default cloud choice shows setup instructions until configured. By default the planning API is localhost-only, so this URL can report that server status is unavailable. For real Copilot planning through the private browser URL, use the explicit setup below. A Codespace is not itself a Copilot subscription or a Copilot CLI login.
+In **Ports**, keep **4173 (BrickLab)** **Private** (not Private to Organization),
+then open its exact HTTPS URL. GitHub authenticates access to the private port;
+BrickLab's separate browser prompt uses username **bricklab** and the temporary
+**app** password shown only in your private terminal. Never enter your GitHub
+password there. The app password rotates when the server restarts, not on
+reconnect. Do not share/record that terminal or raw logs. Stop the Codespace
+when finished to avoid unnecessary usage.
 
-### Opt in to Copilot planning in the Codespace
+Startup uses a nonblocking Linux `flock` per workspace/port (provided by
+`util-linux` in the configured Debian image). Concurrent starts serialize:
+only one worker installs/builds/serves; the kernel releases its lock on exit,
+including container shutdown. An occupied/unavailable port fails explicitly;
+no process is stopped or replaced. Build/install/server failures are not
+readiness. Use `npm run codespace:status` for the fixed phase and private
+diagnostic-log location; inspect logs locally, never share them verbatim.
+`npm run codespace:start` explicitly retries a failed worker; `connect` also
+requests startup if no worker holds the lock. A retry does not stop an existing
+process. Updates to source/dependencies require an operator-managed server
+stop/restart or Codespace stop/start; reconnect deliberately keeps it running.
 
-Run these commands **inside your own Codespace terminal**, not on the computer displaying the browser:
+State is outside the repository in a workspace/port-specific
+`~/.local/state/bricklab-*` directory (0700); session/password, status, lock and
+diagnostic files are owner-only (0600). The server transfers its password to the
+worker by local IPC, not lifecycle stdout, command arguments, or environment
+variables. The terminal checks the live authenticated server before showing
+the password; a private-port verification failure is reported separately and
+browser access stays denied. Local processes under your own user remain trusted.
 
-```sh
-npm install -g @github/copilot
-copilot login
-"${BRICKLAB_GH_BIN:-gh}" --version
-"${BRICKLAB_GH_BIN:-gh}" auth status
-"${BRICKLAB_GH_BIN:-gh}" codespace ports --codespace "$CODESPACE_NAME" --json sourcePort,visibility,browseUrl
-npm run build
-BRICKLAB_CODESPACES=1 BRICKLAB_COPILOT=1 npm start
-```
+**Applying this configuration:** existing Codespaces need a **rebuild** after
+checking out this revision to apply the lifecycle/CLI-feature configuration;
+recreation is not required. Preserve uncommitted work first. This change does
+not modify an already-running Codespace. Do not run a second manual server
+beside the worker. Plain `npm start` without these Codespaces settings remains
+the historical localhost-only mode.
 
-Follow Copilot's browser/device sign-in flow using your own Copilot-enabled account. Do not send tokens, device codes, or credentials to anyone. GitHub CLI (`gh`) must also be installed and able to inspect this Codespace's ports. The devcontainer configuration requests the latest GitHub CLI and sets `BRICKLAB_GH_BIN=/usr/bin/gh` so BrickLab and its diagnostic use the feature-installed executable even if another `gh` precedes it on `PATH`. This takes effect only after creating or rebuilding the container; preserve any uncommitted work before rebuilding. For an existing container, update the CLI separately and set `BRICKLAB_GH_BIN` to its absolute executable path in both terminals, or leave it unset to use `gh` from `PATH`. Check the actual binary and version with the commands above; the version selected on a future rebuild may differ from 2.104.0. The automatically supplied Codespace token may suffice for `gh`; that does not prove Copilot entitlement. If either CLI is unavailable or authentication fails, resolve that in the Codespace terminal before continuing; [Copilot authentication troubleshooting](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/troubleshoot-copilot-cli-auth) describes account and token precedence. Explicitly exported `GH_TOKEN`, `GITHUB_TOKEN` or `COPILOT_GITHUB_TOKEN` can override a Copilot login.
+### Copilot authentication and private access
 
-Keep port **4173** forwarded with **Private** visibility in the Ports tab (not Public or Private to Organization). Open its exact `https://CODESPACENAME-4173.app.github.dev` URL while signed in to GitHub. A second browser sign-in prompt belongs to BrickLab: use username **bricklab** and the **temporary app password printed in the server terminal**. Never use your GitHub password there. Do not share that generated app password or server logs. Restarting rotates it; a cached browser password may need to be replaced. Then choose **Change mode -> Use Copilot planning** in the app.
+An installed CLI, `gh auth`, a token, or successful login does **not** establish
+Copilot entitlement, organization policy, quota or model access. Startup and
+login make no model calls. Only an explicit **Send brief to Copilot** submission
+checks the planning path and may consume quota. Offline templates still need
+no model account. Failed or cancelled login is reported; there is no silent
+account selection/switch, credential removal, fallback plan or paid probe.
+
+[GitHub documents](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/authenticate-copilot-cli)
+`COPILOT_GITHUB_TOKEN`, then `GH_TOKEN`, then `GITHUB_TOKEN`, then saved OAuth
+login, then `gh` fallback. Explicitly exported tokens override saved login.
+Current Copilot CLI documents an exception for the automatically injected
+Codespaces `GITHUB_TOKEN`, allowing a saved login to take precedence. The helper
+does not guess which token was injected, print values, unset overrides, change
+accounts, or overwrite credentials without your explicit login confirmation.
+If login completes but planning fails, review your token overrides, account,
+subscription and policy privately. To initiate authorization later, use
+`npm run codespace:connect` or `copilot login --device-code` in your own terminal.
+
+GitHub CLI (`gh`) must independently inspect this Codespace's ports. The
+devcontainer requests the latest GitHub CLI and sets
+`BRICKLAB_GH_BIN=/usr/bin/gh`, avoiding an older CLI earlier on `PATH`.
+Its Codespaces token may suffice for port inspection, not Copilot entitlement.
+For troubleshooting, run `"${BRICKLAB_GH_BIN:-gh}" --version` and the bounded
+checks below. Resolve failures locally using
+[Copilot authentication troubleshooting](https://docs.github.com/en/copilot/how-tos/copilot-cli/set-up-copilot-cli/troubleshoot-copilot-cli-auth).
+Never make the port public to work around an authentication failure.
+
+This separation follows the
+[devcontainer lifecycle](https://containers.dev/implementors/json_reference/#lifecycle-scripts)
+and [VS Code automatic task consent](https://code.visualstudio.com/docs/debugtest/tasks#_run-behavior)
+contracts. The supported `copilot login --device-code` command was checked
+against CLI 1.0.112 help; actual browser authorization remains user-interactive.
 
 This mode supports only the production server, loopback listener, and standard `app.github.dev` HTTPS host for the current `CODESPACE_NAME` and `PORT`. It accepts either that exact Host or a loopback Host with exactly the expected `X-Forwarded-Host` and `X-Forwarded-Proto: https` for the observed proxy request shape. [Dev Tunnels can also rewrite Origin](https://github.com/microsoft/dev-tunnels/blob/main/go/tunnels/tunnel_options.go): only with that full proxy shape, the exact `http://localhost:PORT`, `https://localhost:PORT` and corresponding `127.0.0.1` origins are accepted alongside the public origin. Arbitrary origins, `null`, wrong ports and multi-value headers remain rejected. Those client-supplied headers are forgeable: they do not prove proxy identity, HTTPS, GitHub authentication, or port privacy. Neither form bypasses the independent random app password, bounded Origin and planning request-token checks, or the private-port check; no CORS is enabled. Each authenticated request checks the actual port's visibility and exact URL through `gh codespace ports` (15-second timeout; no visibility cache). Missing, public, organization-visible, unrecognized or unverifiable ports fail closed with an explanatory error. The app password prevents an unauthenticated caller from obtaining the planner token or spending calls even if visibility changes immediately after a check. Keep the password secret and use only the exact HTTPS URL; local processes that can read or use it are not isolated by the forwarding headers. Both opt-in variables are separate: `BRICKLAB_CODESPACES=1` alone does not enable model calls.
 
@@ -232,9 +298,9 @@ For a private-port verification failure, check the selected CLI's version and ru
 
 For a shareable diagnostic, leave the app running and execute **`node scripts/diagnose-codespaces.mjs` in a second Codespace terminal** (set the same `PORT` there if customized). It prints only fixed classifications and HTTP status codes. Each CLI step is limited to 15 seconds and each HTTP probe to 2 seconds. It never prompts for sign-in, changes visibility, sends app credentials or makes a planning request. GitHub API authentication, access to this Codespace's metadata, and port enumeration are tested separately: metadata success followed by a ports timeout isolates the failing command, not the exact stalled operation or its network root cause. The [GitHub CLI implementation](https://github.com/cli/cli/blob/v2.83.1/pkg/cmd/codespace/ports.go) opens a Codespace connection and tunnel to enumerate ports and also waits for a concurrent devcontainer repository lookup; the command is not just a REST visibility lookup. An API scope denial is a different result from that timeout. `private-app-guard-observed` means only that local unauthenticated probes saw the expected 401/403 boundary; it is **not live browser/proxy verification**. `unexpected-guard-check-startup-mode` means check the running server's production/Codespaces settings before investigating forwarding; bare `npm start` without `BRICKLAB_CODESPACES=1` deliberately leaves the API local-only.
 
-To investigate a browser 403 without changing the trust policy, restart with `BRICKLAB_CODESPACES_DIAGNOSTICS=1` in addition to the normal settings. The first 20 requests log only whether Host, Origin and forwarded host/protocol match the expected values, are absent, or differ (Host and Origin may also be classified as loopback); the `Forwarded` header is recorded only as present or absent. Each entry identifies navigation/API/asset and the host/origin rejection, app-auth requirement, or next private-port check, not successful authorization. No header values, URLs, credentials or cookies are logged by this diagnostic. Disable it after collecting the classifications. Share only the diagnostic JSON/lines, not the server startup log containing its temporary password. These classifications are not proof that forwarded headers are trustworthy or that a request is authenticated. The preflight includes `proxyRewrittenOrigin` (expected 401 without app credentials) and `proxyNullOrigin` (expected 403), so a server with only the earlier Host fix no longer reports all local guards passing.
+To investigate a browser 403 without changing the trust policy, restart with `BRICKLAB_CODESPACES_DIAGNOSTICS=1` in addition to the normal settings. The first 20 requests log only whether Host, Origin and forwarded host/protocol match the expected values, are absent, or differ (Host and Origin may also be classified as loopback); the `Forwarded` header is recorded only as present or absent. Each entry identifies navigation/API/asset and the host/origin rejection, app-auth requirement, or next private-port check, not successful authorization. No header values, URLs, credentials or cookies are logged by this diagnostic. Disable it after collecting the classifications. Share only the diagnostic JSON/lines, never raw startup logs (manual-start logs can contain the temporary password; automated-worker logs are private too). These classifications are not proof that forwarded headers are trustworthy or that a request is authenticated. The preflight includes `proxyRewrittenOrigin` (expected 401 without app credentials) and `proxyNullOrigin` (expected 403), so a server with only the earlier Host fix no longer reports all local guards passing.
 
-Do not make the port public to troubleshoot. If the private URL or visibility verification cannot work in your environment, use the browser's rule-based builder with the default startup above, or forward the remote server to **localhost** using VS Code desktop or `gh codespace ports forward 4173:4173 --codespace NAME` on your own computer, keep the remote port private, and run `BRICKLAB_COPILOT=1 npm start` in the Codespace **without** `BRICKLAB_CODESPACES`. Open `http://127.0.0.1:4173` locally. The separate GitHub Models Actions workflow below is another cloud option; it is not Copilot.
+Do not make the port public to troubleshoot. If private visibility verification cannot work, arrange an operator-managed stop of the automated worker/server before using a manual localhost-only server; never start a replacement beside it. Forward the remote port to **localhost** using VS Code desktop or `gh codespace ports forward 4173:4173 --codespace NAME` on your own computer, keep the remote port private, and run `BRICKLAB_COPILOT=1 npm start` in the Codespace **without** `BRICKLAB_CODESPACES`. Open `http://127.0.0.1:4173` locally. Omit `BRICKLAB_COPILOT=1` for offline-only use. The separate GitHub Models Actions workflow below is another cloud option; it is not Copilot.
 
 **Verification limitation:** automated tests use explicit CLI fixtures for private-port checks and model responses. A real Codespace, its GitHub/browser authentication and forwarding behavior have not been exercised. A reported bounded local Windows ARM64 API request at `0c0bc63` returned `source=copilot`, `model=custom` and one named lighthouse object through the real Copilot CLI. This verifies that local planning path and the named-object contract, not its geometry size/quality, Codespaces forwarding or large multi-object model generation. No infrastructure is provisioned or provider success assumed beyond the reported request. CLI/organization policies, network access, your subscription, Codespaces charges and Copilot quotas still apply; stop the app and Codespace when finished.
 

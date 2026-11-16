@@ -1,0 +1,15 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "BrickLab Codespace",
+      "type": "process",
+      "command": "node",
+      "args": ["scripts/codespaces.mjs", "connect", "--if-codespace"],
+      "options": { "cwd": "${workspaceFolder}" },
+      "runOptions": { "runOn": "folderOpen", "instanceLimit": 1 },
+      "presentation": { "reveal": "always", "focus": true, "panel": "dedicated", "echo": false },
+      "problemMatcher": []
+    }
+  ]
+}
