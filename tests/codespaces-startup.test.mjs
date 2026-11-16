@@ -77,9 +77,9 @@ test('startup installs a missing CLI, builds, persists private IPC credentials, 
   const completion = assert.rejects(running, /server-listening/);
   await state(config, 'listening');
   assert.deepEqual(calls, [
-    ['npm', 'ci', '--no-audit', '--no-fund'], ['copilot', '--version'],
+    ['npm', 'ci', '--no-audit', '--no-fund'], ['copilot', '--version', '--no-auto-update', '--disable-client-telemetry'],
     ['npm', 'install', '-g', '@github/copilot@1.0.112', '--no-audit', '--no-fund'],
-    ['copilot', '--version'], ['npm', 'run', 'build'],
+    ['copilot', '--version', '--no-auto-update', '--disable-client-telemetry'], ['npm', 'run', 'build'],
   ]);
   assert.deepEqual(JSON.parse(await readFile(join(config.state, 'session.json'), 'utf8')),
     { password: 'private-app-password', pid: 123 });
@@ -191,7 +191,7 @@ try {
   const reconnected = await probeSession(config, await state(config, 'listening'));
   assert.deepEqual(reconnected.session, first.session);
   assert.deepEqual((await readFile(events, 'utf8')).trim().split('\n').map(line => JSON.parse(line)), [
-    ['npm', 'ci', '--no-audit', '--no-fund'], ['copilot', '--version'], ['npm', 'run', 'build'],
+    ['npm', 'ci', '--no-audit', '--no-fund'], ['copilot', '--version', '--no-auto-update', '--disable-client-telemetry'], ['npm', 'run', 'build'],
   ]);
   const logs = await readFile(join(config.state, 'startup.log'), 'utf8');
   assert.doesNotMatch(logs, /Temporary app password|private-token|other-private-token/);

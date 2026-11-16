@@ -13,6 +13,7 @@ const script = fileURLToPath(import.meta.url);
 const root = fileURLToPath(new URL('../', import.meta.url));
 const exec = promisify(execFile);
 const cliVersion = '1.0.112';
+const versionArgs = ['--version', '--no-auto-update', '--disable-client-telemetry'];
 const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
 
 export function configuration(env = process.env, workspace = root, home = homedir()) {
@@ -91,14 +92,14 @@ export async function serve(config, { run = command, launch = spawn, checkPort =
     phase = 'checking-copilot-cli';
     await status('starting');
     try {
-      await run(config, config.env.BRICKLAB_COPILOT_BIN || 'copilot', ['--version'], 15_000);
+      await run(config, config.env.BRICKLAB_COPILOT_BIN || 'copilot', versionArgs, 15_000);
     } catch (error) {
       // Do not replace a broken/existing executable or a user-selected installation.
       if (error.code !== 'ENOENT' || config.env.BRICKLAB_COPILOT_BIN) throw error;
       phase = 'installing-copilot-cli';
       await status('starting');
       await run(config, 'npm', ['install', '-g', `@github/copilot@${cliVersion}`, '--no-audit', '--no-fund'], 300_000);
-      await run(config, 'copilot', ['--version'], 15_000);
+      await run(config, 'copilot', versionArgs, 15_000);
     }
     phase = 'building';
     await status('starting');
