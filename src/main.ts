@@ -490,8 +490,8 @@ function render() {
   const canRun = !!team && !['complete', 'damaged'].includes(team.status) && !planning;
   setButton('#run', !canRun);
   setButton('#step', !canRun || running);
-  setButton('#damage', status !== 'complete');
-  setButton('#repair', status !== 'damaged');
+  setButton('#damage', planning || status !== 'complete');
+  setButton('#repair', planning || status !== 'damaged');
   setButton('#export', !count);
   setButton('#plan', planning);
   setButton('#interior-view', !scene);
@@ -559,7 +559,7 @@ function render() {
     : '<p class="empty-note">CheckBot will compare the finished build with the plan, connectivity, and brick budget. Templates also check symmetry.</p>';
   $('#inspection-result').textContent = team ? `${checks.filter(c => c.pass).length}/${checks.length} ${translate('checks')}` : 'Waiting for a build';
   const replay = $<HTMLInputElement>('#replay');
-  replay.disabled = status !== 'complete' && status !== 'damaged';
+  replay.disabled = planning || (status !== 'complete' && status !== 'damaged');
   replay.max = String(Math.max(1, count));
   if (!replaying) replay.value = String(count || 1);
   if (replaying && team) $('#replay-label').textContent = `${translate('Replay:')} ${replay.value} / ${count} ${translate('placed bricks. Your saved build is unchanged.')}`;
@@ -705,9 +705,6 @@ async function makePlan(demo = false) {
   if (planning) return;
   const planningBrief = brief.value;
   const adding = !demo && $<HTMLInputElement>('input[name="scene-action"]:checked').value === 'add';
-  running = false;
-  if (team?.status === 'building') team.status = 'paused';
-  replaying = false;
   clearNotice();
   const controller = new AbortController();
   planningController = controller;
@@ -717,6 +714,9 @@ async function makePlan(demo = false) {
     if (adding && !team) throw new Error('There is no scene to add to. Choose Replace scene to start one.');
     const selectedSize = Number($<HTMLSelectElement>('#scene-size').value);
     const planningSize = mode !== 'local' ? resolveSceneSize(planningBrief, selectedSize) : undefined;
+    running = false;
+    if (team?.status === 'building') team.status = 'paused';
+    replaying = false;
     planning = true; render();
     const image = demo ? undefined : await imageInput?.take();
     controller.signal.throwIfAborted();
@@ -826,7 +826,7 @@ function restore() {
 }
 function switchWorld(next: World) {
   if (planning || next === world) return;
-  save(); running = false; replaying = false; world = next;
+  running = false; replaying = false; world = next;
   $('#app').classList.toggle('space-world', world === 'space');
   for (const id of ['jurassic', 'space']) {
     $(`#${id}`).classList.toggle('active', id === world);
@@ -1057,9 +1057,9 @@ setInterval(() => {
   save();
 }, 180);
 document.addEventListener('visibilitychange', () => {
-  if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); save(); }
+  if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); }
 });
-window.addEventListener('beforeunload', () => { planningController?.abort(); voiceInput?.cancel(); save(); });
+window.addEventListener('beforeunload', () => { planningController?.abort(); voiceInput?.cancel(); });
 window.addEventListener('pagehide', () => { planningController?.abort(); voiceInput?.cancel(); });
 restore();
 render();

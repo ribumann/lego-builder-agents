@@ -75,12 +75,14 @@ test('aborting planning leaves the current scene untouched', async ({ page }) =>
   await page.getByRole('button', { name: 'Run an offline demo' }).click();
   await page.getByRole('button', { name: 'Pause build' }).click();
   const before = await page.locator('#brick-count').textContent();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
   await page.getByRole('button', { name: 'Change mode' }).click();
   await page.getByRole('button', { name: 'Use Copilot planning' }).click();
   await page.getByRole('button', { name: 'Send brief to Copilot' }).click();
   await page.getByRole('button', { name: 'Abort planning' }).click();
   await expect(page.getByRole('alert')).toContainText('Planning aborted');
   await expect(page.locator('#brick-count')).toHaveText(before!);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
 });
 
 test('a streamed planning result uses the same single request', async ({ page }) => {
