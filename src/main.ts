@@ -1,5 +1,5 @@
 import './style.css';
-import { AGENTS, EXAMPLES, Team, allBricks, createPlan, parseBrief, restoreSnapshot, validateSpec, loadAIMission,
+import { AGENTS, EXAMPLES, Team, allBricks, createPlan, createCustomPlan, parseBrief, restoreSnapshot, loadAIMission,
   type AgentId, type Brick, type World } from './engine';
 import { Workbench } from './scene';
 import { worldExample } from './world-examples';
@@ -718,8 +718,7 @@ async function makePlan(demo = false) {
     planning = true; render();
     const image = demo ? undefined : await imageInput?.take();
     controller.signal.throwIfAborted();
-    let spec;
-    let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
+    let plan;
     const assumptions: string[] = [];
     if (mode !== 'local') {
       const planningKey = await refreshStatus();
@@ -749,18 +748,15 @@ async function makePlan(demo = false) {
         await refreshStatus();
         throw new Error(data.error || 'Planning request failed.');
       }
-      spec = validateSpec(data.spec, world);
-      if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
-      source = compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot';
+      plan = createCustomPlan(data.spec, world, assumptions, compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot');
       assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
       assumptions.push(`${translate('Approximate planning target:')} ${planningSize!.target} ${translate('bricks')}; ${translate('Selected size:')} ${selectedSize}. ${translate('A rough target, not an exact output guarantee.')}`);
     } else {
       const parsed = parseBrief(world, planningBrief);
-      spec = parsed.spec;
       assumptions.push(...parsed.assumptions);
       assumptions.push('Offline template mode reads a small vocabulary, not arbitrary language. Species, body color, long tail, wide wings, and budget are supported.');
+      plan = createPlan(parsed.spec, assumptions);
     }
-    const plan = createPlan(spec, assumptions, source);
     if (adding && team) {
       const appended = appendScene(team, plan, translate('Appended scene'), translate);
       team = appended.team;

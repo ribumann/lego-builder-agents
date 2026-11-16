@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { CUSTOM_DESIGN_PROMPT, expandCustomBricks, validateCustomSpec } from '../src/custom-design.mjs';
-import { COLORS, Team, allBricks, createPlan, restoreSnapshot, validateSpec, type Color } from '../src/engine';
+import { COLORS, Team, allBricks, createPlan, createCustomPlan, loadAIMission, restoreSnapshot, validateSpec, type Color } from '../src/engine';
 import { worldExample } from '../src/world-examples';
 import { BrickBatch, MAX_DECORATIVE_STUDS } from '../src/brick-batch';
 import * as THREE from 'three';
@@ -52,6 +52,82 @@ test('custom input rejects overlaps, out-of-bounds, unsafe values and excessive 
   assert.throws(() => validateCustomSpec(design('bad color', [{ ...brick(0, 0, 0, 1, 1, 1), color: 'url(evil)' }])), /color/);
   assert.throws(() => validateCustomSpec({ ...fixtures[0], budget: 1 }), /budget/);
   assert.throws(() => validateSpec(fixtures[0], 'jurassic'), /world/);
+});
+
+test('direct custom plans revalidate external and previously validated mutable input', () => {
+  const spec = validateSpec(fixtures[0], 'space');
+  assert.throws(() => createPlan({ ...spec, budget: 1 }), /budget/);
+  // @ts-expect-error External callers can supply an unsupported world at runtime.
+  assert.throws(() => createPlan({ ...spec, world: 'unsupported' }), /world/);
+  spec.design!.bricks![0].width = 9;
+  assert.throws(() => createPlan(spec), /dimensions/);
+  spec.design!.bricks![0].width = 3;
+  spec.design!.bricks!.push({ ...spec.design!.bricks![0] });
+  assert.throws(() => createPlan(spec), /overlap/);
+});
+
+test('planner boundary preserves validation errors before world and custom-only checks', () => {
+  const template = { world: 'space', model: 'explorer', color: 'blue', longTail: false, wideWings: false, budget: 1 };
+  assert.throws(() => createCustomPlan(template, 'space'), {
+    message: 'The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.',
+  });
+  for (const [input, world] of [
+    [null, 'space'],
+    [{ ...template, color: 'invalid' }, 'space'],
+    [template, 'jurassic'],
+    [fixtures[0], 'jurassic'],
+    [{ ...fixtures[0], budget: 1 }, 'jurassic'],
+    [design('overlap', [brick(0, 0, 0, 2, 2, 2), brick(1, 1, 1, 1, 1, 1)]), 'space'],
+    [design('bounds', [brick(63, 0, 0, 2, 1, 1)]), 'space'],
+    [design('dimensions', [brick(0, 0, 0, 9, 1, 1)]), 'jurassic'],
+  ] as const) {
+    let expected: Error | undefined;
+    try { validateSpec(input, world); } catch (error) {
+      assert.ok(error instanceof Error);
+      expected = error;
+    }
+    assert.ok(expected, 'Fixture must fail the existing validation boundary');
+    assert.throws(() => createCustomPlan(input, world), { message: expected.message });
+  }
+});
+
+test('single-pass plans preserve canonical repeated named geometry, tasks, saves and imported AI priorities', () => {
+  const input = { ...fixtures[0], budget: 100, design: { name: 'Fleet', objects: [
+    { name: 'Row', bricks: [{ ...brick(-50, 0, 0, 1, 1, 1), repeat: { count: 96, dx: 1, dy: 0, dz: 0 } }] },
+    { name: 'Beacon', bricks: fixtures[0].design.bricks.map(b => ({ ...b, z: b.z + 5 })) },
+  ] } };
+  const assumptions = ['Custom geometry proposed by Copilot.'];
+  const legacy = createPlan(validateSpec(input, 'space'), assumptions, 'copilot');
+  const plan = createCustomPlan(input, 'space', assumptions, 'copilot');
+  assert.deepEqual(plan, legacy);
+  input.design.objects[0].bricks[0].width = 9;
+  assert.deepEqual(plan, legacy, 'Canonical spec and task geometry do not alias untrusted input');
+  assert.throws(() => createCustomPlan(input, 'space'), /dimensions/);
+  const team = new Team(plan);
+  team.step(5);
+  const snapshot = JSON.parse(JSON.stringify(team.snapshot('Fleet')));
+  const restored = restoreSnapshot(snapshot);
+  assert.deepEqual(restored.team.plan, legacy);
+  assert.deepEqual([...restored.team.bricks.values()], [...team.bricks.values()]);
+  assert.throws(() => restoreSnapshot({ ...snapshot, spec: { ...snapshot.spec, budget: 1 }, source: 'invalid' }), /budget/);
+  assert.throws(() => restoreSnapshot({ ...snapshot, world: 'jurassic', source: 'invalid' }), /different world/);
+
+  const decisions = ['build', 'frame', 'detail'].map(agent => ({
+    agent, explanation: `${agent} priority`,
+    taskOrder: plan.tasks.filter(task => task.agent === agent).map(task => task.id).reverse(),
+  }));
+  const mission = { kind: 'bricklab-ai-mission', version: 1, brief: 'Fleet', model: 'fixture-model', spec: plan.spec, decisions };
+  const imported = loadAIMission(mission);
+  assert.deepEqual(imported.team.plan.spec, plan.spec);
+  assert.equal(imported.team.plan.source, 'github-models');
+  assert.deepEqual(imported.team.plan.assumptions, [
+    'Loaded AI mission attributed to fixture-model. Imported files are not proof that a model ran.',
+  ]);
+  assert.deepEqual(imported.team.plan.tasks, [...plan.tasks].sort((a, b) => {
+    const order = [...decisions[1].taskOrder, ...decisions[2].taskOrder];
+    return order.indexOf(a.id) - order.indexOf(b.id);
+  }));
+  assert.throws(() => loadAIMission({ ...mission, spec: { ...plan.spec, budget: 1 } }), /budget/);
 });
 
 test('invalid custom metadata reports only failed field names without coercion or output values', () => {
@@ -219,7 +295,9 @@ test('advanced 262144 occupied-cell limit accepts the boundary and rejects one e
   const expanded = expandCustomBricks(validated.design!.bricks!);
   assert.equal(expanded.length, 512);
   assert.equal(expanded.reduce((n, b) => n + b.width * b.height * b.depth, 0), 262144);
+  assert.deepEqual(createCustomPlan(spec, 'space'), createPlan(validated));
   assert.throws(() => validateCustomSpec({ ...spec, design: { ...spec.design, bricks: [...rows, brick(32, 0, -32, 1, 1, 1)] } }), /262144/);
+  assert.throws(() => createCustomPlan({ ...spec, design: { ...spec.design, bricks: [...rows, brick(32, 0, -32, 1, 1, 1)] } }, 'space'), /262144/);
 });
 
 for (const world of ['jurassic', 'space'] as const) test(`${world} example builds, inspects objects, repairs and restores`, () => {
