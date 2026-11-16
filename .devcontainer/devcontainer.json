@@ -1,6 +1,14 @@
 {
   "name": "BrickLab",
   "image": "mcr.microsoft.com/devcontainers/javascript-node:22-bookworm",
+  "features": {
+    "ghcr.io/devcontainers/features/github-cli:1.1.3": {
+      "version": "latest"
+    }
+  },
+  "containerEnv": {
+    "BRICKLAB_GH_BIN": "/usr/bin/gh"
+  },
   "postCreateCommand": "npm ci",
   "waitFor": "postCreateCommand",
   "forwardPorts": [4173],

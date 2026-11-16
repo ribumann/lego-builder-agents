@@ -2,19 +2,27 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { diagnoseCodespaces } from '../scripts/diagnose-codespaces.mjs';
 
 const env = { CODESPACES: 'true', CODESPACE_NAME: 'fixture-space', PORT: '4173', GH_DEBUG: 'api' };
 const origin = 'https://fixture-space-4173.app.github.dev';
 const ports = [{ sourcePort: 4173, visibility: 'private', browseUrl: origin }];
-const guardedProbe = async (_port, headers) => headers.Host !== new URL(origin).host
-  || (headers.Origin && headers.Origin !== origin) ? 403 : 401;
+const guardedProbe = async (_port, headers) => {
+  const acceptedHost = headers.Host === new URL(origin).host
+    || (headers.Host === '127.0.0.1:4173' && headers['X-Forwarded-Host'] === new URL(origin).host
+      && headers['X-Forwarded-Proto'] === 'https');
+  return !acceptedHost || (headers.Origin && headers.Origin !== origin) ? 403 : 401;
+};
 const run = async () => ({ stdout: JSON.stringify(ports) });
 
 test('Codespace preflight reports private visibility and local guards independently of live browser success', async () => {
   const report = await diagnoseCodespaces({ env, run, httpProbe: guardedProbe });
   assert.equal(report.ports, 'verified-private');
   assert.equal(report.server, 'private-app-guard-observed');
+  assert.equal(report.http.proxyShape, 401);
+  assert.equal(report.http.proxyForeignOrigin, 403);
 });
 
 test('Codespace preflight separates metadata authorization from tunnel inspection and does not expose secrets', async () => {
@@ -68,6 +76,20 @@ test('Codespace preflight refuses invalid context before making external request
   for (const invalid of [{ CODESPACES: 'false' }, { CODESPACE_NAME: '../unsafe' }, { PORT: '0' }]) {
     const report = await diagnoseCodespaces({ env: { ...env, ...invalid }, run: () => assert.fail('No command allowed') });
     assert.equal(report.context, 'run-inside-codespace-with-valid-port');
+  }
+});
+
+test('Codespace preflight uses the configured CLI for every check and rejects relative paths', async () => {
+  const executable = join(tmpdir(), 'fixture-gh');
+  const seen = [];
+  const report = await diagnoseCodespaces({ env: { ...env, BRICKLAB_GH_BIN: executable }, httpProbe: guardedProbe,
+    run: async (file, args) => { seen.push(file); return { stdout: args[0] === 'codespace' ? JSON.stringify(ports) : '' }; } });
+  assert.equal(report.ports, 'verified-private');
+  assert.deepEqual(seen, [executable, executable, executable]);
+  for (const invalid of ['', 'gh', 'relative/gh', join(tmpdir(), 'gh.cmd')]) {
+    const result = await diagnoseCodespaces({ env: { ...env, BRICKLAB_GH_BIN: invalid },
+      run: () => assert.fail('No command allowed') });
+    assert.equal(result.context, 'invalid-github-cli-path');
   }
 });
 
