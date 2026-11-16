@@ -220,10 +220,20 @@ export function validateSpec(value: unknown, world: World): Spec {
 }
 
 export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan['source'] = 'local'): Plan {
+  return buildPlan(spec.model === 'custom' ? validateCustomSpec(spec) : spec, assumptions, source);
+}
+
+export function createCustomPlan(value: unknown, world: World, assumptions: string[] = [], source: Plan['source'] = 'local'): Plan {
+  const spec = validateSpec(value, world);
+  if (spec.model !== 'custom') throw new Error('The planner returned a template instead of custom geometry. No new build, retry or template fallback was made.');
+  return buildPlan(spec, assumptions, source);
+}
+
+// Custom geometry must be validated synchronously within this module.
+function buildPlan(spec: Spec, assumptions: string[], source: Plan['source']): Plan {
   if (spec.model === 'custom') {
-    const canonical = validateCustomSpec(spec);
     const tasks: BuildTask[] = [];
-    const design = canonical.design!;
+    const design = spec.design!;
     const multi = !!design.objects;
     const objects = design.objects ?? [{ name: design.name, bricks: design.bricks! }];
     for (const [index, object] of objects.entries()) {
@@ -274,7 +284,7 @@ export function createPlan(spec: Spec, assumptions: string[] = [], source: Plan[
         }
       }
     }
-    return { spec: canonical, tasks, assumptions, source };
+    return { spec, tasks, assumptions, source };
   }
   const voxels = new Map<string, Brick>();
   const main = COLORS[spec.color];
@@ -619,7 +629,7 @@ export function restoreSnapshot(value: unknown): { team: Team; prompt: string } 
   if (!Array.isArray(assumptions) || assumptions.length > 256
       || assumptions.some(text => typeof text !== 'string' || text.length > 1200))
     throw new Error('Saved plan assumptions exceed supported limits.');
-  const plan = createPlan(spec, assumptions, source);
+  const plan = buildPlan(spec, assumptions, source);
   if (s.taskOrder !== undefined) {
     const order = compatibleTaskOrder(plan.tasks, s.taskOrder, spec.model === 'custom');
     if (!order) throw new Error('Saved task priority order is invalid.');
@@ -651,7 +661,7 @@ export function loadAIMission(value: unknown): { team: Team; prompt: string } {
   if (!inputSpec || (inputSpec.world !== 'space' && inputSpec.world !== 'jurassic'))
     throw new Error('AI mission has no supported world.');
   const spec = validateSpec(inputSpec, inputSpec.world);
-  const plan = createPlan(spec, [`Loaded AI mission attributed to ${mission.model}. Imported files are not proof that a model ran.`], 'github-models');
+  const plan = buildPlan(spec, [`Loaded AI mission attributed to ${mission.model}. Imported files are not proof that a model ran.`], 'github-models');
   const decisions = new Map<ModelAgentId, AgentDecision>();
   for (const raw of mission.decisions) {
     if (!raw || typeof raw !== 'object') throw new Error('Agent decision is invalid.');
