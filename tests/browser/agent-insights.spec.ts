@@ -25,6 +25,7 @@ test('extended insights are optional, read-only and show actual construction and
     name: 'insights.json', mimeType: 'application/json',
     buffer: Buffer.from(JSON.stringify(team.snapshot(brief))),
   });
+
   await expect(panel.locator('tbody tr')).toHaveCount(5);
   await expect(panel.locator('dd').nth(0)).toHaveText(brief);
   await expect(panel.locator('img')).toHaveCount(0);
@@ -71,4 +72,52 @@ test('extended insights are optional, read-only and show actual construction and
     expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
   }
   expect(requests).toBe(0);
+});
+
+test('a substantial custom design exposes real staged jobs through build, replay and repair', async ({ page }) => {
+  test.setTimeout(90_000);
+  const team = new Team(createPlan(validateSpec({
+    world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 200,
+    design: { name: 'Staged fixture', bricks: Array.from({ length: 4 }, (_, z) => ({
+      x: -25, y: 0, z, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame',
+      repeat: { count: 50, dx: 1, dy: 0, dz: 0 },
+    })) },
+  }, 'jurassic')));
+  await page.goto('/');
+  await page.locator('#import-file').setInputFiles({
+    name: 'staged.json', mimeType: 'application/json',
+    buffer: Buffer.from(JSON.stringify(team.snapshot('Staged fixture'))),
+  });
+  await page.locator('#tab-tasks').focus();
+  await page.keyboard.press('Enter');
+  const tasks = page.locator('#task-list .task');
+  await expect(tasks).toHaveCount(8);
+  await expect(tasks.first()).toContainText('Structure · 1/4');
+  await expect(tasks.nth(1)).toContainText('Waits for: Structure · 1/4');
+  await expect(tasks.nth(4)).toContainText('Waits for: Structure · 4/4');
+  for (const language of ['en', 'de', 'fr', 'it', 'es', 'pt']) {
+    await page.locator('#language').selectOption(language);
+    await expect(tasks.first()).toContainText('1/4');
+    await expect(tasks.nth(4)).toContainText('1/4');
+    if (language !== 'en') await expect(tasks.nth(4)).not.toContainText('Support assembly & details');
+  }
+  await page.locator('#language').selectOption('en');
+  await page.setViewportSize({ width: 390, height: 844 });
+  await expect(tasks.first()).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth)).toBeLessThanOrEqual(390);
+  await page.locator('#speed').click();
+  await page.locator('#speed').click();
+  await page.locator('#run').click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 30_000 });
+  await expect(page.locator('#task-list .task.done')).toHaveCount(8);
+  await page.locator('#replay').fill('20');
+  await expect(page.locator('#replay-label')).toContainText('20 / 200');
+  await page.locator('#live-view').click();
+  await page.locator('#damage').click();
+  await expect(page.locator('#brick-count')).toContainText('133 / 200');
+  await page.locator('#repair').click();
+  await expect(page.locator('#stage-status')).toContainText('Mission complete', { timeout: 30_000 });
+  await page.reload();
+  await page.locator('#tab-tasks').click();
+  await expect(page.locator('#task-list .task.done')).toHaveCount(8);
 });

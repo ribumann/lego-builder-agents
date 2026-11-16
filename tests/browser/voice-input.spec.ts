@@ -1,4 +1,5 @@
 import { test, expect, type Page } from '@playwright/test';
+import type { VoiceProgress } from '../../src/voice-input';
 
 type VoiceCalls = { microphone: number; tracksStopped: number; workers: number };
 
@@ -7,22 +8,26 @@ declare global {
     __voiceCalls: VoiceCalls;
     __mockTranscript: string;
     __denyMicrophone: boolean;
+    __holdTranscription: boolean;
+    __voiceProgress: (progress: VoiceProgress) => void;
+    __finishVoice: () => void;
   }
 }
 
-async function prepareVoicePage(page: Page, open = true) {
+async function prepareVoicePage(page: Page, open = true, hosted = false) {
   const modelRequests: string[] = [];
   const planRequests: string[] = [];
   page.on('request', request => {
     const url = new URL(request.url());
     if (url.hostname.includes('huggingface.co') || url.hostname.endsWith('hf.co')) modelRequests.push(url.href);
-    if (url.pathname === '/api/plan') planRequests.push(url.href);
+    if (url.pathname === '/api/plan' || url.pathname === '/api/azure-plan') planRequests.push(url.href);
   });
   await page.addInitScript(() => {
     const calls: VoiceCalls = { microphone: 0, tracksStopped: 0, workers: 0 };
     Object.defineProperty(window, '__voiceCalls', { configurable: true, value: calls });
     window.__mockTranscript = 'A blue dinosaur with a gold crest';
     window.__denyMicrophone = false;
+    window.__holdTranscription = false;
     Object.defineProperty(navigator, 'mediaDevices', {
       configurable: true,
       value: {
@@ -61,18 +66,24 @@ async function prepareVoicePage(page: Page, open = true) {
     Object.defineProperty(window, 'AudioContext', { configurable: true, writable: true, value: MockAudioContext });
     Object.defineProperty(window, 'OfflineAudioContext', { configurable: true, writable: true, value: MockOfflineAudioContext });
     class MockWorker {
-      onmessage: ((event: MessageEvent<{ text: string }>) => void) | null = null;
+      onmessage: ((event: MessageEvent<{ text?: string; progress?: VoiceProgress }>) => void) | null = null;
       onerror: (() => void) | null = null;
       constructor(_url: URL, _options: WorkerOptions) {}
       postMessage() {
         calls.workers++;
-        setTimeout(() => this.onmessage?.({ data: { text: window.__mockTranscript } } as MessageEvent<{ text: string }>), 0);
+        window.__voiceProgress = progress => this.onmessage?.({ data: { progress } } as MessageEvent<{ progress: VoiceProgress }>);
+        window.__finishVoice = () => this.onmessage?.({ data: { text: window.__mockTranscript } } as MessageEvent<{ text: string }>);
+        if (!window.__holdTranscription) setTimeout(window.__finishVoice, 0);
       }
       terminate() {}
     }
     Object.defineProperty(window, 'Worker', { configurable: true, writable: true, value: MockWorker });
   });
-  await page.route('**/api/status', route => route.fulfill({ json: {
+  await page.route('**/api/status', route => route.fulfill({ json: hosted ? {
+    hosted: true, azureImages: true, sessionKey: 'voice-fixture',
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+    publicAllowance: { available: true, day: '2026-04-04', used: 1, limit: 50, remaining: 49 },
+  } : {
     copilot: true, sessionKey: 'voice-fixture', planner: { state: 'ready', message: 'Ready' },
   } }));
   await page.goto('/');
@@ -176,6 +187,66 @@ test('discloses voice processing before permission and keeps transcript separate
   await expect(page.locator('#voice-transcript')).toHaveValue('A blue dinosaur with a gold crest');
 });
 
+test('shows localized model-file progress and honest indeterminate local transcription without auto-applying', async ({ page }) => {
+  const { modelRequests, planRequests } = await prepareVoicePage(page);
+  await page.evaluate(() => { window.__holdTranscription = true; });
+  await page.locator('#brief').fill('Keep my typed brief');
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await page.locator('#voice-start').click();
+  await expect(page.locator('#voice-status')).toContainText('Recording');
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-status')).toContainText('Loading the speech model');
+  await expect(page.getByRole('progressbar', { name: 'Loading the speech model on this device' })).toBeVisible();
+  await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+  await expect(page.locator('#voice-cancel')).toBeEnabled();
+  await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 25, total: 100 }));
+  await expect(page.locator('#voice-progress')).toHaveAttribute('value', '0.25');
+  await expect(page.locator('#voice-progress-value')).toHaveText('25%');
+  await expect(page.locator('#voice-progress-help')).toContainText('current model file, not the whole transcription');
+  for (const [language, download, transcribing] of [
+    ['en', 'Downloading a speech model file', 'Transcribing on this device'],
+    ['de', 'Eine Sprachmodelldatei wird heruntergeladen', 'Transkription auf diesem Gerät'],
+    ['fr', 'Téléchargement d’un fichier du modèle vocal', 'Transcription sur cet appareil'],
+    ['it', 'Download di un file del modello vocale', 'Trascrizione su questo dispositivo'],
+    ['es', 'Descargando un archivo del modelo de voz', 'Transcribiendo en este dispositivo'],
+    ['pt', 'Baixando um arquivo do modelo de voz', 'Transcrevendo neste dispositivo'],
+  ]) {
+    await page.locator('#language').selectOption(language);
+    await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 50, total: 100 }));
+    await expect(page.locator('#voice-status')).toHaveText(download);
+    await page.evaluate(() => window.__voiceProgress({ stage: 'transcribing' }));
+    await expect(page.locator('#voice-status')).toHaveText(transcribing);
+    await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+    await expect(page.locator('#voice-progress-value')).toBeEmpty();
+  }
+  await page.evaluate(() => window.__voiceProgress({ stage: 'downloading', loaded: 10, total: 0 }));
+  await expect(page.locator('#voice-progress')).not.toHaveAttribute('value');
+  await page.evaluate(() => window.__finishVoice());
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await expect(page.locator('#voice-transcript')).toHaveValue('A blue dinosaur with a gold crest');
+  await expect(page.locator('#brief')).toHaveValue('Keep my typed brief');
+  await page.locator('#voice-apply').click();
+  await expect(page.locator('#brief')).toHaveValue('A blue dinosaur with a gold crest');
+  expect(modelRequests).toEqual([]);
+  expect(planRequests).toEqual([]);
+});
+
+test('cancelling model loading removes progress and ignores late worker activity', async ({ page }) => {
+  await prepareVoicePage(page);
+  await page.evaluate(() => { window.__holdTranscription = true; });
+  await page.locator('#voice-start').click();
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-activity')).toBeVisible();
+  await page.locator('#voice-cancel').click();
+  await page.evaluate(() => {
+    window.__voiceProgress({ stage: 'downloading', loaded: 100, total: 100 });
+    window.__finishVoice();
+  });
+  await expect(page.locator('#voice-activity')).toBeHidden();
+  await expect(page.locator('#voice-status')).toHaveText('Ready for voice input');
+  await expect(page.locator('#voice-transcript')).toHaveValue('');
+});
+
 test('preserves transcript edits made while recording and requires review before replacing them', async ({ page }) => {
   await prepareVoicePage(page);
   await page.locator('#voice-start').click();
@@ -211,6 +282,98 @@ test('never replaces an existing transcript without explicit action and can disc
   await expect(page.locator('#voice-pending')).toBeHidden();
   await expect(page.locator('#voice-transcript')).toHaveValue('My edited transcript');
   await expect(page.locator('#voice-start')).toBeEnabled();
+});
+
+test('hosted planning sends only the reviewed voice brief and consented image to the anonymous Azure route', async ({ page }) => {
+  const { modelRequests, planRequests } = await prepareVoicePage(page, false, true);
+  let submitted: Record<string, unknown> | undefined;
+  let requestHeaders: Record<string, string> | undefined;
+  await page.route('**/api/azure-plan', route => {
+    submitted = route.request().postDataJSON() as Record<string, unknown>;
+    requestHeaders = route.request().headers();
+    return new Promise<void>(resolve => setTimeout(() => resolve(), 300)).then(() =>
+      route.fulfill({ status: 400, json: { error: 'Mocked hosted validation response.' } }));
+  });
+
+  await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  await expect(page.locator('#brief-help')).toContainText('review and apply');
+  await expect(page.locator('#brief-help')).toContainText('image consent');
+  await expect(page.locator('#brief-help')).toContainText('49 of 50');
+  await page.locator('#settings').click();
+  await expect(page.locator('#dialog-body')).not.toContainText('GitHub Copilot cloud planner');
+  await expect(page.locator('#dialog-body')).not.toContainText('Local AI (Ollama)');
+  await expect(page.locator('#dialog-body')).toContainText('No visitor sign-in is required');
+  await page.locator('#close-dialog').click();
+
+  const voiceCopy = [
+    'Only text you review and apply to the brief',
+    'Audio und Transkript bleiben auf diesem Gerät',
+    'L’audio et la transcription restent sur cet appareil',
+    'L’audio e la trascrizione restano su questo dispositivo',
+    'El audio y la transcripción permanecen en este dispositivo',
+    'O áudio e a transcrição ficam neste dispositivo',
+  ];
+  for (const [index, language] of ['en', 'de', 'fr', 'it', 'es', 'pt'].entries()) {
+    await page.locator('#language').selectOption(language);
+    await page.locator('#voice-entry').click();
+    await expect(page.locator('#voice-permission')).toContainText(voiceCopy[index]);
+    await page.locator('#voice-cancel').click();
+  }
+  await page.locator('#language').selectOption('en');
+  await expect(page.locator('#voice-entry')).toHaveAccessibleName(/\S/);
+  expect(await page.evaluate(() => window.__voiceCalls.microphone)).toBe(0);
+
+  await page.locator('#voice-entry').click();
+  await expect(page.locator('#voice-permission')).toContainText('Only text you review and apply');
+  await page.locator('#voice-start').click();
+  await expect(page.locator('#voice-status')).toContainText('Recording');
+  await page.locator('#voice-stop').click();
+  await expect(page.locator('#voice-transcript')).toHaveValue('A blue dinosaur with a gold crest');
+  await expect(page.locator('#brief')).not.toHaveValue('A blue dinosaur with a gold crest');
+  expect(planRequests).toEqual([]);
+  await page.locator('#voice-transcript').fill('Build a blue dinosaur with a gold crest.');
+  await page.locator('#voice-apply').click();
+  await expect(page.locator('#brief')).toHaveValue('Build a blue dinosaur with a gold crest.');
+  expect(planRequests).toEqual([]);
+
+  await page.locator('#media-privacy > summary').click();
+  await page.locator('#image-file').setInputFiles('tests/fixtures/vision-fixture.jpg');
+  await expect(page.locator('#image-destination')).toContainText('Azure Foundry');
+  await expect(page.locator('#image-disclosure')).toContainText('metadata');
+  const consentCopy = [
+    'I consent to send this image',
+    'Ich stimme zu, dieses Bild',
+    'J’accepte d’envoyer cette image',
+    'Acconsento a inviare immagine',
+    'Acepto enviar esta imagen',
+    'Concordo em enviar esta imagem',
+  ];
+  for (const [index, language] of ['en', 'de', 'fr', 'it', 'es', 'pt'].entries()) {
+    await page.locator('#language').selectOption(language);
+    await expect(page.locator('#image-destination')).toContainText('Azure Foundry');
+    await expect(page.locator('#image-consent-text')).toContainText(consentCopy[index]);
+  }
+  await page.locator('#language').selectOption('en');
+  await page.locator('#plan').click();
+  await expect(page.locator('#notice')).toContainText('Consent');
+  expect(planRequests).toEqual([]);
+  await page.locator('#image-consent').check();
+  await page.locator('#plan').click();
+  await expect(page.locator('#planning-description')).toHaveText('One Azure Foundry request is running. It may take up to 300 seconds.');
+  await expect(page.locator('#planning-description')).not.toContainText('estimate');
+  await expect(page.locator('#notice')).toContainText('Mocked hosted validation response');
+  expect(planRequests).toHaveLength(1);
+  expect(submitted).toMatchObject({
+    world: 'jurassic',
+    brief: 'Build a blue dinosaur with a gold crest.',
+    imageConsent: true,
+    image: { mimeType: 'image/jpeg' },
+  });
+  expect((submitted!.image as { data: string }).data.length).toBeGreaterThan(0);
+  expect(submitted).not.toHaveProperty('audio');
+  expect(requestHeaders?.['x-bricklab-key']).toBe('voice-fixture');
+  expect(requestHeaders?.authorization).toBeUndefined();
+  expect(modelRequests).toEqual([]);
 });
 
 test('does not silently truncate overlong transcripts or apply them to the brief', async ({ page }) => {

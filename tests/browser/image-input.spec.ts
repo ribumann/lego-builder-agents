@@ -89,7 +89,7 @@ test('hosted and offline routes do not send selected images', async ({ page }) =
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
@@ -99,6 +99,36 @@ test('hosted and offline routes do not send selected images', async ({ page }) =
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
+});
+
+test('hosted offline mode rejects selected images even when Azure images are enabled', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    hosted: true, azureImages: true, sessionKey: 'fixture',
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+  } }));
+  await page.route('**/api/*plan', route => { requests++; return route.abort(); });
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#plan').click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  expect(saved).not.toBeNull();
+  await page.locator('#settings').click();
+  await page.locator('#choose-azure').click();
+  await page.locator('#media-privacy > summary').click();
+  await page.locator('#image-file').setInputFiles(image);
+  await expect(page.locator('#image-destination')).toContainText('Azure');
+  await page.locator('#image-consent').check();
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await expect(page.locator('#image-consent')).not.toBeChecked();
+  await expect(page.locator('#image-consent')).toBeDisabled();
+  await expect(page.locator('#image-destination')).not.toContainText('Azure');
+  await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
+  await expect(page.locator('#notice')).toContainText('unavailable');
+  expect(requests).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
 });
 
 test('Copilot image planning stays unavailable without verified process containment', async ({ page }) => {
@@ -111,7 +141,7 @@ test('Copilot image planning stays unavailable without verified process containm
   await page.locator('#media-privacy > summary').click();
   await expect(page.locator('#image-destination')).toContainText('unavailable');
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
@@ -167,13 +197,21 @@ test('a stale Windows image capability cannot enable hosted image planning', asy
   } }));
   await page.route('**/api/*plan', route => { requests++; return route.abort(); });
   await page.goto('/');
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await page.locator('#plan').click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  expect(saved).not.toBeNull();
+  await page.locator('#settings').click();
+  await page.locator('#choose-azure').click();
   await page.locator('#media-privacy > summary').click();
-  await expect(page.locator('#image-destination')).toContainText('Hosted image planning is unavailable');
+  await expect(page.locator('#image-destination')).toContainText('Azure image planning is unavailable on this server.');
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#plan').click();
   await expect(page.locator('#notice')).toContainText('unavailable');
   expect(requests).toBe(0);
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
 });
 
 test('Copilot image planning has no text-only timing estimate and abort preserves the scene', async ({ page }) => {
@@ -215,13 +253,18 @@ test('image disclosure and destination change with language and planner', async 
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
-  await page.locator('#image-consent').check();
+  await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#language').selectOption('de');
   await expect(page.locator('#image-disclosure')).toContainText('Metadaten');
   await page.locator('#settings').click();
   await page.locator('#choose-local-ai').click();
   await expect(page.locator('#image-destination')).toContainText('Ollama');
   await expect(page.locator('#image-consent')).not.toBeChecked();
+  await page.locator('#image-consent').check();
+  await page.locator('#settings').click();
+  await page.locator('#choose-local').click();
+  await expect(page.locator('#image-consent')).not.toBeChecked();
+  await expect(page.locator('#image-consent')).toBeDisabled();
 });
 
 test('image privacy disclosure is available in all six languages', async ({ page }) => {

@@ -69,7 +69,7 @@ test('local planning keeps its separate 90-second deadline without Copilot estim
 test('planning estimates use only the explicit brief and only the measured provider', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
-    azurePlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
   } }));
   await page.addInitScript(() => {
     const original = window.fetch;
@@ -88,7 +88,7 @@ test('planning estimates use only the explicit brief and only the measured provi
   await page.getByRole('button', { name: 'Change mode' }).click();
   await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
-  await expect(dialog).toContainText('Estimate unknown; Azure Foundry was not measured in the Copilot study');
+  await expect(dialog).toContainText('One Azure Foundry request is running. It may take up to 300 seconds.');
   await expect(dialog).not.toContainText('55–175');
   await dialog.getByRole('button', { name: 'Abort planning' }).click();
 });
@@ -138,6 +138,49 @@ test('a streamed planning result uses the same single request', async ({ page })
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).prompt)).toBe('The submitted sculpture');
 });
 
+test('one internal design correction is visible and a second invalid result preserves the accepted scene', async ({ page }) => {
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    hosted: true, sessionKey: 'fixture', copilot: false,
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+  } }));
+  await page.addInitScript(() => {
+    const original = window.fetch;
+    const state = window as Window & { finishCorrection?: () => void; planCount?: number };
+    window.fetch = (input, init) => {
+      if (String(input) !== '/api/azure-plan') return original(input, init);
+      state.planCount = (state.planCount ?? 0) + 1;
+      const encoder = new TextEncoder();
+      return Promise.resolve(new Response(new ReadableStream<Uint8Array>({
+        start(controller) {
+          controller.enqueue(encoder.encode('{"type":"waiting"}\n{"type":"correcting"}\n'));
+          state.finishCorrection = () => {
+            controller.enqueue(encoder.encode(JSON.stringify({ type: 'error',
+              error: 'The design is still invalid after one correction: Custom bricks overlap after expansion. No new build was started. Simplify the brief or reduce scene size before a new submission; no further correction was attempted.',
+              designCorrection: { providerAttempts: 2, attempted: true, outcome: 'failed' },
+            }) + '\n'));
+            controller.close();
+          };
+        },
+      }), { headers: { 'Content-Type': 'application/x-ndjson' } }));
+    };
+  });
+  await page.goto('/');
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await page.getByRole('button', { name: 'Use offline templates' }).click();
+  await page.getByRole('button', { name: 'Make a plan' }).click();
+  await page.getByRole('button', { name: 'Build one step' }).click();
+  const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
+  await page.getByRole('button', { name: 'Change mode' }).click();
+  await expect(page.getByRole('dialog')).toContainText('One submission may use two model requests');
+  await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('dialog', { name: 'Planning in progress' })).toContainText('Correcting the generated design once');
+  await page.evaluate(() => (window as Window & { finishCorrection?: () => void }).finishCorrection!());
+  await expect(page.getByRole('alert')).toContainText('still invalid after one correction');
+  expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
+  expect(await page.evaluate(() => (window as Window & { planCount?: number }).planCount)).toBe(1);
+});
+
 test('compatible AI is explicit, localized and preserves attribution', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
@@ -168,12 +211,19 @@ test('compatible AI is explicit, localized and preserves attribution', async ({ 
 
 test('hosted Azure planning is separate, explicit, and preserves attribution', async ({ page }) => {
   let calls = 0;
+  let signIns = 0;
+  await page.route('**/api/azure-auth-config', route => {
+    signIns++;
+    return route.fulfill({ status: 503, json: { error: 'Unexpected visitor sign-in' } });
+  });
   await page.route('**/api/status', route => route.fulfill({ json: {
     hosted: true, sessionKey: 'fixture', copilot: false,
-    azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+    publicAllowance: { available: true, remaining: 43, limit: 50 },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Fixture Azure planner ready.' },
   } }));
   await page.route('**/api/azure-plan', route => {
     calls++;
+    expect(route.request().headers().authorization).toBeUndefined();
     expect(route.request().postDataJSON()).toEqual({ world: 'jurassic', brief: 'A blue beacon', sceneSize: 1000 });
     const spec = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
       design: { name: 'Beacon', bricks: [{ x: 0, y: 0, z: 0, width: 1, height: 1, depth: 1, color: 'blue', part: 'frame' }] } };
@@ -181,11 +231,13 @@ test('hosted Azure planning is separate, explicit, and preserves attribution', a
   });
   await page.goto('/');
   await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  await expect(page.locator('#brief-help')).toContainText('43 of 50 shared planning attempts remain today');
   expect(calls).toBe(0);
   await page.getByLabel('What shall we build?').fill('A blue beacon');
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
   await expect(page.locator('#stage-status')).toContainText('Plan ready');
   expect(calls).toBe(1);
+  expect(signIns).toBe(0);
   const saved = await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!));
   expect(saved.source).toBe('azure');
 });
@@ -209,12 +261,56 @@ test('unavailable hosted planner never submits and offline templates remain avai
   expect(calls).toBe(0);
 });
 
-test('a configured local Azure planner is an explicit separate choice', async ({ page }) => {
+test('explicit planning refreshes a rotated server key without retrying the planning POST', async ({ page }) => {
+  let statusCalls = 0;
+  let calls = 0;
+  await page.route('**/api/status', route => {
+    statusCalls++;
+    return route.fulfill({ json: {
+      hosted: true, sessionKey: statusCalls === 1 ? 'before-restart' : 'after-restart',
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+    } });
+  });
+  await page.route('**/api/azure-plan', route => {
+    calls++;
+    expect(route.request().headers()['x-bricklab-key']).toBe('after-restart');
+    return route.fulfill({ status: 503, json: { error: 'Fixture model unavailable.' } });
+  });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  expect(statusCalls).toBe(1);
+  expect(calls).toBe(0);
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('alert')).toHaveText('Fixture model unavailable.');
+  expect(calls).toBe(1);
+});
+
+test('failed planning-session refresh does not reuse an old key or submit a brief', async ({ page }) => {
+  let statusCalls = 0;
+  let calls = 0;
+  await page.route('**/api/status', route => {
+    statusCalls++;
+    return statusCalls === 1 ? route.fulfill({ json: {
+      hosted: true, sessionKey: 'old-key',
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Ready' },
+    } }) : route.fulfill({ status: 503, json: { error: 'Fixture status unavailable.' } });
+  });
+  await page.route('**/api/azure-plan', route => { calls++; return route.abort(); });
+  await page.goto('/');
+  await expect(page.locator('#mode-label')).toContainText('Azure Foundry');
+  await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
+  await expect(page.getByRole('alert')).toContainText(/status.*(?:not ready|unavailable)/i);
+  expect(calls).toBe(0);
+});
+
+test('a configured private Azure planner requires sign-in before submitting', async ({ page }) => {
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
     hosted: false, sessionKey: 'fixture', copilot: false,
-    azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+    azurePlanner: { enabled: true, state: 'configured', authentication: 'entra', message: 'Fixture Azure planner ready.' },
   } }));
+  await page.route('**/api/azure-auth-config', route =>
+    route.fulfill({ status: 503, json: { error: 'Fixture sign-in unavailable.' } }));
   await page.route('**/api/azure-plan', route => {
     calls++;
     return route.fulfill({ status: 503, json: { error: 'Fixture unavailable.' } });
@@ -225,8 +321,8 @@ test('a configured local Azure planner is an explicit separate choice', async ({
   await page.getByRole('button', { name: 'Use Azure Foundry planning' }).click();
   expect(calls).toBe(0);
   await page.getByRole('button', { name: 'Plan with Azure Foundry' }).click();
-  await expect(page.getByRole('alert')).toContainText('Fixture unavailable');
-  expect(calls).toBe(1);
+  await expect(page.getByRole('alert')).toContainText('Azure sign-in is not configured. No planning request was sent.');
+  expect(calls).toBe(0);
 });
 
 for (const [description, status, contentType, body, message] of [
@@ -237,7 +333,7 @@ for (const [description, status, contentType, body, message] of [
     let calls = 0;
     await page.route('**/api/status', route => route.fulfill({ json: {
       hosted: true, sessionKey: 'fixture', copilot: false,
-      azurePlanner: { enabled: true, state: 'configured', message: 'Fixture Azure planner ready.' },
+      azurePlanner: { enabled: true, state: 'configured', authentication: 'anonymous', message: 'Fixture Azure planner ready.' },
     } }));
     await page.route('**/api/azure-plan', route => {
       calls++;

@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { AGENTS, type Brick, type World } from './engine';
 import { BrickBatch } from './brick-batch';
+import { cameraViewOffset } from './camera-view.mjs';
 
 const UNIT_Y = 0.7;
 export class Workbench {
@@ -31,6 +32,7 @@ export class Workbench {
   private cameraTarget = new THREE.Vector3(-1, 3, 0);
   private cutawayPlane = new THREE.Plane(new THREE.Vector3(-1, 0, 0), 0);
   private interiorView = false;
+  private cameraFlipped = false;
   private cameraDistance = 39;
   private renderMetricsDirty = true;
   constructor(host: HTMLElement, onSelect: (brick: Brick) => void) {
@@ -181,7 +183,7 @@ export class Workbench {
       robot.position.set(-8 + i * 4, 0, 8);
       this.robots.add(robot);
     }
-    this.resetCamera();
+    this.applyCameraView();
   }
   setBlueprint(bricks: Brick[]) {
     this.modelBatch?.dispose();
@@ -218,7 +220,7 @@ export class Workbench {
       this.cameraTarget.set(-1, 3, 0);
       this.cameraDistance = 39;
     }
-    this.resetCamera();
+    this.applyCameraView();
   }
   showBlueprint(show: boolean) { this.blueprint.visible = show; }
   sync(bricks: Brick[]) {
@@ -248,8 +250,24 @@ export class Workbench {
     this.blueprintBatch?.setCutaway(value ? this.cutawayPlane : undefined);
   }
   explode(value: boolean) { this.exploded = value; this.modelBatch?.setExploded(value, performance.now()); }
+  flipCamera() {
+    this.cameraFlipped = !this.cameraFlipped;
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.x = -offset.x;
+    offset.z = -offset.z;
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.controls.update();
+    return this.cameraFlipped;
+  }
   resetCamera() {
-    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(0.55, 0.35, 0.7).normalize().multiplyScalar(this.cameraDistance));
+    this.cameraFlipped = false;
+    this.applyCameraView();
+  }
+  private applyCameraView() {
+    const offset = cameraViewOffset(this.cameraFlipped);
+    this.camera.position.copy(this.cameraTarget).add(new THREE.Vector3(
+      offset.x, offset.y, offset.z,
+    ).normalize().multiplyScalar(this.cameraDistance));
     this.controls.target.copy(this.cameraTarget);
     this.controls.update();
   }

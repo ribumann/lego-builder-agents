@@ -87,7 +87,7 @@ test('all planning endpoints validate scene size before provider access', async 
     for (const body of [{ sceneSize: '1000' }, { sceneSize: 9000 }, { sceneSize: 1000, brief: '9000 bricks' },
       { sceneSize: 1000, brief: 'build -5 bricks' }, { sceneSize: 1000, brief: 'build −5 bricks' }]) {
       const response = await post(body);
-      assert.equal(response.status, 400, route);
+      assert.equal(response.status, route === '/api/azure-plan' ? 403 : 400, route);
     }
     assert.equal((await post({ sceneSize: 1000 })).status, 403, route);
     assert.equal((await post({})).status, 403, `${route} accepts legacy requests`);

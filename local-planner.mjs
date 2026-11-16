@@ -1,5 +1,6 @@
 import { Agent, request } from 'node:http';
 import { validatePlanningImage } from './planning-image.mjs';
+import { createPlanningCapacity } from './planning-capacity.mjs';
 
 const MAX_BODY_BYTES = 1_048_576;
 const MAX_RESPONSE_BYTES = 128_000;
@@ -22,7 +23,7 @@ const localError = message => new Error(`${message} ${trustNotice}`);
  * A consented image adds a /api/show preflight requiring model vision capability;
  * the brief and image are sent only after metadata and vision checks succeed.
  */
-export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:11434', timeoutMs = MAX_TIMEOUT_MS }) {
+export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:11434', timeoutMs = MAX_TIMEOUT_MS, concurrency = 2 }) {
   if (typeof enabled !== 'boolean')
     throw localError('Local AI enabled must be a boolean.');
   const validModel = modelIdentifier(model);
@@ -42,7 +43,7 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
       throw localError('Local AI timeout must be greater than zero and at most 90000 milliseconds.');
   }
   const configuredModel = validModel ? model : '';
-  let busy = false;
+  const capacity = createPlanningCapacity({ total: concurrency, perProvider: concurrency });
 
   return {
     status() {
@@ -66,10 +67,10 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
         throw localError('Local AI planning options are invalid.');
       const image = validatePlanningImage(options.image, options.imageConsent);
       if (options.signal?.aborted) throw localError('Local AI planning was cancelled.');
-      if (busy) throw localError('A local AI request is already in progress. Wait for it to finish.');
       if (cloudModel(configuredModel))
         throw localError('Cloud-tagged models are not allowed for local AI.');
-      busy = true;
+      const releaseCapacity = capacity.acquire('local');
+      if (!releaseCapacity) throw Object.assign(localError('Local AI shared planning capacity is exhausted. Wait for an active request to finish.'), { statusCode: 429 });
       const controller = new AbortController();
       const cancel = () => controller.abort();
       options.signal?.addEventListener('abort', cancel, { once: true });
@@ -77,6 +78,7 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
       // http.globalAgent, and never opt into proxyEnv/environment proxy routing.
       // Disable keep-alive and destroy the agent when this explicit plan ends.
       const agent = new Agent({ keepAlive: false });
+      const socketClosures = [];
       let timedOut = false;
       let failure;
       const timer = setTimeout(() => {
@@ -97,6 +99,9 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
             signal: controller.signal,
           }, resolve);
           req.on('error', reject);
+          req.on('socket', socket => {
+            socketClosures.push(new Promise(resolve => socket.once('close', resolve)));
+          });
           req.end(body === undefined ? undefined : JSON.stringify(body));
         });
         try {
@@ -173,7 +178,8 @@ export function createLocalPlanner({ enabled, model, url = 'http://127.0.0.1:114
         options.signal?.removeEventListener('abort', cancel);
         controller.abort();
         agent.destroy();
-        busy = false;
+        await Promise.all(socketClosures);
+        releaseCapacity();
       }
     },
   };

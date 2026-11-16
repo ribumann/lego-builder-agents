@@ -2,7 +2,8 @@ import type { Language } from './i18n';
 
 export type VoiceState = 'idle' | 'requesting' | 'recording' | 'processing' | 'error';
 export type VoiceError = 'unsupported' | 'permission' | 'recording' | 'empty' | 'too-large' | 'processing';
-export type VoiceUpdate = { state: VoiceState; error?: VoiceError };
+export type VoiceProgress = { stage: 'preparing' | 'loading' | 'downloading' | 'transcribing'; loaded?: number; total?: number };
+export type VoiceUpdate = { state: VoiceState; error?: VoiceError; progress?: VoiceProgress };
 
 const MAX_DURATION_MS = 30_000;
 const MAX_BYTES = 4 * 1024 * 1024;
@@ -13,7 +14,7 @@ type Dependencies = {
   getStream: () => Promise<MediaStream>;
   createRecorder: (stream: MediaStream) => MediaRecorder;
   decode: (audio: Blob) => Promise<Float32Array>;
-  transcribe: (audio: Float32Array, language: Language) => Transcription;
+  transcribe: (audio: Float32Array, language: Language, onProgress: (progress: VoiceProgress) => void) => Transcription;
 };
 
 async function decodeAudio(audio: Blob): Promise<Float32Array> {
@@ -32,12 +33,13 @@ async function decodeAudio(audio: Blob): Promise<Float32Array> {
   }
 }
 
-function transcribeLocally(audio: Float32Array, language: Language): Transcription {
+function transcribeLocally(audio: Float32Array, language: Language, onProgress: (progress: VoiceProgress) => void): Transcription {
   const worker = new Worker(new URL('./voice-whisper.worker.ts', import.meta.url), { type: 'module' });
   let rejectPending: (error: Error) => void = () => {};
   const promise = new Promise<string>((resolve, reject) => {
     rejectPending = reject;
-    worker.onmessage = (event: MessageEvent<{ text?: string; error?: string }>) => {
+    worker.onmessage = (event: MessageEvent<{ text?: string; error?: string; progress?: VoiceProgress }>) => {
+      if (event.data.progress) { onProgress(event.data.progress); return; }
       worker.terminate();
       if (typeof event.data.text === 'string') resolve(event.data.text);
       else reject(new Error(event.data.error || 'Transcription failed'));
@@ -72,7 +74,10 @@ export function createVoiceInput(
   let chunks: Blob[] = [];
   let bytes = 0;
 
-  const update = (next: VoiceState, error?: VoiceError) => { state = next; onUpdate({ state, ...(error ? { error } : {}) }); };
+  const update = (next: VoiceState, error?: VoiceError, progress?: VoiceProgress) => {
+    state = next;
+    onUpdate({ state, ...(error ? { error } : {}), ...(progress ? { progress } : {}) });
+  };
   const release = () => {
     if (timer) clearTimeout(timer);
     timer = undefined;
@@ -99,7 +104,7 @@ export function createVoiceInput(
   };
   const stop = () => {
     if (state !== 'recording' || !recorder) return;
-    update('processing');
+    update('processing', undefined, { stage: 'preparing' });
     if (timer) clearTimeout(timer);
     timer = undefined;
     recorder.stop();
@@ -133,7 +138,7 @@ export function createVoiceInput(
       recorder.onerror = () => { if (current === generation) fail('recording'); };
       recorder.onstop = async () => {
         if (current !== generation) return;
-        if (state === 'recording') update('processing');
+        if (state === 'recording') update('processing', undefined, { stage: 'preparing' });
         recorder = undefined;
         release();
         const audio = new Blob(chunks);
@@ -144,7 +149,10 @@ export function createVoiceInput(
           if (current !== generation) return;
           if (!samples.length || samples.length > SAMPLE_RATE * 31) { fail('processing'); return; }
           if (samples.every(sample => sample === 0)) { fail('empty'); return; }
-          transcription = dependencies.transcribe(samples, language);
+          update('processing', undefined, { stage: 'loading' });
+          transcription = dependencies.transcribe(samples, language, progress => {
+            if (current === generation && state === 'processing') update('processing', undefined, progress);
+          });
           const text = (await transcription.promise).trim();
           if (current !== generation) return;
           transcription = undefined;

@@ -11,7 +11,7 @@ test('planning estimates stay provider-specific in every supported language', ()
     const azure = planningDescription('Azure Foundry', 'A 500-brick lighthouse');
     assert.match(copilot, /55–175/);
     assert.doesNotMatch(azure, /55–175/);
-    assert.match(azure, /Azure Foundry/);
+    assert.match(azure, /Azure[ -]Foundry/);
     assert.match(azure, /300/);
     const image = planningDescription('Copilot', 'A 500-brick lighthouse', true);
     assert.doesNotMatch(image, /55–175|20–183/);
@@ -27,9 +27,9 @@ test('planning estimates stay provider-specific in every supported language', ()
   setLanguage('en');
 });
 
-test('mission navigation and guide disclosures have translations in all six languages', () => {
+test('mission navigation, view controls and guide disclosures have translations in all six languages', () => {
   const interfaceText = ['Mission steps', 'Planning choices and privacy', 'Timing and design limits',
-    'Imagine it', 'Meet the plan', 'Watch them build', 'Test & discover'];
+    'Imagine it', 'Meet the plan', 'Watch them build', 'Test & discover', 'Flip camera 180 degrees'];
   for (const language of languages.slice(1)) {
     setLanguage(language);
     for (const text of interfaceText) assert.notEqual(translate(text), text, `${language}: ${text}`);
@@ -61,6 +61,25 @@ test('known activity templates preserve user-defined task names', () => {
   assert.match(details, /connectées par leurs faces/);
   const name = 'Hill 3/3 face-connected; Lighthouse 🚀';
   assert.ok(translateCheckDetail(`${name}: 5/5 face-connected. Not a physical stability simulation.`, [name]).startsWith(name));
+  setLanguage('en');
+});
+
+test('staged task labels translate without changing user object names or stage numbers', () => {
+  for (const language of languages) {
+    setLanguage(language);
+    const single = translateTaskName('Support assembly & details · 2/5', false);
+    assert.ok(single.endsWith(' · 2/5'));
+    if (language !== 'en') assert.notEqual(single, 'Support assembly & details · 2/5');
+    const objectName = 'Maison, 🚀';
+    const task = `${objectName} · support assembly & details · 3/5`;
+    const translated = translateTaskName(task, false, [objectName, 'Tour']);
+    assert.ok(translated.startsWith(`${objectName} · `));
+    assert.ok(translated.endsWith(' · 3/5'));
+    if (language !== 'en') assert.notEqual(translated, task);
+    const activity = translateActivity(`I received 2 missing planned bricks for ${task}, Tour · details · 1/2. Reclaiming my original task.`, false, [objectName, 'Tour']);
+    assert.ok(activity.includes(translated));
+    assert.ok(activity.includes(translateTaskName('Tour · details · 1/2', false, ['Tour'])));
+  }
   setLanguage('en');
 });
 
@@ -127,6 +146,10 @@ test('scene and imported mission errors translate inside load and restore notice
     'Custom design exceeds its expanded brick budget.',
     'Custom design exceeds the 8192-brick limit.',
     'Custom brick 17 repeat exceeds bounds.',
+    'Custom brick 17 in object 2 has invalid dimensions, bounds, color, or part (width: above-maximum). No build was started. Try a smaller scene size or ask for tiled parts; no automatic retry.',
+    'Custom brick 17 in object 2 repeat exceeds bounds (repeat.x/width: occupied-extent-above-maximum).',
+    'The design is still invalid after one correction: Custom bricks overlap after expansion. No new build was started. Simplify the brief or reduce scene size before a new submission; no further correction was attempted.',
+    'Custom bricks overlap after expansion (object 2, brick 17, repeat 3 intersects object 1, brick 2, repeat 1).',
     'Copilot returned invalid JSON in its final response. No build was started and BrickLab did not retry. Revise the brief or explicitly choose offline templates.',
     'Azure returned a template or omitted custom geometry. An original custom design is required. No retry or template fallback was made.',
   ];
@@ -139,6 +162,10 @@ test('scene and imported mission errors translate inside load and restore notice
       const restore = `Could not restore the saved build: ${detail}. Your old save has not been overwritten.`;
       assert.ok(translateActivity(restore).includes(translateActivity(detail)));
       if (detail.includes('17')) assert.match(translateActivity(detail), /17/);
+      if (detail.includes('in object 2')) {
+        assert.match(translateActivity(detail), /2/);
+        assert.match(translateActivity(detail), /width:/);
+      }
     }
     const external = 'Cannot append a brick assigned to unknown object "Maison 🚀".';
     assert.match(translateActivity(external), /Maison 🚀/);

@@ -11,6 +11,7 @@ import { createVoiceInput, type VoiceUpdate } from './voice-input';
 import { voiceLabels } from './voice-labels';
 import { createPlanningImageInput } from './planning-image-input';
 import { resolveSceneSize } from './scene-size.mjs';
+import { acquireAzurePlanningToken } from './azure-auth';
 
 const icon = (name: string) => {
   const paths: Record<string, string> = {
@@ -18,6 +19,7 @@ const icon = (name: string) => {
     pause: '<path d="M8 5v14M16 5v14"/>',
     fast: '<path d="m3 5 9 7-9 7zm10 0 9 7-9 7z"/>',
     reset: '<path d="M3 10a9 9 0 1 1 2 8M3 4v6h6"/>',
+    rotate: '<path d="M20 11a8 8 0 1 1-2.34-5.66L20 8"/><path d="M20 3v5h-5"/>',
     arrow: '<path d="M4 12h16m-6-6 6 6-6 6"/>',
     download: '<path d="M12 3v12m-5-5 5 5 5-5M4 16v5h16v-5"/>',
     cube: '<path d="m12 3 9 5v9l-9 5-9-5V8zm0 10 9-5M12 13 3 8m9 5v9"/>',
@@ -78,6 +80,7 @@ app.innerHTML = `
           <button id="blueprint" class="tool-button" aria-label="Toggle blueprint" aria-pressed="true" title="Blueprint">${icon('scan')}</button>
           <button id="explode" class="tool-button" aria-label="Toggle exploded view" aria-pressed="false" title="Exploded view">${icon('cube')}</button>
           <button id="interior-view" class="tool-button" aria-label="Toggle cutaway view" aria-pressed="false" title="Cutaway view">${icon('cutaway')}</button>
+          <button id="flip-camera" class="tool-button" aria-label="Flip camera 180 degrees" aria-pressed="false" title="Flip camera 180 degrees">${icon('rotate')}</button>
           <button id="camera" class="tool-button" aria-label="Reset camera" title="Reset camera">${icon('reset')}</button>
         </div>
         <div class="scene-caption" id="scene-caption"><strong>A big idea starts with a small brief.</strong><span>The translucent bricks are a preview, not an agent-built result.</span></div>
@@ -132,6 +135,11 @@ app.innerHTML = `
             <button id="voice-cancel" class="text-button" type="button">Cancel voice input</button>
           </div>
           <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true">Ready for voice input</p>
+          <div id="voice-activity" class="voice-activity" hidden>
+            <progress id="voice-progress" aria-labelledby="voice-status" aria-describedby="voice-progress-help"></progress>
+            <span id="voice-progress-value" aria-hidden="true"></span>
+            <p id="voice-progress-help"></p>
+          </div>
           <div id="voice-review" hidden>
             <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
             <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
@@ -230,7 +238,23 @@ const refreshVoiceUI = () => {
   if ((start.hidden && focused === start) || (stop.hidden && focused === stop) || (entry.disabled && focused === entry))
     (voiceUpdate.state === 'recording' ? stop : $('#voice-cancel')).focus();
   apply.disabled = active || !transcript.value.trim() || tooLong;
-  $('#voice-status').textContent = `${labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
+  const progress = voiceUpdate.state === 'processing' ? voiceUpdate.progress : undefined;
+  const statusText = `${progress ? labels.progress[progress.stage] : labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
+  if ($('#voice-status').textContent !== statusText) $('#voice-status').textContent = statusText;
+  $('#voice-activity').hidden = voiceUpdate.state !== 'processing';
+  const progressBar = $<HTMLProgressElement>('#voice-progress');
+  const loaded = progress?.loaded;
+  const total = progress?.total;
+  const fraction = progress?.stage === 'downloading' && typeof loaded === 'number' && typeof total === 'number'
+    && Number.isFinite(loaded) && Number.isFinite(total) && total > 0 && loaded >= 0 && loaded <= total
+    ? loaded / total : undefined;
+  progressBar.max = 1;
+  if (fraction !== undefined) progressBar.value = fraction;
+  else progressBar.removeAttribute('value');
+  $('#voice-progress-value').textContent = fraction !== undefined
+    ? new Intl.NumberFormat(getLanguage(), { style: 'percent', maximumFractionDigits: 0 }).format(progressBar.value) : '';
+  $('#voice-progress-help').textContent = progress?.stage === 'downloading' ? labels.downloadHelp
+    : progress?.stage === 'loading' ? labels.loadingHelp : labels.processingHelp;
   $('#voice-count').textContent = labels.count.replace('{count}', String(transcript.value.length));
   const warning = $<HTMLParagraphElement>('#voice-length-warning');
   warning.textContent = tooLong ? labels.tooLong.replace('{count}', String(transcript.value.length)) : '';
@@ -317,10 +341,12 @@ let hosted = false;
 let apiKey = '';
 let copilotEnabled = false;
 let copilotImagesEnabled = false;
+let azureImagesEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
 let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
-let azurePlanner = { enabled: false, state: 'off', message: 'Azure planning is unavailable on this server.' };
+let azurePlanner = { enabled: false, state: 'off', authentication: 'entra', message: 'Azure planning is unavailable on this server.' };
+let publicAllowance = '';
 let compatiblePlanner = { enabled: false, state: 'off', message: 'Compatible AI is off.' };
 let planning = false;
 let planningController: AbortController | null = null;
@@ -351,7 +377,8 @@ brief.addEventListener('input', updateSceneSize);
 $<HTMLSelectElement>('#scene-size').addEventListener('change', updateSceneSize);
 imageInput = createPlanningImageInput({
   container: $('#image-input'), chooser: $<HTMLButtonElement>('#image-choose'), privacy: $('#image-privacy'),
-  target: () => hosted ? 'hosted' : mode, copilotImages: () => copilotImagesEnabled,
+  target: () => mode === 'local' ? 'local' : hosted && mode !== 'azure' ? 'hosted' : mode,
+  copilotImages: () => copilotImagesEnabled, azureImages: () => azureImagesEnabled,
 });
 const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
 voiceInput = createVoiceInput(
@@ -639,6 +666,10 @@ async function planningResponse(response: Response): Promise<{ spec?: unknown; e
     const event: unknown = JSON.parse(line);
     if (!event || typeof event !== 'object' || !('type' in event)) throw new Error('Invalid planning stream event.');
     if (event.type === 'waiting') return;
+    if (event.type === 'correcting') {
+      $('#planning-description').textContent = translate('Correcting the generated design once. The same submission, deadline and daily allowance apply; transport failures are not retried.');
+      return;
+    }
     if (event.type === 'result' && 'spec' in event) result = { spec: event.spec };
     else if (event.type === 'error' && 'error' in event && typeof event.error === 'string') result = { error: event.error };
     else throw new Error('Invalid planning stream event.');
@@ -691,16 +722,23 @@ async function makePlan(demo = false) {
     let source: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'local';
     const assumptions: string[] = [];
     if (mode !== 'local') {
+      const planningKey = await refreshStatus();
+      controller.signal.throwIfAborted();
+      if (!planningKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
       const localAI = mode === 'local-ai';
       const azure = mode === 'azure';
       const compatible = mode === 'compatible';
       if (compatible ? !compatiblePlanner.enabled || compatiblePlanner.state !== 'configured' : azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
         : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
         throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
-      if (!apiKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
+      const azureAccessToken = azure && azurePlanner.authentication !== 'anonymous' ? await acquireAzurePlanningToken() : undefined;
+      controller.signal.throwIfAborted();
+      if (image && azure && !azureImagesEnabled) throw new Error('Azure image planning is unavailable on this server.');
       wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
       const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
-        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': apiKey, ...(localAI ? {} : { Accept: 'application/x-ndjson' }) },
+        headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': planningKey,
+          Accept: 'application/x-ndjson',
+          ...(azureAccessToken ? { Authorization: `Bearer ${azureAccessToken}` } : {}) },
         body: JSON.stringify({ world, brief: planningBrief,
           sceneSize: selectedSize,
           ...($<HTMLInputElement>('#hollow-interior').checked ? { hollowInterior: true } : {}),
@@ -753,7 +791,7 @@ async function makePlan(demo = false) {
         : 'Planning reached the 300-second limit. No new build was started.'
         : 'Planning aborted. No new build was started.'
       : error instanceof Error ? error.message : 'Planning failed. No new build was started.');
-  } finally { wait?.close(); planningController = null; planning = false; render(); }
+  } finally { wait?.close(); planningController = null; planning = false; render(); if (hosted) void refreshStatus(); }
 }
 function updateSpeed() {
   $('#speed').innerHTML = `${icon('fast')}<span>${speed}×</span>`;
@@ -830,7 +868,14 @@ $('#interior-view').addEventListener('click', () => {
   scene?.setInteriorView(interiorView);
   $('#interior-view').setAttribute('aria-pressed', String(interiorView));
 });
-$('#camera').addEventListener('click', () => scene?.resetCamera());
+$('#flip-camera').addEventListener('click', () => {
+  if (!scene) return;
+  $('#flip-camera').setAttribute('aria-pressed', String(scene.flipCamera()));
+});
+$('#camera').addEventListener('click', () => {
+  scene?.resetCamera();
+  $('#flip-camera').setAttribute('aria-pressed', 'false');
+});
 $('#damage').addEventListener('click', () => { replaying = false; team?.damage(); eventRevision++; render(); save(); });
 $('#repair').addEventListener('click', () => { replaying = false; team?.repair(); running = team?.status === 'building'; eventRevision++; render(); save(); });
 $('#replay').addEventListener('input', () => {
@@ -863,7 +908,9 @@ function answer(question: string, agent?: AgentId) {
   };
   let response = responses[id];
   if (/who.*what/.test(q)) response = 'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.';
-  else if (/cost|money|price/.test(q)) response = 'Offline templates make no model calls. Local AI uses server compute. Copilot starts one CLI invocation; the CLI may retry internally. Azure Foundry can incur charges for its host. We cannot measure a dollar price here.';
+  else if (/cost|money|price/.test(q)) response = hosted
+    ? `The hosted demo uses a shared daily request allowance; it does not display a per-request dollar estimate. ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}${publicAllowance ? ` ${publicAllowance}` : ''}`
+    : `${translate('Offline templates make no model calls. Local AI uses server compute. Model and hosting charges may apply; no dollar estimate is available.')} ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}`;
   else if (/hollow|interior|cavity/.test(q)) response = 'The hollow-interior preference asks custom planning to leave an empty space and a usable opening when the design supports it. Use Cutaway view to inspect the cross-section. It is a preference, not a guarantee.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
@@ -961,45 +1008,50 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.</p>
   <p>${esc(translate('Try the hollow-interior preference with custom planning, then use Cutaway view to inspect the cross-section. It is a preference, not a guarantee; connectivity checks do not prove physical stability.'))}</p>
   <details><summary>Planning choices and privacy</summary>
-    <p>${hosted ? 'The hosted Azure Foundry option is separate from GitHub Copilot and may be unavailable until safeguards are enabled. Pressing its planning button sends the brief to Azure and may incur charges for the host.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
+    <p>${hosted ? 'The hosted demo sends your brief and any image you explicitly consent to share to Azure when you choose Plan. No visitor sign-in is required. Voice transcription runs in your browser; only text you review and apply to the brief is sent with a later planning request. No input is sent on page load or while selecting media.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
     <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
     <p>Additional offline template body colors: black, yellow, gray, brown and pink.</p>
     <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
   </details>
   <details><summary>Timing and design limits</summary>
-    <p>Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure is not yet estimated. Local AI has a separate 90-second limit.</p>
+    <p>${hosted ? 'Hosted Azure planning can take up to 300 seconds. You can abort the request while it is running.' : 'Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure planning can take up to 300 seconds.'} Local AI has a separate 90-second limit.</p>
     <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
     <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>
   </details>`));
 $('#settings').addEventListener('click', () => {
   dialog('Choose how the team plans', `
-    ${hosted || azurePlanner.enabled ? `<p><strong>Azure Foundry planner</strong> — a separate service from GitHub Copilot. When enabled, an explicit planning action sends the brief to Azure and may incur charges for the host. No model request happens on load. Do not enter personal information.</p>
+    ${hosted || azurePlanner.enabled ? `<p><strong>${hosted ? 'Hosted Azure demo' : 'Azure Foundry planner'}</strong> — a separate service from GitHub Copilot. ${hosted ? 'No visitor sign-in is required. Pressing Plan sends your brief and any explicitly consented image to Azure. Audio stays in the browser; only reviewed text you apply to the brief is included. No input is sent on page load or when selecting media.' : 'Private Azure planning requires Entra sign-in. An explicit planning action sends the brief to Azure. No model request happens on load. Do not enter personal information.'}</p>
     <p id="azure-planner-status" role="status">${esc(translate(azurePlanner.message))}</p>
+    <p>${esc(translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.'))}</p>
+    ${hosted && publicAllowance ? `<p id="public-allowance" role="status">${esc(publicAllowance)}</p>` : ''}
     <button id="choose-azure" class="button primary">Use Azure Foundry planning</button><hr>` : ''}
+    ${!hosted ? `
     <p><strong>GitHub Copilot cloud planner (default)</strong> — one CLI planning invocation per explicit submission proposes custom geometry for your brief, within workspace and count limits. All five agents execute locally, not as separate LLMs.</p>
-    <p>Your brief is sent through the authenticated Copilot CLI to GitHub's model service. No agent tools are allowed. The app does not automatically retry or fall back to a template on failure, but the CLI may retry internally and subscription usage can differ. The app does not know the model’s dollar cost. Default limit: 12 CLI invocations per UTC day per server process; restarting resets this counter. This is not a monetary budget or a production billing control.</p>
+    <p>${esc(translate('Your brief is sent through the authenticated Copilot CLI to GitHub’s model service. No agent tools are allowed. The app does not know the model’s dollar cost. Local servers and Codespaces have no application daily request quota; provider subscription quotas still apply.'))}</p>
+    <p>${esc(translate('Each planning submission allows one initial design and at most one correction of invalid geometry, using the same provider and deadline. Network, authentication, rate-limit and timeout failures are not replayed. No template fallback is used. Hosted allowance counts submissions, not model requests: 50 submissions can make up to 100 model requests per UTC day. Copilot CLI may retry internally.'))}</p>
     <p id="planner-status" role="status">${esc(translate(plannerMessage))}</p>
     <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Pressing <strong>Send brief to Copilot</strong> consents to sending that brief. Selecting a mode or loading the page sends no brief; readiness does not verify login, subscription, or live access. Do not enter personal information.</p>
-    <button id="refresh-status" class="button outline">Retry status</button>
     <button id="choose-copilot" class="button primary">Use Copilot planning</button>
     <hr><p><strong>Local AI (Ollama)</strong> — optional original custom planning on the <strong>BrickLab server host</strong>, not automatically on this browser's device. In a Codespace it runs on that remote host. Configure Ollama with <code>OLLAMA_NO_CLOUD=1</code> and a downloaded local model first. Loopback alone does not prove offline operation; remote model metadata is rejected, but the configured service must be trusted.</p>
     <p id="local-planner-status" role="status">${esc(translate(localPlanner.message))}</p>
     <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
     <button id="choose-local-ai" class="button outline">Use Local AI</button>
-    ${!hosted ? `<hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
+    <hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
     <p id="compatible-planner-status" role="status">${esc(translateActivity(compatiblePlanner.message))}</p>
     <button id="choose-compatible" class="button outline">Use Compatible AI</button>` : ''}
-    <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls. Host charges may still apply.</p>
+    <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls.${hosted ? '' : ' Host charges may still apply.'}</p>
     <button id="choose-local" class="button outline">Use offline templates</button>
+    <button id="refresh-status" class="button outline">Retry status</button>
+    ${hosted ? '' : `
     <hr><p><strong>Three model decisions via GitHub Actions</strong> — the included <code>ai-mission.yml</code> workflow calls one coordinator model, then two builder models concurrently. Each chooses a real task priority. PlanBot and CheckBot remain local rule-based agents, making five crew members, not five model calls. Download its <code>ai-mission.json</code> artifact and use <strong>Load build / AI mission</strong> below to watch the resulting team execute.</p>
     <p>This workflow needs repository access and GitHub Models availability. It has not been live-verified in this environment. It uses three bounded requests, no additional model keys, and no model tools. Do not enter personal information in workflow inputs.</p>
-    <p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
+    `}<p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
   $('#choose-local').addEventListener('click', () => { mode = 'local'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
-  $('#choose-copilot').addEventListener('click', () => { mode = 'copilot'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
-  $('#choose-local-ai').addEventListener('click', () => { mode = 'local-ai'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
+  document.querySelector<HTMLElement>('#choose-copilot')?.addEventListener('click', () => { mode = 'copilot'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
+  document.querySelector<HTMLElement>('#choose-local-ai')?.addEventListener('click', () => { mode = 'local-ai'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
   document.querySelector<HTMLElement>('#choose-compatible')?.addEventListener('click', () => { mode = 'compatible'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!compatiblePlanner.enabled) notice(compatiblePlanner.message); });
   document.querySelector<HTMLElement>('#choose-azure')?.addEventListener('click', () => { mode = 'azure'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!azurePlanner.enabled) notice(azurePlanner.message); });
-  $('#refresh-status').addEventListener('click', () => { void refreshStatus(true); });
+  document.querySelector<HTMLElement>('#refresh-status')?.addEventListener('click', () => { void refreshStatus(true); });
 });
 
 setInterval(() => {
@@ -1025,19 +1077,21 @@ function updateMode() {
   $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
+    : hosted
+      ? `This hosted demo uses Azure Foundry. Voice transcription stays in your browser; only text you review and apply to the brief is sent when you press Plan. Any selected image is sent only with image consent and Plan.${publicAllowance ? ` ${publicAllowance}` : ''}`
     : mode === 'compatible'
       ? 'Plan with Compatible AI sends this brief to the configured service and may incur charges. No request until you press it. Do not enter personal information.'
     : mode === 'local-ai'
       ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
       : mode === 'azure'
-        ? 'Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. No request until you press it. Do not enter personal information.'
+        ? `${hosted ? 'No visitor sign-in is required. ' : 'Private planning requires Entra sign-in. '}Pressing Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. Do not enter personal information.${publicAllowance ? ` ${publicAllowance}` : ''}`
         : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
   $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
 }
 async function refreshStatus(inDialog = false) {
   try {
-    const response = await fetch('/api/status');
+    const response = await fetch('/api/status', { cache: 'no-store' });
     if (!response.ok) throw new Error(`Server status returned ${response.status}`);
     const data = await response.json();
     apiKey = typeof data.sessionKey === 'string' ? data.sessionKey : '';
@@ -1048,17 +1102,29 @@ async function refreshStatus(inDialog = false) {
     if (data.localPlanner && typeof data.localPlanner.message === 'string')
       localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
     if (data.azurePlanner && typeof data.azurePlanner.message === 'string')
-      azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state), message: data.azurePlanner.message };
+      azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state),
+        authentication: data.azurePlanner.authentication === 'anonymous' ? 'anonymous' : 'entra', message: data.azurePlanner.message };
+    azureImagesEnabled = data.azureImages === true;
     if (data.compatiblePlanner && typeof data.compatiblePlanner.message === 'string')
       compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state), message: data.compatiblePlanner.message };
     hosted = data.hosted === true;
+    const allowance = data.publicAllowance;
+    publicAllowance = hosted
+      ? allowance && Number.isInteger(allowance.remaining) && Number.isInteger(allowance.limit)
+        && allowance.limit > 0 && allowance.remaining >= 0 && allowance.remaining <= allowance.limit
+        ? `${allowance.remaining} of ${allowance.limit} shared planning attempts remain today (UTC). Snapshot only; other visitors can use them.`
+        : 'Shared daily planning count is currently unavailable.'
+      : '';
     if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
+    else if (mode === 'azure') updateMode();
     imageInput?.refresh();
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
   } catch (error) {
+    apiKey = '';
     copilotEnabled = false;
     copilotImagesEnabled = false;
+    azureImagesEnabled = false;
     imageInput?.refresh(true);
     plannerState = 'unavailable';
     plannerMessage = `Local server status unavailable: ${error instanceof Error ? error.message : 'unknown error'}. Rule-based building still works.`;
@@ -1074,6 +1140,7 @@ async function refreshStatus(inDialog = false) {
     const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
     if (compatibleStatus) compatibleStatus.textContent = translateActivity(compatiblePlanner.message);
   }
+  return apiKey;
 }
 updateMode();
 void refreshStatus();

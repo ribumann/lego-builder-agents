@@ -280,6 +280,71 @@ function structuralSpec(count: number, withDetail = false) {
   }, 'space');
 }
 
+test('large custom geometry becomes substantive ordered jobs and survives legacy saves and repair', () => {
+  const rows = Array.from({ length: 55 }, (_, z) => ({
+    x: -30, y: 0, z: z - 27, width: 1, height: 1, depth: 1,
+    color: z < 45 ? 'blue' : 'orange', part: z < 45 ? 'frame' : 'detail',
+    repeat: { count: z === 54 ? 59 : 60, dx: 1, dy: 0, dz: 0 },
+  }));
+  const spec = validateSpec({
+    world: 'space', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 3299,
+    design: { name: 'Large mixed build', bricks: rows },
+  }, 'space');
+  const plan = createPlan(spec);
+  assert.equal(plan.tasks.length, 10);
+  assert.ok(plan.tasks.every(task => task.bricks.length >= 100));
+  assert.deepEqual(plan.tasks, createPlan(spec).tasks);
+  const bricks = allBricks(plan);
+  assert.equal(bricks.length, 3299);
+  assert.equal(new Set(bricks.map(brick => brick.id)).size, 3299);
+  assert.equal(bricks.filter(brick => brick.agent === 'frame').length, 1650);
+  assert.equal(bricks.filter(brick => brick.agent === 'detail').length, 1649);
+  assert.equal(bricks.filter(brick => brick.part === 'detail').length, 599);
+  for (const [index, task] of plan.tasks.entries())
+    assert.deepEqual(task.depends, index ? [plan.tasks[index - 1].id] : []);
+  const canonical = new Map(bricks.map(brick => [brick.id, brick]));
+  for (const row of rows) for (let x = 0; x < row.repeat.count; x++) {
+    const brick = canonical.get(`${row.x + x},${row.y},${row.z}`);
+    assert.ok(brick);
+    assert.deepEqual([brick.x, brick.y, brick.z, brick.width, brick.height, brick.depth, brick.part],
+      [row.x + x, row.y, row.z, row.width, row.height, row.depth, row.part]);
+  }
+  const initial = new Team(plan);
+  initial.step(20);
+  const oldSave = { ...initial.snapshot('large legacy save'), taskOrder: ['frame:frame', 'detail:detail'] };
+  const team = restoreSnapshot(JSON.parse(JSON.stringify(oldSave))).team;
+  assert.deepEqual([...team.bricks.keys()], [...initial.bricks.keys()]);
+  assert.throws(() => restoreSnapshot({ ...oldSave, taskOrder: ['frame:frame'] }), /priority order/);
+  assert.throws(() => restoreSnapshot({ ...oldSave, taskOrder: ['frame:frame', 'frame:frame'] }), /priority order/);
+  while (team.status !== 'complete' && team.status !== 'damaged') {
+    const before = new Set(team.bricks.keys());
+    team.step(20);
+    for (const task of plan.tasks) {
+      if (task.bricks.some(brick => !before.has(brick.id) && team.bricks.has(brick.id)))
+        for (const dependency of task.depends)
+          assert.ok(team.taskDone(plan.tasks.find(item => item.id === dependency)!));
+    }
+  }
+  assert.equal(team.status, 'complete');
+  assert.ok(plan.tasks.every(task => team.events.some(event =>
+    event.agent === task.agent && event.message.includes(`Finished ${task.label}.`))));
+  const mission = loadAIMission({
+    kind: 'bricklab-ai-mission', version: 1, brief: 'Legacy large design', model: 'fixture-only', spec,
+    decisions: ['build', 'frame', 'detail'].map(agent => ({
+      agent, explanation: 'Fixture decision.', taskOrder: agent === 'build' ? [] : [`${agent}:${agent}`],
+    })),
+  });
+  assert.deepEqual(mission.team.plan.tasks.map(task => task.id), plan.tasks.map(task => task.id));
+  team.damage();
+  const missing = bricks.filter(brick => !team.bricks.has(brick.id)).map(brick => brick.id);
+  assert.equal(missing.length, 1100);
+  const restored = restoreSnapshot(JSON.parse(JSON.stringify(team.snapshot('damaged')))).team;
+  restored.repair();
+  finish(restored);
+  assert.deepEqual([...restored.bricks.keys()].sort(), [...canonical.keys()].sort());
+  assert.equal(restoreSnapshot(JSON.parse(JSON.stringify(restored.snapshot('repaired')))).team.status, 'complete');
+});
+
 for (const [count, withDetail] of [[2, false], [3, false], [7, false], [6, true]] as const) {
   test(`both builders place structural bricks with real dependency handoffs: ${count} frame, ${withDetail ? 1 : 0} detail`, () => {
     const plan = createPlan(structuralSpec(count, withDetail));
