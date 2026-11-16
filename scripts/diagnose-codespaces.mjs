@@ -2,6 +2,7 @@ import { execFile } from 'node:child_process';
 import { request } from 'node:http';
 import { promisify } from 'node:util';
 import { pathToFileURL } from 'node:url';
+import { isAbsolute } from 'node:path';
 
 const exec = promisify(execFile);
 
@@ -36,6 +37,10 @@ export async function diagnoseCodespaces({ env = process.env, run = exec, httpPr
   if (env.CODESPACES !== 'true' || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(name ?? '')
       || !Number.isInteger(port) || port < 1 || port > 65535)
     return { context: 'run-inside-codespace-with-valid-port' };
+  const ghExecutable = env.BRICKLAB_GH_BIN ?? 'gh';
+  if (env.BRICKLAB_GH_BIN !== undefined
+      && (!isAbsolute(ghExecutable) || /\.(?:cmd|bat)$/i.test(ghExecutable)))
+    return { context: 'invalid-github-cli-path' };
 
   const host = `${name}-${port}.app.github.dev`;
   const origin = `https://${host}`;
@@ -45,18 +50,18 @@ export async function diagnoseCodespaces({ env = process.env, run = exec, httpPr
     env: { ...env, GH_HOST: 'github.com', GH_PROMPT_DISABLED: '1', GH_DEBUG: '', GH_PAGER: 'cat' },
   };
   try {
-    await run('gh', ['api', '--hostname', 'github.com', 'user', '--silent'], options);
+    await run(ghExecutable, ['api', '--hostname', 'github.com', 'user', '--silent'], options);
     report.github = 'reachable-and-authenticated';
   } catch (error) { report.github = failure(error); }
   if (report.github === 'reachable-and-authenticated') {
     try {
-      await run('gh', ['api', '--hostname', 'github.com', `user/codespaces/${name}`, '--silent'], options);
+      await run(ghExecutable, ['api', '--hostname', 'github.com', `user/codespaces/${name}`, '--silent'], options);
       report.codespace = 'metadata-accessible';
     } catch (error) { report.codespace = failure(error); }
   }
   if (report.codespace === 'metadata-accessible') {
     try {
-      const { stdout } = await run('gh', ['codespace', 'ports', '--codespace', name,
+      const { stdout } = await run(ghExecutable, ['codespace', 'ports', '--codespace', name,
         '--json', 'sourcePort,visibility,browseUrl'], options);
       let ports;
       try { ports = JSON.parse(stdout); } catch { /* Report malformed CLI output below. */ }
@@ -76,10 +81,14 @@ export async function diagnoseCodespaces({ env = process.env, run = exec, httpPr
     ['foreignOrigin', { Host: host, Origin: 'https://diagnostic.invalid' }],
     ['spoofedForwarding', { Host: 'diagnostic.invalid', 'X-Forwarded-Host': host, 'X-Forwarded-Proto': 'https' }],
     ['loopbackHost', { Host: `127.0.0.1:${port}` }],
+    ['proxyShape', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host, 'X-Forwarded-Proto': 'https' }],
+    ['proxyForeignOrigin', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host,
+      'X-Forwarded-Proto': 'https', Origin: 'https://diagnostic.invalid' }],
   ]) report.http[label] = await httpProbe(port, headers);
   report.server = report.http.expectedHost === 401 && report.http.expectedOrigin === 401
     && report.http.foreignOrigin === 403 && report.http.spoofedForwarding === 403
-    && report.http.loopbackHost === 403 ? 'private-app-guard-observed'
+    && report.http.loopbackHost === 403 && report.http.proxyShape === 401
+    && report.http.proxyForeignOrigin === 403 ? 'private-app-guard-observed'
     : report.http.expectedHost === 'unreachable' ? 'server-unreachable' : 'unexpected-guard-check-startup-mode';
   return report;
 }

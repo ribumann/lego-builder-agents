@@ -47,7 +47,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
   await new Promise<void>(resolve => reservation.close(() => resolve()));
   const child = spawn(process.execPath, [...nodeArgs, 'server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port),
-      BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '',
+      BRICKLAB_COPILOT: '1', BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT_BIN: '', BRICKLAB_GH_BIN: undefined,
       BRICKLAB_COPILOT_IMAGES: '0', BRICKLAB_COPILOT_MODEL: undefined,
       // Historical lifecycle cases explicitly exercise a one-slot configuration.
       BRICKLAB_PLANNING_CONCURRENCY: '1', BRICKLAB_PROVIDER_CONCURRENCY: '1',
@@ -139,6 +139,7 @@ globalThis.setTimeout = (callback, delay, ...args) => {
 };
 globalThis.clearTimeout = timer => { timers.delete(timer); realClear(timer); };
 const children = [];
+const ghFiles = [];
 const signals = [];
 const waiters = [];
 const azureEvents = [];
@@ -307,15 +308,16 @@ process.kill = (pid, signal) => {
 };
 const actualExec = cp.execFile;
 cp.execFile = (file, args, options, callback) => {
-  if (file === 'gh' && args[0] === 'codespace') {
+  if (args[0] === 'codespace') {
+    ghFiles.push(file);
     if (process.env.TEST_GH_FAILURE) {
       const error = Object.assign(new Error('secret CLI output'), process.env.TEST_GH_FAILURE === 'missing'
         ? { code: 'ENOENT' } : process.env.TEST_GH_FAILURE === 'timeout' ? { killed: true } : { code: 1 });
       process.nextTick(() => callback(error, '', 'secret CLI stderr'));
       return new EventEmitter();
     }
-    process.nextTick(() => callback(null, JSON.stringify([{
-      sourcePort: Number(process.env.PORT), visibility: 'private',
+    process.nextTick(() => callback(null, process.env.TEST_GH_OUTPUT || JSON.stringify([{
+      sourcePort: Number(process.env.PORT), visibility: process.env.TEST_GH_VISIBILITY || 'private',
       browseUrl: 'https://' + process.env.CODESPACE_NAME + '-' + process.env.PORT + '.app.github.dev'
     }]), ''));
     return new EventEmitter();
@@ -331,7 +333,7 @@ cp.execFile[promisify.custom] = (...args) => new Promise((resolve, reject) =>
 syncBuiltinESMExports();
 process.on('message', message => {
   const reply = () => setImmediate(() => process.send({
-    id: message.id, count: children.length, imageDirectories, signals, heartbeatWrites, azureConfig,
+    id: message.id, count: children.length, imageDirectories, signals, heartbeatWrites, azureConfig, ghFiles,
     budgetState, budgetReads, budgetConflicts,
     prompts: children.map(child => child.args[1]), childArgs: children.map(child => child.args),
     azureEvents: azureEvents.map(({ signal, ...event }) => ({ ...event, aborted: signal.aborted })),
@@ -2513,6 +2515,61 @@ test('Local vision metadata gate sends an image only after per-request consent a
   assert.ok(requests.at(-1)?.body.prompt.endsWith('User brief: "A tiny observatory"'));
 });
 
+test('Codespace proxy-shaped requests retain authentication, origin and port checks', { timeout: 25_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    BRICKLAB_CODESPACES_DIAGNOSTICS: '1', TEST_STATIC_FIXTURE: '1',
+  });
+  const origin = server.headers.Origin;
+  const proxy = { Host: `127.0.0.1:${server.port}`, 'X-Forwarded-Host': new URL(origin).host,
+    'X-Forwarded-Proto': 'https' };
+  assert.equal((await server.get('/', proxy)).status, 200);
+  assert.equal((await server.get('/assets/fake-runtime.mjs', proxy)).status, 200);
+  assert.equal((await server.get('/api/status', proxy)).status, 200);
+  assert.equal((await server.post(proxy, '{')).status, 400);
+  assert.equal((await server.get('/', { ...proxy, Authorization: '' })).status, 401);
+  assert.equal((await server.get('/api/status', { ...proxy, Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await server.post({ ...proxy, Origin: 'https://attacker.example' })).status, 403);
+  assert.equal((await server.post({ ...proxy, 'X-Bricklab-Key': '' })).status, 403);
+  for (const invalid of [
+    { Host: `127.0.0.1:${server.port}` },
+    { ...proxy, Host: `127.0.0.1:${server.port + 1}` },
+    { ...proxy, 'X-Forwarded-Proto': '' },
+    { ...proxy, Host: 'attacker.example' },
+    { ...proxy, 'X-Forwarded-Host': 'attacker.example' },
+    { ...proxy, 'X-Forwarded-Host': `${proxy['X-Forwarded-Host']}, attacker.example` },
+    { ...proxy, 'X-Forwarded-Proto': 'http' },
+    { ...proxy, 'X-Forwarded-Proto': 'https, http' },
+  ]) assert.equal((await server.get('/api/status', invalid)).status, 403);
+
+  const failing = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    TEST_GH_FAILURE: 'timeout',
+  });
+  assert.equal((await failing.get('/api/status', {
+    Host: `localhost:${failing.port}`, 'X-Forwarded-Host': new URL(failing.headers.Origin).host,
+    'X-Forwarded-Proto': 'https',
+  })).status, 503);
+  for (const visibility of ['public', 'org']) {
+    const unsafePort = await startLifecycleServer(t, 'linux', {
+      BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+      TEST_GH_VISIBILITY: visibility,
+    });
+    assert.equal((await unsafePort.get('/api/status', {
+      Host: `localhost:${unsafePort.port}`, 'X-Forwarded-Host': new URL(unsafePort.headers.Origin).host,
+      'X-Forwarded-Proto': 'https',
+    })).status, 503);
+  }
+  const invalidPortData = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    TEST_GH_OUTPUT: 'not json',
+  });
+  assert.equal((await invalidPortData.get('/api/status', {
+    Host: `localhost:${invalidPortData.port}`, 'X-Forwarded-Host': new URL(invalidPortData.headers.Origin).host,
+    'X-Forwarded-Proto': 'https',
+  })).status, 503);
+});
+
 test('Codespace diagnostics redact headers and never trust forwarded values', { timeout: 15_000 }, async t => {
   const server = await startLifecycleServer(t, 'linux', {
     BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
@@ -2555,6 +2612,16 @@ test('Codespace private-port errors distinguish missing CLI and timeout without 
     assert.match(body, expected);
     assert.doesNotMatch(body, /secret CLI/);
   }
+});
+
+test('Codespace port checks use the configured absolute CLI rather than PATH', { timeout: 15_000 }, async t => {
+  const executable = join(tmpdir(), 'bricklab-fixture-gh');
+  const server = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
+    BRICKLAB_GH_BIN: executable,
+  });
+  assert.equal((await server.get()).status, 200);
+  assert.deepEqual((await server.command({})).ghFiles, [executable, executable]);
 });
 
 test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {
@@ -2794,5 +2861,15 @@ test('Codespace mode rejects missing context, unsafe binding and development ser
     assert.ifError(result.error);
     assert.equal(result.status, 1);
     assert.match(result.stderr, /requires a Codespace/);
+  }
+  for (const executable of ['', 'gh', 'relative/gh', join(tmpdir(), 'gh.cmd')]) {
+    const result = spawnSync(process.execPath, ['server.mjs', '--production'], {
+      env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_CODESPACES: '1',
+        CODESPACES: 'true', CODESPACE_NAME: 'test-codespace', BRICKLAB_GH_BIN: executable },
+      encoding: 'utf8', timeout: 15_000,
+    });
+    assert.ifError(result.error);
+    assert.equal(result.status, 1);
+    assert.match(result.stderr, /BRICKLAB_GH_BIN must be an absolute path/);
   }
 });

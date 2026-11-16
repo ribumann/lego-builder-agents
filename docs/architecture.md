@@ -186,8 +186,11 @@ Live long-stream reliability and real-timeout behavior remain unverified.
 - On a local run, the server listens on loopback by default. Exact Host/Origin,
   a per-process request token, bounded input, and provider opt-ins protect its
   planning routes; this is not a hardened public multi-user service.
-- Codespaces adds exact forwarded-host/origin checks, a separate app login, and
-  a fresh GitHub CLI check that the port is private. GitHub/Copilot sign-in and
+- Codespaces accepts the exact public Host or the observed loopback Host plus
+  exact forwarded host/protocol shape. Forwarding headers are forgeable and
+  establish neither proxy identity nor privacy; exact Origin checks, separate
+  app login, request tokens and a fresh GitHub CLI private-port check remain
+  mandatory. GitHub/Copilot sign-in and
   BrickLab's app password are distinct credentials. Never publish the port or
   paste GitHub credentials or tokens into BrickLab or chat. For the private
   app's HTTPS Basic Authentication prompt only, enter username `bricklab` and

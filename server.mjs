@@ -113,10 +113,14 @@ function quarantinePlanning(message = copilotImageLockMessage) {
 }
 const codespaces = process.env.BRICKLAB_CODESPACES === '1';
 const codespaceName = process.env.CODESPACE_NAME;
+const ghExecutable = process.env.BRICKLAB_GH_BIN ?? 'gh';
 if (codespaces && (!production || process.env.CODESPACES !== 'true'
     || !/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(codespaceName || '')
     || host !== '127.0.0.1' || !Number.isInteger(port) || port < 1 || port > 65535))
   throw new Error('BRICKLAB_CODESPACES=1 requires a Codespace, npm start, a valid PORT, and HOST=127.0.0.1.');
+if (codespaces && process.env.BRICKLAB_GH_BIN !== undefined
+    && (!isAbsolute(ghExecutable) || /\.(?:cmd|bat)$/i.test(ghExecutable)))
+  throw new Error('BRICKLAB_GH_BIN must be an absolute path to the GitHub CLI executable.');
 const forwardedOrigin = codespaces ? `https://${codespaceName}-${port}.app.github.dev` : null;
 const allowedHosts = new Set(hosted ? [new URL(hostedOrigin).host] : codespaces
   ? [new URL(forwardedOrigin).host] : [`localhost:${port}`, `127.0.0.1:${port}`]);
@@ -146,6 +150,10 @@ const sameSecret = (value, expected) => typeof value === 'string'
   && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 const sameToken = token => sameSecret(token, sessionKey);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const acceptedRequestHost = req => allowedHosts.has(req.headers.host)
+  || (codespaces && [`localhost:${port}`, `127.0.0.1:${port}`].includes(req.headers.host)
+    && req.headers['x-forwarded-host'] === new URL(forwardedOrigin).host
+    && req.headers['x-forwarded-proto'] === 'https');
 
 async function readPlanningBody(req) {
   const declared = req.headers['content-length'];
@@ -189,7 +197,7 @@ function safePlanningError(error) {
 async function verifyPrivatePort() {
   let stdout;
   try {
-    ({ stdout } = await runFile('gh', ['codespace', 'ports', '--codespace', codespaceName,
+    ({ stdout } = await runFile(ghExecutable, ['codespace', 'ports', '--codespace', codespaceName,
       '--json', 'sourcePort,visibility,browseUrl'], {
       timeout: 15_000, maxBuffer: 64_000, env: { ...process.env, GH_PROMPT_DISABLED: '1' },
     }));
@@ -368,7 +376,8 @@ const server = http.createServer(async (req, res) => {
   catch { return send(res, 400, { error: 'Invalid request URL.' }); }
   if (codespaces) {
     res.setHeader('Cache-Control', 'no-store');
-    const acceptedHost = allowedHosts.has(req.headers.host);
+    // This recognizes a proxy-shaped request, not a trusted proxy or an identity.
+    const acceptedHost = acceptedRequestHost(req);
     const acceptedOrigin = !req.headers.origin || allowedOrigins.has(req.headers.origin);
     if (codespacesDiagnostics && diagnosticRequests++ < 20) {
       const classify = (value, expected) => value === undefined ? 'absent'
@@ -396,7 +405,7 @@ const server = http.createServer(async (req, res) => {
     catch (error) { return send(res, 503, { error: error.message }); }
   }
   if (url.pathname.startsWith('/api/')) {
-    if (!allowedHosts.has(req.headers.host)) return send(res, 403, { error: 'API is local-only. Open the app on localhost.' });
+    if (!acceptedRequestHost(req)) return send(res, 403, { error: 'API is local-only. Open the app on localhost.' });
     if (req.method === 'POST' && !allowedOrigins.has(req.headers.origin))
       return send(res, 403, { error: 'API POST requests require this app\'s exact origin.' });
     if (req.method === 'GET' && url.pathname === '/api/status') {
