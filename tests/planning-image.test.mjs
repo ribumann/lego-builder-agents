@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { once } from 'node:events';
 import { dirname } from 'node:path';
@@ -77,6 +77,13 @@ test('Copilot attachment exists only during the awaited callback and is removed 
   assert.equal(await withCopilotImageAttachment({ image, imageConsent: true }, async path => {
     file = path;
     assert.deepEqual(await readFile(path), png);
+    if (typeof process.getuid === 'function') {
+      for (const [location, expectedMode] of [[dirname(path), 0o700], [path, 0o600]]) {
+        const info = await stat(location);
+        assert.equal(info.uid, process.getuid());
+        assert.equal(info.mode & 0o777, expectedMode);
+      }
+    }
     return 'result';
   }), 'result');
   await assert.rejects(access(file), { code: 'ENOENT' });

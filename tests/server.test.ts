@@ -6,9 +6,9 @@ import { SignJWT } from 'jose';
 import { createServer } from 'node:net';
 import { once } from 'node:events';
 import { request, createServer as createHttpServer } from 'node:http';
-import { mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
+import { access, mkdtemp, writeFile, rm, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
-import { join, delimiter } from 'node:path';
+import { join, dirname, delimiter } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { Readable } from 'node:stream';
 import { createPlanningCapacity } from '../planning-capacity.mjs';
@@ -117,11 +117,15 @@ import { createAzurePlanner, getAzurePlannerDiagnostic } from ${JSON.stringify(n
 import { createWindowsCopilotJobRunner } from ${JSON.stringify(new URL('../src/windows-copilot-job-runner.mjs', import.meta.url).href)};
 const actualReadFile = fs.readFile;
 const actualMkdtemp = fs.mkdtemp;
+const actualRm = fs.rm;
 let imageDirectories = 0;
 fs.mkdtemp = (prefix, ...args) => {
   if (basename(String(prefix)) === 'bricklab-image-') imageDirectories++;
   return actualMkdtemp(prefix, ...args);
 };
+fs.rm = (path, ...args) => process.env.TEST_IMAGE_CLEANUP_FAILURE === '1'
+  && basename(String(path)).startsWith('bricklab-image-')
+  ? Promise.reject(new Error('synthetic cleanup failure')) : actualRm(path, ...args);
 fs.readFile = (file, ...args) => process.env.TEST_STATIC_FIXTURE === '1'
   && ((basename(String(file)) === 'index.html' && basename(dirname(String(file))) === 'dist')
     || ['fake-runtime.mjs', 'fake-runtime.wasm', 'fake-style.css'].includes(basename(String(file))))
@@ -1874,7 +1878,7 @@ test('local API rejects cross-origin, wrong-host, malformed and unapproved model
   assert.equal(forwarded.status, 403, 'Forwarding is not implicitly enabled');
 });
 
-test('Copilot images fail closed without a supported Windows opt-in before attachment creation or invocation', { timeout: 30_000 }, async t => {
+test('Copilot images fail closed without a supported platform opt-in before attachment creation or invocation', { timeout: 30_000 }, async t => {
   const jpeg = await readFile(new URL('./fixtures/vision-fixture.jpg', import.meta.url));
   const metadata = Buffer.alloc(5000);
   metadata[0] = 0xff;
@@ -1886,7 +1890,7 @@ test('Copilot images fail closed without a supported Windows opt-in before attac
   assert.ok(Buffer.byteLength(payload) > 4096, 'The bounded image request must exceed the text-only limit');
   for (const platform of ['linux', 'darwin', 'win32']) {
     const server = await startLifecycleServer(t, platform, {
-      BRICKLAB_COPILOT_IMAGES: platform === 'win32' ? '0' : '1',
+      BRICKLAB_COPILOT_IMAGES: platform === 'darwin' ? '1' : '0',
       BRICKLAB_COPILOT_BIN: join(process.cwd(), 'fixture-copilot.exe'),
     });
     assert.equal((await server.post({}, JSON.stringify({ world: 'space', brief: 'A sculpture', image }))).status, 400,
@@ -1898,7 +1902,7 @@ test('Copilot images fail closed without a supported Windows opt-in before attac
     for (const headers of [{}, ndjson]) {
       const response = await server.post(headers, payload);
       assert.equal(response.status, 503, `${platform} must reject before any CLI invocation`);
-      assert.match((await response.json() as { error: string }).error, /unavailable in Codespaces\/Linux.*process-tree containment.*No image was sent/);
+      assert.match((await response.json() as { error: string }).error, /opted-in private Linux or Windows server.*No image was sent/);
     }
     const state = await server.command({ action: 'inspect' });
     assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, false);
@@ -1912,6 +1916,92 @@ test('Copilot images fail closed without a supported Windows opt-in before attac
       ? { action: 'job-complete', output: imageJobOutput() } : { action: 'complete', spec: lifecycleSpec });
     assert.equal((await text).status, 200, 'Text-only Copilot remains available');
   }
+});
+
+test('Linux image request uses an isolated attachment until its managed process closes', { timeout: 30_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { BRICKLAB_COPILOT_IMAGES: '1' });
+  assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, true);
+  assert.equal((await server.post({}, JSON.stringify({ world: 'space', brief: 'test', image: consentedTestImage }))).status, 400);
+  const response = server.post({}, JSON.stringify({ world: 'space', brief: 'test', image: consentedTestImage, imageConsent: true }));
+  const state = await server.command({ action: 'started', count: 1 });
+  const args: string[] = state.childArgs[0];
+  const index = args.indexOf('--attachment');
+  assert.ok(index > 0);
+  const attachment = args[index + 1];
+  assert.deepEqual(await readFile(attachment), Buffer.from(consentedTestImage.data, 'base64'));
+  assert.equal((await server.post()).status, 429);
+  await server.command({ action: 'complete', spec: lifecycleSpec });
+  assert.equal((await response).status, 200);
+  await assert.rejects(access(attachment), { code: 'ENOENT' });
+});
+
+test('Linux image timeout keeps the attachment and slot until managed cleanup completes', { timeout: 30_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { BRICKLAB_COPILOT_IMAGES: '1' });
+  const response = await server.post(ndjson, JSON.stringify({
+    world: 'space', brief: 'test', image: consentedTestImage, imageConsent: true,
+  }));
+  const started = await server.command({ action: 'started', count: 1 });
+  const args: string[] = started.childArgs[0];
+  const attachment = args[args.indexOf('--attachment') + 1];
+  const timedOut = await server.command({ action: 'advance', ms: 300_000 });
+  assert.deepEqual(timedOut.signals, [{ pid: -1000000, signal: 'SIGKILL' }]);
+  assert.equal(streamEvents(await response.text()).at(-1).type, 'error');
+  await access(attachment);
+  assert.equal((await server.post()).status, 429);
+  await server.command({ action: 'close' });
+  for (let i = 0; i < 50; i++) {
+    try { await access(attachment); await new Promise(resolve => setTimeout(resolve, 20)); }
+    catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, 'ENOENT');
+      return;
+    }
+  }
+  assert.fail('Timed-out attachment was not removed');
+});
+
+test('Linux image disconnect terminates its group before deleting its attachment', { timeout: 30_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', { BRICKLAB_COPILOT_IMAGES: '1' });
+  const response = await server.post(ndjson, JSON.stringify({
+    world: 'space', brief: 'test', image: consentedTestImage, imageConsent: true,
+  }));
+  const started = await server.command({ action: 'started', count: 1 });
+  const args: string[] = started.childArgs[0];
+  const attachment = args[args.indexOf('--attachment') + 1];
+  await response.body!.cancel();
+  const stopped = await server.command({ action: 'advance', ms: 2000 });
+  assert.deepEqual(stopped.signals.map((entry: { signal: string }) => entry.signal), ['SIGTERM', 'SIGKILL']);
+  await access(attachment);
+  assert.equal((await server.post()).status, 429);
+  await server.command({ action: 'close' });
+  for (let i = 0; i < 50; i++) {
+    try { await access(attachment); await new Promise(resolve => setTimeout(resolve, 20)); }
+    catch (error) {
+      assert.equal((error as NodeJS.ErrnoException).code, 'ENOENT');
+      return;
+    }
+  }
+  assert.fail('Cancelled attachment was not removed');
+});
+
+test('Linux image cleanup failure quarantines planning without exposing the attachment', { timeout: 30_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_COPILOT_IMAGES: '1', TEST_IMAGE_CLEANUP_FAILURE: '1',
+  });
+  const response = server.post({}, JSON.stringify({
+    world: 'space', brief: 'test', image: consentedTestImage, imageConsent: true,
+  }));
+  const started = await server.command({ action: 'started', count: 1 });
+  const args: string[] = started.childArgs[0];
+  const attachment = args[args.indexOf('--attachment') + 1];
+  t.after(() => rm(dirname(attachment), { recursive: true, force: true }));
+  await server.command({ action: 'complete', spec: lifecycleSpec });
+  const result = await response;
+  assert.equal(result.status, 502);
+  const body = await result.text();
+  assert.match(body, /cleanup could not be confirmed/);
+  assert.doesNotMatch(body, /data:image|image\.png|synthetic cleanup failure/);
+  assert.equal((await server.post()).status, 429);
+  assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, false);
 });
 
 const windowsImageConfig = { BRICKLAB_COPILOT_IMAGES: '1',
