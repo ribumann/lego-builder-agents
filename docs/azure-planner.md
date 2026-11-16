@@ -1,10 +1,16 @@
 # Azure Foundry planner
 
-The adapter sends one managed-identity-authenticated HTTP request to the
-configured Azure OpenAI model deployment. It needs no Copilot CLI, client API
-key, retail-price lookup or preliminary model call. The five visible game
-agents execute and check the returned geometry locally, not as five model calls.
-This describes the source contract; deployment is verified separately.
+Each Azure planning attempt sends one managed-identity-authenticated HTTP
+request to the configured Azure OpenAI deployment. A completed invalid design
+may cause one correction request; transport and provider failures are not
+retried. It needs no Copilot CLI, client API key, retail-price lookup or
+preliminary model call. The five visible game agents execute and check the
+returned geometry locally, not as five model calls. This describes the source
+contract; deployment evidence is separate.
+For the current preview revision, verified settings, and evidence limits, see
+[architecture and release status](architecture.md#deployment-and-release-evidence).
+The owner recorded two text-only one-attempt baseline plans through the live
+UI; neither exercised correction or vision.
 
 ## Anonymous hosted preview
 
@@ -57,7 +63,8 @@ The correction prompt remains capped at 32,000 bytes; a larger rejected design
 fails explicitly, without truncating or fabricating geometry.
 
 Thus **50 submissions can make up to 100 Azure model requests per UTC day**,
-not 50 provider calls. No second reservation, refund or counter reset occurs.
+not 50 provider calls. A correction does not increment the count again or
+refund usage, and does not reset the daily counter.
 This is the maximum attributable to submissions admitted that day, not a
 provider billing-window limit: in-flight work can cross UTC midnight.
 The old ledger and environment names are unchanged. Each attempt retains the
@@ -109,7 +116,7 @@ world/brief validation as text planning. `azureImages` in status reports the
 enabled Azure image capability.
 
 Images require explicit `imageConsent:true`, with
-`image:{mimeType,data}` containing PNG/JPEG/WebP base64. Validation checks actual
+`image:{mimeType,data}` containing PNG or JPEG base64. Validation checks actual
 type, at most 1,000,000 decoded bytes, dimensions at most 4096 each and at most
 8 million pixels before counting or inference. The adapter sends one user
 message containing text plus an `image_url` data URL. There are no Azure image
@@ -155,5 +162,8 @@ cancellation does not prove that the remote service stops computing or billing.
 
 Private local/Codespaces Azure keeps its Entra verifier and exact request
 protections, without a daily counter or obsolete spend-budget opt-in. Local
-capacity remains 8 total / 2 per provider. No live paid inference, real parked
-provider or UAT deployment is implied by mock/unit checks.
+capacity remains 8 total / 2 per provider. The owner verified the current
+public preview package/settings and two baseline text plans through its UI;
+the earlier synthetic planning/build case is also described in the architecture
+notes. These examples do not establish correction/vision behavior, broad
+provider reliability, or user acceptance.

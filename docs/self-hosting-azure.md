@@ -1,124 +1,84 @@
 # Self-hosting BrickLab on Azure
 
-This guide describes an isolated, public Azure deployment with an Azure-hosted
-planner. **It is not yet a validated end-to-end deployment:** the templates
-have provisioned the individual resources. One staging deployment loaded a
-private Blob package with managed identity, and a non-paid synthetic stream
-completed after 271.6 seconds; an earlier stream closed early. Full
-reproducibility, reliable streaming, edge protections and hosted model
-generation were not established by that staging sample. Subsequently, exact
-application revision `2720ec7` with the user-selected Terra default completed
-one representative 100-brick airplane in 29.619 seconds: valid geometry,
-100/100 bricks built, 4/4 tasks and 3/3 inspection checks, with a recognizable
-cuboid airplane. It used one model request without correction. This is
-one-case evidence, not general reliability or live correction-path validation.
-The simplified preview uses an anonymous
-managed-identity Azure wrapper with a mandatory shared call count; deployment
-defaults keep paid planning off until the real configuration is verified.
-Until these checks and the application integration are complete, this is a
-staging guide, not a production recipe.
-
-An independent sample also deployed the base, private-storage and edge
-templates, built revision `084cfb4` on a private runner and served its immutable
-package through the default Front Door hostname with planners disabled. That
-sample did not reproduce custom-domain binding or initialize a second budget.
-The sample's ARM deployment reported success while its new Front Door hostname
-still returned 404 for several minutes; wait for the real endpoint to work
-over verified HTTPS before considering the edge ready.
-Two synthetic streams through the sample edge, from separate clients, each
-delivered 22 ordered heartbeats over 315 seconds with maximum observed delivery
-lag below two seconds. Other attempts ended in client connection resets without
-adequate progress telemetry; their cause remains unknown. These results do not
-establish reliable transport through the production custom domain.
+This guide is a self-hosting recipe; running it creates resources in your
+subscription and requires your own configuration and acceptance checks. The
+current public preview is a separate deployment: its owner confirms merged
+revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with the Terra planner
+selected, and verified the package/settings and public HTTPS response with
+asset `index-B5T0Pdlt.js` on 2026-11-16. One earlier synthetic 100-brick
+airplane completed planning in 29.619 seconds with valid geometry and then
+built 100/100 bricks with 4/4 tasks and 3/3 inspection checks. Separately, two
+guarded text-only baseline plans ran through the deployed
+UI: a 99-brick spaceship (22.332s) and a hollow observatory with separate
+rover (97 bricks, 27.123s), each one adapter attempt and 3/3 local checks.
+Their exact UTC request windows are in the
+[architecture evidence](architecture.md#deployment-and-release-evidence).
+These examples do not establish broad reliability, correction or vision
+behavior, end-to-end timeout/cleanup, or user acceptance. Private
+Codespaces setup and real-microphone voice acceptance are also unverified.
+The owner also confirms hosted Azure is enabled with managed identity, HTTPS
+only, Front Door-only app ingress using the exact Front Door ID and default
+deny, and independent SCM deny-all. These are deployment-owner checks, not a
+new end-to-end security test in this guide. Live status reports Azure
+configured for anonymous use, with the shared 50/day allowance and 20/20
+capacity settings.
 
 ## Prerequisites and costs
 
-use your own Azure subscription, a dedicated resource group, and a DNS name
+Use your own Azure subscription, a dedicated resource group, and a DNS name
 you control. You need permission to create resources and role assignments,
 Azure CLI with Bicep, Node.js 24 and npm, Python 3, Git, and a Linux build
 environment.
-An Azure OpenAI model deployment and Linux App Service B1 must be available in
-the chosen subscription. These templates currently use Sweden Central for
-storage and the model and Italy North for the web app; the preview contract
-does not pin a model version or region.
-Check quota, regional availability and organizational policies before
-provisioning. Do not use another application's identity, storage, model or
-developer credentials.
+An Azure OpenAI deployment and Linux App Service B1 must be available in the
+chosen subscription. The base template places the web app in Italy North by
+default; storage/model resource locations are parameters or belong to the
+existing Azure OpenAI account. The application adapter accepts the configured
+Azure endpoint and deployment; it does not require the preview's model,
+version, or region. Check current availability, quota, cost and organizational
+policies for your own deployment before provisioning. Do not use another
+application's identity, storage, model or developer credentials.
 
-### Dedicated model throughput quota
+### Current public-preview planner (not a general model requirement)
 
-The base template's `plannerCapacity` parameter defaults to **200** for the
-dedicated GPT-5.4 DataZoneStandard deployment: Azure currently reports
-200,000 tokens/minute and 200 requests/minute at this allocation. This is
-[pay-per-token standard capacity](https://learn.microsoft.com/azure/foundry/foundry-models/concepts/deployment-types),
-not fixed-cost provisioned throughput. Check unallocated regional quota
-before deployment; do not reduce another application's allocation to fit.
-The approved preview allocation on 2026-11-15 used 201 of 333 shared regional
-GPT-5.4 DataZoneStandard units, leaving 132 free.
-
-Capacity is separate from the app's 20 simultaneous requests and 50 shared
-attempts per UTC day. It does not guarantee 20 simultaneous large completions:
-prompt and maximum completion estimates, short rate windows and service
-availability can still cause 429 responses. The initial 1,000 TPM allocation
-produced a confirmed provider 429; its original subtype and rate-limit
-headers were not retained, so the exact historical cause is unknown.
-
-To reproduce the chosen quota allocation on an existing dedicated deployment,
-update only its capacity, not the entire infrastructure template:
-
-```bash
-MODEL_ID="/subscriptions/$SUBSCRIPTION/resourceGroups/$RG/providers/Microsoft.CognitiveServices/accounts/$AI/deployments/bricklab-planner-gpt54"
-az resource update --subscription "$SUBSCRIPTION" --ids "$MODEL_ID" \
-  --api-version 2024-10-01 --set sku.capacity=200
-az cognitiveservices account deployment show --subscription "$SUBSCRIPTION" \
-  --resource-group "$RG" --name "$AI" --deployment-name bricklab-planner-gpt54
-az cognitiveservices usage list --subscription "$SUBSCRIPTION" --location swedencentral
-```
-
-Set `AI` to the dedicated account name and first confirm the existing SKU is
-`DataZoneStandard`. Preserve its model, content policy, all other deployments
-and application settings. Pass `plannerCapacity=200` on subsequent base-template
-deployments; do not restore the former capacity of 1. Wait at least one rate
-window after a change before a separately approved bounded inference check.
-
-### Selected default: GPT-6.1 Terra
-
-The user selected and retained the working default on 2026-11-15:
+The Azure owner confirms the current public preview uses:
 `bricklab-planner-terra`: `gpt-6.1-terra` version `2026-10-26`,
 `GlobalStandard`, capacity **40**, with `bricklab-public-safe` and automatic
 version upgrades disabled. Azure accepted this deployment in the dedicated
 Sweden Central account and reports 40 requests/minute and 40,000 tokens/minute.
-Global Standard is not restricted to EU processing. GPT-5.4's existing
-200-unit allocation remains unchanged; it is not the selected startup planner
-and there is no automatic model fallback.
-Terra public unit prices were not returned by the queried Azure Retail API;
-do not infer an invoice price from another model.
+This is the deployment configuration for that preview, not a model/version/
+region constraint in the application adapter. Global Standard does not promise
+EU-only processing. The app does not automatically fall back to another model.
 
-`infra/terra-planner.bicep` creates only this deployment under an existing
-dedicated account and existing content policy. It does not change the app,
-other deployments, quota limits, identities, or the usage ledger. Confirm the
-exact model/version/SKU and unallocated quota in your account before using it:
+`infra/terra-planner.bicep` can create this deployment under an existing
+dedicated account and content policy. It does not change the app, other
+deployments, identities, or the usage counter. To reproduce this specific
+preview deployment, first check current model/SKU availability and quota in
+your own account:
 
 ```powershell
 az deployment group create --subscription $Subscription --resource-group $Group `
   --template-file infra\terra-planner.bicep --parameters accountName=$AI capacity=40
 ```
 
-The durable live app setting is
+The current preview's live app setting is
 `AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`; ordinary package updates must
 preserve it. No model switch or additional probe is needed to retain it.
-For a separately authorized installation or configuration change, first verify
+For any separately authorized configuration change, first verify
 `/api/status` reports no active planning request, then set only that app setting
 on the existing app and restart. Preserve every other setting, the private package pointer,
 the shared 50-submission daily ledger and 20/20 concurrency controls. The base
-template still creates the retained GPT-5.4 deployment at capacity 200, but its
-`plannerDeploymentName` parameter and `openAiDeployment` output default to
-`bricklab-planner-terra`. That output is selection metadata, not proof the
-deployment exists: new installations must provision the isolated Terra
-template first. The parameter sets the actual `AZURE_OPENAI_DEPLOYMENT` app setting as well
-as the output, but keeps `BRICKLAB_AZURE_AI=0`. It does not create a deployment
-or enable paid planning. Do not copy the retained GPT-5.4 resource name into
-startup settings or redeploy the whole base stack to switch a model.
+template's `plannerDeploymentName` parameter defaults to
+`bricklab-planner-terra` and sets `AZURE_OPENAI_DEPLOYMENT`; this is a setting,
+not proof that the deployment exists. The template creates its separate
+GPT-5.4 DataZoneStandard resource with `plannerCapacity` defaulting to 200
+quota units, but the app does not automatically use it as a fallback. This
+template-specific resource and quota are not required by the application.
+The base template keeps `BRICKLAB_AZURE_AI=0`. It does not enable paid planning.
+For a different model, use a deployment supported by the selected Azure
+service and set its endpoint/deployment explicitly; do not assume the preview's
+model choice is required. The base Bicep parameter currently allows only its
+declared Terra and GPT-5.4 deployment names; extend that allowlist or configure
+the app setting directly when using another deployment name.
 After an authorized restart verify the intended package,
 an available allowance snapshot and one separately authorized guarded
 submission. A configured status or successful ARM deployment is not proof of
@@ -141,7 +101,7 @@ not reset the package pointer, existing ledger aliases, allowance or security
 settings. The current live app already has this value: **do not run it again
 merely to retain the working default**.
 
-For a new installation, provision the isolated Terra deployment and finish
+For a new installation using the preview's Terra deployment, provision it and finish
 the managed-identity, endpoint, existing/new usage-container, origin and
 network setup below before a separately authorized paid opt-in. The explicit
 opt-in is a different operation and is not part of a routine package update:
@@ -170,27 +130,27 @@ az cognitiveservices account deployment delete --subscription $Subscription `
   --resource-group $Group --name $AI --deployment-name bricklab-planner-terra
 ```
 
-Costs start when resources are provisioned even if the origin is disabled.
-Estimate using your subscription's
+Costs start when resources are provisioned, even if the origin is disabled.
+Estimate your subscription's App Service, Front Door, storage, private
+networking, model usage and other costs with the
 [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/).
-For example, at published USD retail rates, one Italy North Linux B1 at
-$0.018/hour, Front Door Standard at $35/month, a $0.01/hour private endpoint,
-and a $0.50/month private DNS zone total about $55.94 for 730 hours. With
-100,000 European requests, 10 GB edge-to-client, 1 GB edge-to-origin and 1 GB
-private-link processing, the illustrative subtotal is about $56.89/month,
-before storage, DNS queries, cross-region traffic, tax and other charges.
-Actual agreement prices, traffic geography, uptime and rates can differ.
+Actual rates and charges vary by agreement, region and traffic. Neither the
+daily request limit nor the concurrency bound is a billing cap.
 See [App Service retail prices](https://prices.azure.com/api/retail/prices?%24filter=serviceName%20eq%20%27Azure%20App%20Service%27%20and%20skuName%20eq%20%27B1%27%20and%20armRegionName%20eq%20%27italynorth%27),
 [Front Door](https://azure.microsoft.com/pricing/details/frontdoor/),
 [Private Link](https://azure.microsoft.com/pricing/details/private-link/)
 and [DNS](https://azure.microsoft.com/pricing/details/dns/).
 
-The preview requires a shared, count-only limit of 50 explicit planning submissions per UTC day,
-backed by private Blob state and conditional writes across app instances.
+The public Azure preview is configured with a shared application limit of 50
+explicit planning submissions per UTC day, backed by private Blob state and
+conditional writes across app instances. The limit is configurable from 1 to
+100 with `BRICKLAB_AZURE_DAILY_CALLS`.
 Each submission may make one initial Azure model request and at most one
 correction of a completed invalid design: up to 100 model requests per day.
-Both share one reservation, deadline and capacity slot. Network/authentication/
-429/timeout failures are not replayed; no usage is refunded or reset.
+The initial and possible correction request share one submission count,
+deadline and capacity slot. Network/authentication/
+429/timeout failures are not replayed; correction does not refund usage or
+increment the count again. Daily usage follows the UTC day boundary.
 It also limits hosted planning to 20 in-flight requests. Keep one worker and
 one Node process unless a shared in-flight semaphore is added and verified.
 Public visitors are anonymous; no per-client fairness or identity is claimed.
