@@ -1,11 +1,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { access, readFile } from 'node:fs/promises';
-import { createServer } from 'node:http';
-import { once } from 'node:events';
 import { dirname } from 'node:path';
 import { MAX_IMAGE_BYTES, validatePlanningImage, withCopilotImageAttachment } from '../planning-image.mjs';
-import { createLocalPlanner } from '../local-planner.mjs';
 import { createOpenAICompatiblePlanner } from '../openai-compatible-planner.mjs';
 
 const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAIAAACQd1PeAAAADElEQVR4nGP4z8AAAAMBAQDJ/pLvAAAAAElFTkSuQmCC', 'base64');
@@ -58,7 +55,6 @@ test('image validation requires per-request consent and rejects invalid encoding
     { ...jpegImage, data: jpeg.subarray(0, jpeg.length - 2).toString('base64') },
   ]) assert.throws(() => validatePlanningImage(bad, true), /bounded PNG or JPEG/);
 });
-
 test('raw image byte ceiling accepts the exact boundary and rejects one byte over', () => {
   const ancillary = Buffer.alloc(MAX_IMAGE_BYTES - png.length);
   ancillary.writeUInt32BE(ancillary.length - 12, 0);
@@ -147,58 +143,4 @@ test('compatible cancellation and provider failures never expose image contents'
     fetchImpl: async () => { throw new Error(image.data); } });
   await assert.rejects(failed.plan({ prompt: 'brief', image, imageConsent: true }),
     error => !error.message.includes(image.data) && !error.cause);
-});
-
-async function fakeOllama(t, { capabilities = ['completion', 'vision'], blockShow = false } = {}) {
-  const calls = [];
-  const server = createServer(async (req, res) => {
-    let body = '';
-    for await (const chunk of req) body += chunk;
-    calls.push({ path: req.url, body });
-    if (blockShow && req.url === '/api/show') return;
-    res.setHeader('content-type', 'application/json');
-    res.end(JSON.stringify(req.url === '/api/tags' ? { models: [{ name: 'vision-model' }] }
-      : req.url === '/api/show' ? { capabilities }
-        : { done: true, response: '{"model":"custom"}' }));
-  });
-  server.listen(0, '127.0.0.1');
-  await once(server, 'listening');
-  t.after(async () => {
-    const closed = new Promise(resolve => server.close(resolve));
-    server.closeAllConnections();
-    await closed;
-  });
-  return { calls, url: `http://127.0.0.1:${server.address().port}` };
-}
-
-test('local vision checks model metadata before sending one prompt and image', async t => {
-  const service = await fakeOllama(t);
-  const planner = createLocalPlanner({ enabled: true, model: 'vision-model', url: service.url });
-  assert.equal(await planner.plan('brief', { image, imageConsent: true }), '{"model":"custom"}');
-  assert.deepEqual(service.calls.map(call => call.path), ['/api/tags', '/api/show', '/api/generate']);
-  assert.equal(service.calls[0].body, '');
-  assert.deepEqual(JSON.parse(service.calls[1].body), { model: 'vision-model' });
-  const payload = JSON.parse(service.calls[2].body);
-  assert.equal(payload.prompt, 'brief');
-  assert.deepEqual(payload.images, [image.data]);
-  assert.equal(JSON.stringify(planner.status()).includes(image.data), false);
-});
-
-test('local missing consent, unverified capabilities and cancellation never send image to generation', async t => {
-  const service = await fakeOllama(t, { capabilities: ['completion'] });
-  const planner = createLocalPlanner({ enabled: true, model: 'vision-model', url: service.url });
-  await assert.rejects(planner.plan('brief', { image }), /consent/);
-  assert.equal(service.calls.length, 0);
-  await assert.rejects(planner.plan('brief', { image, imageConsent: true }), /does not report image vision/);
-  assert.deepEqual(service.calls.map(call => call.path), ['/api/tags', '/api/show']);
-  assert.ok(service.calls.every(call => !call.body.includes(image.data) && !call.body.includes('brief')));
-  const waiting = await fakeOllama(t, { blockShow: true });
-  const cancel = new AbortController();
-  const cancelled = createLocalPlanner({ enabled: true, model: 'vision-model', url: waiting.url });
-  const promise = cancelled.plan('brief', { image, imageConsent: true, signal: cancel.signal });
-  for (let i = 0; i < 100 && waiting.calls.length < 2; i++) await new Promise(resolve => setTimeout(resolve, 10));
-  assert.equal(waiting.calls.length, 2);
-  cancel.abort();
-  await assert.rejects(promise, /cancelled/);
-  assert.deepEqual(waiting.calls.map(call => call.path), ['/api/tags', '/api/show']);
 });

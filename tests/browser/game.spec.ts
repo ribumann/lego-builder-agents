@@ -226,13 +226,11 @@ test('Copilot provider failures are visible and never become a fake AI build', a
 
 test('cloud is default but unavailable setup never submits or falls back to templates', async ({ page }) => {
   let requests = 0;
-  let localRequests = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
     copilot: false, sessionKey: 'fixture',
     planner: { state: 'off', message: 'Run copilot login and restart with BRICKLAB_COPILOT=1.' },
   } }));
   await page.route('**/api/plan', route => { requests++; return route.abort(); });
-  await page.route('**/api/local-plan', route => { localRequests++; return route.abort(); });
   await page.goto('/');
   await expect(page.locator('#mode-label')).toContainText('Copilot cloud planning');
   await expect(page.locator('#event-list')).toContainText('Describe any brick design.');
@@ -242,11 +240,6 @@ test('cloud is default but unavailable setup never submits or falls back to temp
   await expect(page.getByRole('alert')).toContainText('copilot login');
   await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
   expect(requests).toBe(0);
-  await page.getByRole('button', { name: 'Change mode' }).click();
-  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
-  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('BRICKLAB_LOCAL_AI=1');
-  expect(localRequests).toBe(0);
   await chooseOfflineTemplates(page);
   await page.getByLabel('What shall we build?').fill('Build a green stegosaurus with a long tail.');
   await page.getByRole('button', { name: 'Make a plan' }).click();
@@ -272,51 +265,6 @@ test('cloud template output is rejected without a new build or retry', async ({ 
   await expect(page.locator('#stage-status')).toContainText('Ready for your imagination');
   await expect(page.getByRole('button', { name: 'Start building' })).toBeDisabled();
   expect(requests).toBe(1);
-});
-
-test('explicit Local AI sends only to its endpoint, restores attribution and reports failure', async ({ page }) => {
-  const briefs: string[] = [];
-  let cloudRequests = 0;
-  let unavailable = false;
-  await page.route('**/api/status', route => route.fulfill({ json: {
-    copilot: false, sessionKey: 'fixture', planner: { state: 'off', message: 'Copilot off.' },
-    localPlanner: { enabled: true, state: 'configured', message: 'Fixture local model configured.' },
-  } }));
-  await page.route('**/api/plan', route => { cloudRequests++; return route.abort(); });
-  await page.route('**/api/local-plan', route => {
-    briefs.push(route.request().postDataJSON().brief);
-    return unavailable ? route.fulfill({ status: 502, json: { error: 'Local model missing. Configure Ollama on the server host.' } })
-      : route.fulfill({ json: { spec: {
-        world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
-        design: { name: 'Local original fixture', objects: [{ name: 'Sculpture', bricks: [
-          { x: 0, y: 0, z: 0, width: 2, height: 2, depth: 2, color: 'purple', part: 'frame' },
-        ] }] },
-      } } });
-  });
-  await page.goto('/');
-  await page.getByRole('button', { name: 'Change mode' }).click();
-  await expect(page.locator('#local-planner-status')).toHaveText('Fixture local model configured.');
-  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
-  expect(briefs).toHaveLength(0);
-  const brief = 'An original purple sculpture, not a dinosaur or spaceship.';
-  await page.getByLabel('What shall we build?').fill(brief);
-  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
-  await expect(page.locator('#scene-caption')).toContainText('Local original fixture');
-  expect(briefs).toEqual([brief]);
-  expect(cloudRequests).toBe(0);
-  await page.getByRole('button', { name: 'Start building' }).click();
-  await expect(page.locator('#stage-status')).toContainText('Mission complete');
-  expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).source)).toBe('local-ai');
-  await page.reload();
-  await expect(page.locator('#stage-status')).toContainText('Mission complete');
-  await page.getByRole('button', { name: 'Change mode' }).click();
-  await page.getByRole('button', { name: 'Use Local AI', exact: true }).click();
-  unavailable = true;
-  await page.getByRole('button', { name: 'Plan with Local AI', exact: true }).click();
-  await expect(page.getByRole('alert')).toContainText('Local model missing');
-  await expect(page.locator('#brick-count')).toHaveText('1 / 1 bricks');
-  expect(briefs).toHaveLength(2);
-  expect(cloudRequests).toBe(0);
 });
 
 test('fixture Copilot custom design accepts an unrelated brief and survives reload', async ({ page }) => {

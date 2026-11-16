@@ -31,14 +31,12 @@ flowchart LR
   end
 
   CLI["GitHub Copilot CLI"]
-  Local["Backlog: local model service"]
-  Compat["Backlog: compatible API"]
+  Compat["Operator-configured compatible API"]
   Azure["Azure OpenAI + managed identity"]
   Counter["Private Blob: UTC call count"]
 
   UI -->|"Explicit request; exact host/origin and per-process request token; cancel/disconnect/deadline aborts"| API
   API -->|"Server user's authenticated CLI"| CLI
-  API -->|"Private/local opt-in"| Local
   API -->|"Private/local opt-in"| Compat
   Quota -->|"Blob ETag conditional update"| Counter
   Quota -->|"Admitted submission"| Azure
@@ -160,7 +158,7 @@ correction/vision behavior, every cleanup edge case or user acceptance.
   and validated Azure image requests are implemented in source. Live vision
   behavior has not been verified.
 - The backend applies a 300-second HTTP deadline to Copilot, Azure, and
-  compatible-provider planning; Local AI has a separate 90-second limit. On
+  compatible-provider planning. On
   timeout it aborts the provider request; capacity remains held until cleanup
   settles. Its tests cover the HTTP-to-Windows text-job timeout path, slot
   retention through confirmed cleanup, and quarantine when cleanup cannot be
@@ -231,9 +229,8 @@ operator responsibilities, not product deliverables or release blockers.
 - **Stretch:** improve and validate voice input; automatic onset/silence handling
   is not implemented and real-microphone usability is not accepted. Refactor
   existing code only where required to meet MVP behavior and reliability.
-- **Backlog:** OpenAI-compatible custom endpoints and Ollama/local-model
-  planning. Code and older setup notes may exist, but these paths are not MVP
-  support commitments.
+- **Private workshops:** operators may configure an OpenAI-compatible endpoint;
+  supported protocol requirements and limitations are documented in the README.
 - **Not a physical simulator:** face connectivity and occupied-cell checks do
   not prove clutch strength, collision safety, stability, or buildability.
 

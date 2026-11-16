@@ -10,7 +10,6 @@ import { GeneratedDesignError, validateGeneratedDesign, designCorrectionPrompt, 
 import { planningPrompt } from './planning-prompt.mjs';
 import { resolveSceneSize } from './src/scene-size.mjs';
 import { readCopilotResponse, copilotAuthenticationFailed } from './copilot-output.mjs';
-import { createLocalPlanner } from './local-planner.mjs';
 import { createPlanningCapacity } from './planning-capacity.mjs';
 import { createPlanningQuota } from './planning-quota.mjs';
 import { createAzurePlanner, getAzurePlannerDiagnostic } from './azure-planner.mjs';
@@ -43,6 +42,8 @@ if (hosted && (!production || process.env.BRICKLAB_CODESPACES === '1'
   throw new Error('BRICKLAB_HOSTED=1 requires production, a valid PORT and no Codespace mode. Hosted mode serves public static/offline content only.');
 if (hosted && process.env.BRICKLAB_COMPATIBLE_AI === '1')
   throw new Error('Compatible AI cannot be enabled in public hosted mode.');
+if (process.env.BRICKLAB_COMPATIBLE_AI === '1' && !['127.0.0.1', 'localhost'].includes(host))
+  throw new Error('Compatible AI requires a loopback-bound private server. Do not expose it through a public proxy.');
 const compatibleVisionEnabled = process.env.BRICKLAB_COMPATIBLE_VISION === '1';
 const compatiblePlanner = createOpenAICompatiblePlanner(process.env.BRICKLAB_COMPATIBLE_AI === '1'
   ? { enabled: true, endpoint: process.env.BRICKLAB_COMPATIBLE_ENDPOINT,
@@ -76,12 +77,6 @@ const planningCapacity = createPlanningCapacity({
     ? hosted ? 20 : 8 : Number(process.env.BRICKLAB_PLANNING_CONCURRENCY),
   perProvider: process.env.BRICKLAB_PROVIDER_CONCURRENCY === undefined
     ? hosted ? 20 : 2 : Number(process.env.BRICKLAB_PROVIDER_CONCURRENCY),
-});
-const localPlanner = createLocalPlanner({
-  enabled: !hosted && process.env.BRICKLAB_LOCAL_AI === '1',
-  model: process.env.BRICKLAB_LOCAL_MODEL || '',
-  url: process.env.BRICKLAB_LOCAL_URL,
-  concurrency: planningCapacity.status().perProvider,
 });
 const copilotExecutable = process.env.BRICKLAB_COPILOT_BIN || 'copilot';
 if (process.env.BRICKLAB_COPILOT_BIN
@@ -418,7 +413,7 @@ const server = http.createServer(async (req, res) => {
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const planner = await plannerStatus();
       return send(res, 200, { copilot: liveEnabled && !['missing-cli', 'unavailable'].includes(planner.state),
-        calls, limit, sessionKey, mode: 'cloud-first', planner, localPlanner: localPlanner.status(),
+        calls, limit, sessionKey, mode: 'cloud-first', planner,
         azurePlanner: azurePlannerStatus, compatiblePlanner: compatiblePlanner.status(), hosted,
         planningCapacity: { ...planningCapacity.status(), quarantined: planningQuarantined },
         planningQuota: hosted ? { ...planningQuota, dailyClientLimit: null } : planningQuota,
@@ -438,10 +433,9 @@ const server = http.createServer(async (req, res) => {
         scope: `api://${azureAuthConfig.apiClientId}/${azureAuthConfig.requiredScope}`,
       });
     }
-    const localAI = url.pathname === '/api/local-plan';
     const azureAI = url.pathname === '/api/azure-plan';
     const compatibleAI = url.pathname === '/api/compatible-plan';
-    const copilotAI = !localAI && !azureAI && !compatibleAI;
+    const copilotAI = !azureAI && !compatibleAI;
     if (req.method !== 'POST' || (copilotAI && url.pathname !== '/api/plan')) return send(res, 404, { error: 'Unknown API route.' });
     const origin = req.headers.origin;
     if (!origin || !acceptedRequestOrigin(req)
@@ -464,7 +458,7 @@ const server = http.createServer(async (req, res) => {
       req.resume();
       return send(res, 429, { error: planningQuarantineMessage });
     }
-    const provider = azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local' : 'copilot';
+    const provider = azureAI ? 'azure' : compatibleAI ? 'compatible' : 'copilot';
     const releaseCapacity = planningCapacity.acquire(provider);
     if (!releaseCapacity) {
       req.resume();
@@ -498,9 +492,9 @@ const server = http.createServer(async (req, res) => {
         try { target = resolveSceneSize(brief, sceneSize).target; }
         catch (error) { return send(res, 400, { error: error.message }); }
       }
-      if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : localAI ? !localPlanner.status().enabled : !liveEnabled)
+      if (azureAI ? !azureEnabled : compatibleAI ? !compatiblePlanner.status().enabled : !liveEnabled)
         return send(res, 403, { error: azureAI ? azurePlannerStatus.message
-          : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
+          : compatibleAI ? compatiblePlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
       if (copilotAI && image && !copilotImagesEnabled)
         return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
@@ -538,7 +532,7 @@ const server = http.createServer(async (req, res) => {
         let spec;
         const originalPrompt = planningPrompt(world, brief, hollowInterior, target);
         let prompt = originalPrompt;
-        const timeoutSeconds = localAI ? 90 : 300;
+        const timeoutSeconds = 300;
         deadline = setTimeout(() => controller.abort(Object.assign(
           new Error(`Planning took longer than ${timeoutSeconds} seconds. No transport retry or fallback was attempted.`),
           { name: 'TimeoutError' })), timeoutSeconds * 1000);
@@ -566,10 +560,7 @@ const server = http.createServer(async (req, res) => {
             controller.signal.throwIfAborted();
             if (!azureAI) providerAttempts++;
             if (providerAttempts === 2) correctionOutcome = 'failed';
-            if (localAI) spec = extractSpec(await localPlanner.plan(prompt, {
-              image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
-            }), 'Local AI');
-            else if (azureAI) {
+            if (azureAI) {
               const work = (async () => {
                 controller.signal.throwIfAborted();
                 try {
@@ -665,7 +656,7 @@ const server = http.createServer(async (req, res) => {
         }
         respond(200, { spec, ...((azureAI && !planningQuota.enabled) || compatibleAI ? {}
           : { calls: azureAI ? azureReservation.used : copilotCall ?? calls, limit: azureAI ? azureReservation.limit : limit }),
-        source: azureAI ? 'azure' : compatibleAI ? 'compatible' : localAI ? 'local-ai' : 'copilot' });
+        source: azureAI ? 'azure' : compatibleAI ? 'compatible' : 'copilot' });
       } catch (error) {
         // Output-limit errors still wait for termination; cancellation/timeout never delays the HTTP result.
         if (!controller.signal.aborted) await Promise.race([finished, interrupted]);
@@ -704,7 +695,7 @@ const server = http.createServer(async (req, res) => {
   } catch { res.writeHead(404).end('Not found'); }
 });
 server.listen(port, host, () => {
-  console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'} | Local AI: ${localPlanner.status().state}`);
+  console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'}`);
   if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with a shared daily request allowance' : 'static/offline only; Azure planning is off'}.`);
   if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });

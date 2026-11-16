@@ -56,7 +56,7 @@ A completed, parsed but invalid model design gets at most **one correction**
 from the same provider. The rejected JSON and precise validation feedback are
 sent transiently with the original instructions; they are never logged. Both
 attempts use the same held capacity slot, cancellation signal and overall
-300-second deadline (90 seconds for local AI). There is no correction after
+300-second deadline. There is no correction after
 network/authentication/429/timeout failure or client cancellation. JSON parsing,
 incomplete responses and content filtering also fail without replay.
 The correction prompt remains capped at 32,000 bytes; a larger rejected design

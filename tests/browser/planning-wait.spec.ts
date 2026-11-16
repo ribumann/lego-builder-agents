@@ -33,39 +33,6 @@ test('one planning request offers waiting twice and stops at five minutes', asyn
   expect(await page.evaluate(() => (window as Window & { planCount?: number }).planCount)).toBe(1);
 });
 
-test('local planning keeps its separate 90-second deadline without Copilot estimates or retries', async ({ page }) => {
-  await page.clock.install({ time: new Date('2024-01-01T00:00:00Z') });
-  await page.clock.pauseAt(new Date('2024-01-01T00:00:01Z'));
-  await page.route('**/api/status', route => route.fulfill({ json: {
-    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
-  } }));
-  await page.addInitScript(() => {
-    const original = window.fetch;
-    window.fetch = (input, init) => {
-      if (String(input) !== '/api/local-plan') return original(input, init);
-      (window as Window & { planCount?: number }).planCount = ((window as Window & { planCount?: number }).planCount ?? 0) + 1;
-      return new Promise((_resolve, reject) => {
-        init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
-      });
-    };
-  });
-  await page.goto('/');
-  await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
-  await page.locator('#brief').fill('A 500-brick lighthouse');
-  await page.locator('#plan').click();
-  const dialog = page.getByRole('dialog', { name: 'Planning in progress' });
-  await expect(dialog).toContainText('Maximum wait: 90 seconds');
-  await expect(dialog).not.toContainText('55–175');
-  await page.clock.fastForward(89_000);
-  await expect(dialog).toBeVisible();
-  await page.clock.fastForward(1000);
-  await expect(dialog).toBeHidden();
-  await expect(page.getByRole('alert')).toContainText('90-second limit');
-  await page.clock.fastForward(300_000);
-  expect(await page.evaluate(() => (window as Window & { planCount?: number }).planCount)).toBe(1);
-});
-
 test('planning estimates use only the explicit brief and only the measured provider', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     copilot: true, sessionKey: 'fixture', planner: { state: 'ready', message: 'Ready' },
@@ -185,7 +152,7 @@ test('compatible AI is explicit, localized and preserves attribution', async ({ 
   let calls = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
     sessionKey: 'fixture', copilot: false, planner: { state: 'off', message: 'Off' },
-    compatiblePlanner: { enabled: true, state: 'configured',
+    compatiblePlanner: { enabled: true, state: 'configured', destination: 'https://provider.example', vision: false,
       message: 'Compatible AI is configured. Availability and authentication are unverified; only explicit planning sends a prompt.' },
   } }));
   await page.route('**/api/compatible-plan', route => {
@@ -199,14 +166,39 @@ test('compatible AI is explicit, localized and preserves attribution', async ({ 
   await page.locator('#language').selectOption('fr');
   await page.locator('#settings').click();
   await expect(page.locator('#compatible-planner-status')).toContainText('ne sont pas vérifiées');
+  await expect(page.locator('#compatible-destination')).toHaveText('https://provider.example');
   await page.locator('#choose-compatible').click();
   expect(calls).toBe(0);
   await page.locator('#brief').fill('A blue beacon');
   await expect(page.locator('#brief-help')).toContainText('service configuré');
+  await expect(page.locator('#brief-help')).toContainText('https://provider.example');
+  await page.locator('#language').selectOption('de');
+  await expect(page.locator('#brief-help')).toContainText('konfigurierten Dienst');
+  await expect(page.locator('#brief-help')).toContainText('https://provider.example');
+  await page.locator('#language').selectOption('fr');
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   await expect(page.locator('#stage-status')).toContainText('Plan prêt');
   expect(calls).toBe(1);
   expect(await page.evaluate(() => JSON.parse(localStorage.getItem('bricklab-jurassic')!).source)).toBe('compatible');
+});
+
+test('changed compatible destination requires review before sending', async ({ page }) => {
+  let destination = 'https://first.example';
+  let calls = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', planner: { state: 'off', message: 'Off' },
+    compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination, vision: false },
+  } }));
+  await page.route('**/api/compatible-plan', route => { calls++; return route.abort(); });
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await expect(page.locator('#compatible-destination')).toHaveText(destination);
+  await page.locator('#choose-compatible').click();
+  destination = 'https://second.example';
+  await page.locator('#plan').click();
+  await expect(page.locator('#notice')).toContainText('destination changed');
+  await expect(page.locator('#brief-help')).toContainText(destination);
+  expect(calls).toBe(0);
 });
 
 test('hosted Azure planning is separate, explicit, and preserves attribution', async ({ page }) => {

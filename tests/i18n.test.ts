@@ -16,12 +16,6 @@ test('planning estimates stay provider-specific in every supported language', ()
     const image = planningDescription('Copilot', 'A 500-brick lighthouse', true);
     assert.doesNotMatch(image, /55–175|20–183/);
     assert.match(image, /300/);
-    const local = planningDescription('Local AI', 'A 500-brick lighthouse');
-    assert.match(local, /90/);
-    assert.doesNotMatch(local, /300|55–175|20–183/);
-    if (language !== 'en')
-      assert.notEqual(translate('Planning reached the 90-second limit. No new build was started.'),
-        'Planning reached the 90-second limit. No new build was started.');
     assert.match(elapsedText(100), /100/);
   }
   setLanguage('en');
@@ -102,26 +96,6 @@ test('damage, repair and inspection activity is localized in every non-English l
     assert.notEqual(translatedTask, task);
     assert.ok(translatedTask.startsWith('Object 🚀 · '));
     assert.ok(translateActivity(`I accepted the "${task}" handoff (5 bricks).`, false, ['Object 🚀']).includes(translatedTask));
-  }
-  setLanguage('en');
-});
-
-test('known Local AI status translates while preserving unknown provider text', () => {
-  const status = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL to opt in. Service availability and authentication are unverified. Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
-  const off = 'Local AI is off. Set BRICKLAB_LOCAL_AI=1 to opt in.';
-  const notice = 'Start the trusted host Ollama service with OLLAMA_NO_CLOUD=1. Model metadata checks cannot prove the service is offline or not proxying.';
-  const denied = 'Local Ollama denied access. Check authentication on the trusted server host; this adapter does not send credentials.';
-  for (const language of languages.slice(1)) {
-    setLanguage(language);
-    assert.notEqual(translate(status), status);
-    assert.match(translate(status), /OLLAMA_NO_CLOUD=1/);
-    assert.equal(translate(`${off} ${notice}`), `${translate(off)} ${translate(notice)}`);
-    assert.notEqual(translate(denied), denied);
-    assert.equal(translate(`${denied} ${notice}`), `${translate(denied)} ${translate(notice)}`);
-    const azure = 'Azure OpenAI rate or quota limit reached. No retry was attempted.';
-    assert.notEqual(translateActivity(azure), azure);
-    assert.equal(translate(`Provider says 🚀 ${notice}`), `Provider says 🚀 ${notice}`);
-    assert.equal(translate('Provider says 🚀'), 'Provider says 🚀');
   }
   setLanguage('en');
 });

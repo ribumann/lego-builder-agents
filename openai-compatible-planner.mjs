@@ -32,7 +32,7 @@ function validateEndpoint(endpoint) {
  * Server-only, opt-in factory: { enabled:false, endpoint, model, apiKey?,
  * fetchImpl?, vision:false }. `vision` is an operator assertion, not a verified
  * provider capability. endpoint is the complete chat-completions URL, not a base URL.
- * status() is configuration-only and discloses neither endpoint nor credentials.
+ * status() discloses only the service origin and vision opt-in, never the path or credentials.
  * plan({ prompt, signal?, image?, imageConsent? }) posts one user message, stream:false, JSON-object
  * output and max_tokens:12000. It returns a parsed JSON object; the caller must
  * validate custom-spec geometry. No preflight, retries, fallback or deployment.
@@ -56,6 +56,7 @@ export function createOpenAICompatiblePlanner(configuration = {}) {
   return {
     status() {
       return { enabled, state: enabled ? 'configured' : 'off',
+        destination: enabled ? new URL(endpoint).origin : null, vision: enabled && vision,
         message: enabled
           ? 'Compatible AI is configured. Availability and authentication are unverified; only explicit planning sends a prompt.'
           : 'Compatible AI is off.' };
@@ -93,6 +94,8 @@ export function createOpenAICompatiblePlanner(configuration = {}) {
             fail('Compatible AI denied access. Check the server-side authentication and model configuration.');
           if (response.status === 429)
             fail('Compatible AI rate or quota limit reached. No retry was attempted.');
+          if (response.status === 400 || response.status === 404 || response.status === 422)
+            fail('Compatible AI rejected the request. Check the endpoint, model, and support for chat completions, max_tokens and JSON-object responses; no retry was attempted.');
           fail('Compatible AI service returned an HTTP failure. No retry was attempted.');
         }
         const reader = response.body.getReader();

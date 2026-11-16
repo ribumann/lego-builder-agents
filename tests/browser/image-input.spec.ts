@@ -7,9 +7,9 @@ const image = resolve('tests', 'fixtures', 'vision-fixture.jpg');
 test('pagehide during image preparation prevents a later planning request', async ({ page }) => {
   let requests = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
-    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    sessionKey: 'fixture', compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination: 'https://provider.example', vision: true },
   } }));
-  await page.route('**/api/local-plan', route => {
+  await page.route('**/api/compatible-plan', route => {
     requests++;
     return route.fulfill({ status: 503, json: { error: 'Must not be reached.' } });
   });
@@ -28,7 +28,7 @@ test('pagehide during image preparation prevents a later planning request', asyn
   await page.locator('#plan').click();
   const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
   await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
+  await page.locator('#choose-compatible').click();
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
   await page.locator('#image-consent').check();
@@ -48,9 +48,9 @@ test('pagehide during image preparation prevents a later planning request', asyn
 test('image selection requires explicit consent and sends only on planning', async ({ page }) => {
   let requests = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
-    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    sessionKey: 'fixture', compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination: 'https://provider.example', vision: true },
   } }));
-  await page.route('**/api/local-plan', route => {
+  await page.route('**/api/compatible-plan', route => {
     requests++;
     const body = route.request().postDataJSON();
     expect(body.imageConsent).toBe(true);
@@ -61,11 +61,11 @@ test('image selection requires explicit consent and sends only on planning', asy
   });
   await page.goto('/');
   await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
+  await page.locator('#choose-compatible').click();
   await page.locator('#hollow-interior').check();
   await page.locator('#media-privacy > summary').click();
   await expect(page.locator('#image-disclosure')).toContainText('metadata');
-  await expect(page.locator('#image-destination')).toContainText('Ollama');
+  await expect(page.locator('#image-destination')).toContainText('https://provider.example');
   const chooser = page.waitForEvent('filechooser');
   await page.locator('#image-choose').click();
   await (await chooser).setFiles(image);
@@ -78,6 +78,26 @@ test('image selection requires explicit consent and sends only on planning', asy
   await expect(page.locator('#notice')).toContainText('Fixture unavailable');
   expect(requests).toBe(1);
   await expect(page.locator('#image-consent')).not.toBeChecked();
+});
+
+test('compatible images stay unavailable without operator vision opt-in', async ({ page }) => {
+  let requests = 0;
+  await page.route('**/api/status', route => route.fulfill({ json: {
+    sessionKey: 'fixture', compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready',
+      destination: 'https://provider.example', vision: false },
+  } }));
+  await page.route('**/api/compatible-plan', route => { requests++; return route.abort(); });
+  await page.goto('/');
+  await page.locator('#settings').click();
+  await expect(page.locator('#choose-local-ai')).toHaveCount(0);
+  await page.locator('#choose-compatible').click();
+  await page.locator('#media-privacy > summary').click();
+  await page.locator('#image-file').setInputFiles(image);
+  await expect(page.locator('#image-destination')).toContainText('https://provider.example');
+  await expect(page.locator('#image-consent')).toBeDisabled();
+  await page.locator('#plan').click();
+  await expect(page.locator('#notice')).toContainText('Images are unavailable');
+  expect(requests).toBe(0);
 });
 
 test('hosted and offline routes do not send selected images', async ({ page }) => {
@@ -248,7 +268,7 @@ test('Copilot image planning has no text-only timing estimate and abort preserve
 test('image disclosure and destination change with language and planner', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
     sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
-    localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination: 'https://provider.example', vision: true },
   } }));
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
@@ -257,8 +277,8 @@ test('image disclosure and destination change with language and planner', async 
   await page.locator('#language').selectOption('de');
   await expect(page.locator('#image-disclosure')).toContainText('Metadaten');
   await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
-  await expect(page.locator('#image-destination')).toContainText('Ollama');
+  await page.locator('#choose-compatible').click();
+  await expect(page.locator('#image-destination')).toContainText('https://provider.example');
   await expect(page.locator('#image-consent')).not.toBeChecked();
   await page.locator('#image-consent').check();
   await page.locator('#settings').click();
@@ -282,13 +302,13 @@ test('image privacy disclosure is available in all six languages', async ({ page
   }
 });
 
-test('aborting local vision planning preserves the existing scene', async ({ page }) => {
+test('aborting compatible vision planning preserves the existing scene', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
-    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    sessionKey: 'fixture', compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination: 'https://provider.example', vision: true },
   } }));
   await page.addInitScript(() => {
     const fetchOriginal = window.fetch;
-    window.fetch = (input, init) => String(input) !== '/api/local-plan' ? fetchOriginal(input, init)
+    window.fetch = (input, init) => String(input) !== '/api/compatible-plan' ? fetchOriginal(input, init)
       : new Promise((_resolve, reject) => {
         init?.signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
       });
@@ -299,7 +319,7 @@ test('aborting local vision planning preserves the existing scene', async ({ pag
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
   const saved = await page.evaluate(() => localStorage.getItem('bricklab-jurassic'));
   await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
+  await page.locator('#choose-compatible').click();
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(image);
   await page.locator('#image-consent').check();

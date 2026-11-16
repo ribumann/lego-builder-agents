@@ -96,8 +96,8 @@ spec validation, and tests. The current boundaries are:
   approved native Azure
   content policy and network protections. The application call limit is not
   an invoice cap.
-- Local AI and OpenAI-compatible adapters exist in code but are backlog, not
-  supported MVP choices. They must not be presented as release-ready paths.
+- A private lab operator can configure an OpenAI-compatible chat-completions
+  provider. Compatibility and provider data handling must be checked by the operator.
 - The GitHub Models Actions workflow is a separate artifact-generation path,
   not another runtime-pluggable provider for the workshop.
 
@@ -116,7 +116,7 @@ application-level retry or provider fallback.
 
 Cancellation and cleanup are critical correctness properties. The backend
 applies a 300-second HTTP deadline to Copilot, Azure, and compatible
-planning; Local AI has a separate 90-second limit. Capacity remains held until
+planning. Capacity remains held until
 provider and process cleanup settle; this cannot prove remote model computation
 or billing stopped. Native Windows Copilot text/image jobs use Job containment;
 unconfirmed cleanup retains capacity and quarantines planning until an operator
@@ -127,8 +127,8 @@ timeout-isolation and host-loss quarantine tests. The deployed
 package and public endpoint were verified; package/status checks are distinct
 from the two live baseline requests above, which provide small text-inference
 evidence only. Local Copilot authentication, manual UAT,
-real Codespaces forwarding, real-microphone voice acceptance and real Ollama
-inference remain unverified. The separate prompt/output latency experiment is
+real Codespaces forwarding and real-microphone voice acceptance remain unverified.
+The separate prompt/output latency experiment is
 not shipped; its paired measurements did not demonstrate end-to-end speedup.
 The reported CI covers implemented abort, cleanup-wait and quarantine paths;
 a live HTTP abort cannot prove remote compute termination or billing.

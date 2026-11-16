@@ -291,10 +291,11 @@ const applyLanguage = () => {
   playground.setLanguage(getLanguage());
   applyVoiceLabels();
   imageInput?.refresh();
+  if (mode === 'compatible') $('#brief-help').textContent = compatibleBriefHelp();
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
   if (answerSource) $('#crew-answer').textContent = `${AGENTS[answerSource.id].name}: ${translate(answerSource.response)}`;
   if (sceneErrorDetail) $('#scene-error').textContent = `${translate('3D is unavailable:')} ${translate(sceneErrorDetail)}. ${translate('You can still build using the task board and text inspection below.')}`;
-  const statuses = [['#planner-status', plannerMessage], ['#local-planner-status', localPlanner.message],
+  const statuses = [['#planner-status', plannerMessage],
     ['#azure-planner-status', azurePlanner.message], ['#compatible-planner-status', compatiblePlanner.message]] as const;
   for (const [selector, message] of statuses) {
     const element = document.querySelector<HTMLElement>(selector);
@@ -335,7 +336,7 @@ let eventRevision = 0;
 let showGhost = true;
 let exploded = false;
 let interiorView = false;
-let mode: 'local' | 'copilot' | 'local-ai' | 'azure' | 'compatible' = 'copilot';
+let mode: 'local' | 'copilot' | 'azure' | 'compatible' = 'copilot';
 let modeChosen = false;
 let hosted = false;
 let apiKey = '';
@@ -344,10 +345,10 @@ let copilotImagesEnabled = false;
 let azureImagesEnabled = false;
 let plannerState = 'unavailable';
 let plannerMessage = 'Checking the local planner…';
-let localPlanner = { enabled: false, state: 'off', message: 'Local AI is off. Configure Ollama on the BrickLab server host, then restart with BRICKLAB_LOCAL_AI=1 and BRICKLAB_LOCAL_MODEL set.' };
 let azurePlanner = { enabled: false, state: 'off', authentication: 'entra', message: 'Azure planning is unavailable on this server.' };
 let publicAllowance = '';
-let compatiblePlanner = { enabled: false, state: 'off', message: 'Compatible AI is off.' };
+let compatiblePlanner: { enabled: boolean; state: string; message: string; destination: string | null; vision: boolean } =
+  { enabled: false, state: 'off', message: 'Compatible AI is off.', destination: null, vision: false };
 let planning = false;
 let planningController: AbortController | null = null;
 let replaying = false;
@@ -379,6 +380,7 @@ imageInput = createPlanningImageInput({
   container: $('#image-input'), chooser: $<HTMLButtonElement>('#image-choose'), privacy: $('#image-privacy'),
   target: () => mode === 'local' ? 'local' : hosted && mode !== 'azure' ? 'hosted' : mode,
   copilotImages: () => copilotImagesEnabled, azureImages: () => azureImagesEnabled,
+  compatibleDestination: () => compatiblePlanner.destination, compatibleImages: () => compatiblePlanner.vision,
 });
 const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
 voiceInput = createVoiceInput(
@@ -608,10 +610,10 @@ function renderInsights() {
 }
 $('#agent-insights').addEventListener('toggle', renderInsights);
 
-function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI' | 'Local AI', planningBrief: string, image = false) {
+function startPlanningWait(controller: AbortController, provider: 'Azure Foundry' | 'Copilot' | 'Compatible AI', planningBrief: string, image = false) {
   const modal = $<HTMLDialogElement>('#planning-dialog');
   const started = Date.now();
-  const maximum = provider === 'Local AI' ? 90 : 300;
+  const maximum = 300;
   let nextReminder = 100;
   let timeout = false;
   const update = () => {
@@ -721,20 +723,22 @@ async function makePlan(demo = false) {
     let plan;
     const assumptions: string[] = [];
     if (mode !== 'local') {
+      const previousDestination = compatiblePlanner.destination;
       const planningKey = await refreshStatus();
       controller.signal.throwIfAborted();
       if (!planningKey) throw new Error('Server status is not ready. Retry status in Change mode before planning.');
-      const localAI = mode === 'local-ai';
       const azure = mode === 'azure';
       const compatible = mode === 'compatible';
+      if (compatible && (!previousDestination || previousDestination !== compatiblePlanner.destination))
+        throw new Error('Compatible AI destination changed or is unavailable. Review the destination before planning again.');
       if (compatible ? !compatiblePlanner.enabled || compatiblePlanner.state !== 'configured' : azure ? !azurePlanner.enabled || azurePlanner.state !== 'configured'
-        : localAI ? !localPlanner.enabled || localPlanner.state !== 'configured' : !copilotEnabled && plannerState !== 'needs-auth')
-        throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : localAI ? localPlanner.message : plannerMessage);
+        : !copilotEnabled && plannerState !== 'needs-auth')
+        throw new Error(compatible ? compatiblePlanner.message : azure ? azurePlanner.message : plannerMessage);
       const azureAccessToken = azure && azurePlanner.authentication !== 'anonymous' ? await acquireAzurePlanningToken() : undefined;
       controller.signal.throwIfAborted();
       if (image && azure && !azureImagesEnabled) throw new Error('Azure image planning is unavailable on this server.');
-      wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot', planningBrief, !!image);
-      const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : localAI ? '/api/local-plan' : '/api/plan', { method: 'POST',
+      wait = startPlanningWait(controller, compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot', planningBrief, !!image);
+      const response = await fetch(compatible ? '/api/compatible-plan' : azure ? '/api/azure-plan' : '/api/plan', { method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Bricklab-Key': planningKey,
           Accept: 'application/x-ndjson',
           ...(azureAccessToken ? { Authorization: `Bearer ${azureAccessToken}` } : {}) },
@@ -748,8 +752,8 @@ async function makePlan(demo = false) {
         await refreshStatus();
         throw new Error(data.error || 'Planning request failed.');
       }
-      plan = createCustomPlan(data.spec, world, assumptions, compatible ? 'compatible' : azure ? 'azure' : localAI ? 'local-ai' : 'copilot');
-      assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : localAI ? 'Local AI' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
+      plan = createCustomPlan(data.spec, world, assumptions, compatible ? 'compatible' : azure ? 'azure' : 'copilot');
+      assumptions.push(`${compatible ? 'Compatible AI' : azure ? 'Azure Foundry' : 'Copilot'} proposed a custom brick design. The five local agents execute and inspect it; they are not separate language models.`);
       assumptions.push(`${translate('Approximate planning target:')} ${planningSize!.target} ${translate('bricks')}; ${translate('Selected size:')} ${selectedSize}. ${translate('A rough target, not an exact output guarantee.')}`);
     } else {
       const parsed = parseBrief(world, planningBrief);
@@ -782,9 +786,7 @@ async function makePlan(demo = false) {
     save();
   } catch (error) {
     notice(planningController?.signal.aborted
-      ? wait?.timedOut() ? mode === 'local-ai'
-        ? 'Planning reached the 90-second limit. No new build was started.'
-        : 'Planning reached the 300-second limit. No new build was started.'
+      ? wait?.timedOut() ? 'Planning reached the 300-second limit. No new build was started.'
         : 'Planning aborted. No new build was started.'
       : error instanceof Error ? error.message : 'Planning failed. No new build was started.');
   } finally { wait?.close(); planningController = null; planning = false; render(); if (hosted) void refreshStatus(); }
@@ -906,7 +908,7 @@ function answer(question: string, agent?: AgentId) {
   if (/who.*what/.test(q)) response = 'BuildBot coordinates, PlanBot checks dependencies, FrameBot and DetailBot build, and CheckBot inspects and directs repairs.';
   else if (/cost|money|price/.test(q)) response = hosted
     ? `The hosted demo uses a shared daily request allowance; it does not display a per-request dollar estimate. ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}${publicAllowance ? ` ${publicAllowance}` : ''}`
-    : `${translate('Offline templates make no model calls. Local AI uses server compute. Model and hosting charges may apply; no dollar estimate is available.')} ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}`;
+    : `${translate('Offline templates make no model calls. Model and hosting charges may apply; no dollar estimate is available.')} ${translate('One submission may use two model requests to correct an invalid design; the daily allowance counts submissions.')}`;
   else if (/hollow|interior|cavity/.test(q)) response = 'The hollow-interior preference asks custom planning to leave an empty space and a usable opening when the design supports it. Use Cutaway view to inspect the cross-section. It is a preference, not a guarantee.';
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
@@ -1007,10 +1009,10 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
     <p>${hosted ? 'The hosted demo sends your brief and any image you explicitly consent to share to Azure when you choose Plan. No visitor sign-in is required. Voice transcription runs in your browser; only text you review and apply to the brief is sent with a later planning request. No input is sent on page load or while selecting media.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
     <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
     <p>Additional offline template body colors: black, yellow, gray, brown and pink.</p>
-    <p>Copilot and optional Local AI must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
+    <p>AI planners must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
   </details>
   <details><summary>Timing and design limits</summary>
-    <p>${hosted ? 'Hosted Azure planning can take up to 300 seconds. You can abort the request while it is running.' : 'Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; the same request stops after at most 300 seconds. Azure planning can take up to 300 seconds.'} Local AI has a separate 90-second limit.</p>
+    <p>${hosted ? 'Hosted Azure planning can take up to 300 seconds. You can abort the request while it is running.' : 'Copilot planning shows elapsed time and a rough study-based estimate, and offers abort or continued waiting at 100 and 200 seconds; planning stops after at most 300 seconds.'}</p>
     <p>Try the local herd and fleet examples for separate named objects. Normal designs target up to 1,000 pieces and 32,768 occupied cells. Advanced designs allow up to 8,192 pieces and 262,144 cells; large builds may be slow. Decorative studs are sampled above 8,192 per model or blueprint; all brick bodies remain present and selectable.</p>
     <p>Models are stylized original geometry. Connected bricks do not imply real-world clutch, stability, or flight. Saves stay in this browser.</p>
   </details>`));
@@ -1028,11 +1030,8 @@ $('#settings').addEventListener('click', () => {
     <p id="planner-status" role="status">${esc(translate(plannerMessage))}</p>
     <p>Install the Copilot CLI, run <code>copilot login</code>, and start the server with <code>BRICKLAB_COPILOT=1 npm run dev</code>. Pressing <strong>Send brief to Copilot</strong> consents to sending that brief. Selecting a mode or loading the page sends no brief; readiness does not verify login, subscription, or live access. Do not enter personal information.</p>
     <button id="choose-copilot" class="button primary">Use Copilot planning</button>
-    <hr><p><strong>Local AI (Ollama)</strong> — optional original custom planning on the <strong>BrickLab server host</strong>, not automatically on this browser's device. In a Codespace it runs on that remote host. Configure Ollama with <code>OLLAMA_NO_CLOUD=1</code> and a downloaded local model first. Loopback alone does not prove offline operation; remote model metadata is rejected, but the configured service must be trusted.</p>
-    <p id="local-planner-status" role="status">${esc(translate(localPlanner.message))}</p>
-    <p>Start BrickLab with <code>BRICKLAB_LOCAL_AI=1 BRICKLAB_LOCAL_MODEL=YOUR_MODEL</code>. No automatic installs, model downloads, cloud fallback or template fallback. Initial downloads need network access; planning needs device-dependent memory and compute.</p>
-    <button id="choose-local-ai" class="button outline">Use Local AI</button>
     <hr><p>Compatible AI is a separately configured server-side provider. An explicit planning request sends your brief to its configured service and may incur charges. Do not enter personal information. No request is sent on page load or mode selection.</p>
+    <p>${esc(translate('Provider destination:'))} <strong id="compatible-destination">${esc(compatiblePlanner.destination ?? translate('Not configured'))}</strong>. ${esc(translate('The operator chooses the service and model; model availability and compatibility are not verified.'))}</p>
     <p id="compatible-planner-status" role="status">${esc(translateActivity(compatiblePlanner.message))}</p>
     <button id="choose-compatible" class="button outline">Use Compatible AI</button>` : ''}
     <hr><p><strong>Offline templates</strong> — explicitly choose deterministic stegosaurus, brachiosaurus, explorer and cargo presets. This is not open-ended AI. Runs offline after loading; no model calls.${hosted ? '' : ' Host charges may still apply.'}</p>
@@ -1044,7 +1043,6 @@ $('#settings').addEventListener('click', () => {
     `}<p>Mode changes apply to the next plan. Existing builds are not sent anywhere.</p>`);
   $('#choose-local').addEventListener('click', () => { mode = 'local'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); });
   document.querySelector<HTMLElement>('#choose-copilot')?.addEventListener('click', () => { mode = 'copilot'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!copilotEnabled) notice(plannerMessage); });
-  document.querySelector<HTMLElement>('#choose-local-ai')?.addEventListener('click', () => { mode = 'local-ai'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (localPlanner.state !== 'configured') notice(localPlanner.message); });
   document.querySelector<HTMLElement>('#choose-compatible')?.addEventListener('click', () => { mode = 'compatible'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!compatiblePlanner.enabled) notice(compatiblePlanner.message); });
   document.querySelector<HTMLElement>('#choose-azure')?.addEventListener('click', () => { mode = 'azure'; modeChosen = true; clearNotice(); updateMode(); $<HTMLDialogElement>('#info-dialog').close(); if (!azurePlanner.enabled) notice(azurePlanner.message); });
   document.querySelector<HTMLElement>('#refresh-status')?.addEventListener('click', () => { void refreshStatus(true); });
@@ -1065,24 +1063,25 @@ window.addEventListener('beforeunload', () => { planningController?.abort(); voi
 window.addEventListener('pagehide', () => { planningController?.abort(); voiceInput?.cancel(); });
 restore();
 render();
+function compatibleBriefHelp() {
+  return `${translate('Plan with Compatible AI sends this brief to the configured service and may incur charges. No request until you press it. Do not enter personal information.')} ${compatiblePlanner.destination ?? translate('Not configured')}`;
+}
 function updateMode() {
   $<HTMLInputElement>('#hollow-interior').disabled = planning || mode === 'local';
   $<HTMLSelectElement>('#scene-size').disabled = planning || mode === 'local';
   updateSceneSize();
   imageInput?.refresh(true);
-  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'local-ai' ? 'Local AI · server-host model' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
+  $('#mode-label').textContent = mode === 'local' ? 'Offline templates · rule-based agents' : mode === 'compatible' ? 'Compatible AI · custom designs' : mode === 'azure' ? 'Azure Foundry planning · custom designs' : 'Copilot cloud planning · custom designs';
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
     : hosted
       ? `This hosted demo uses Azure Foundry. Voice transcription stays in your browser; only text you review and apply to the brief is sent when you press Plan. Any selected image is sent only with image consent and Plan.${publicAllowance ? ` ${publicAllowance}` : ''}`
     : mode === 'compatible'
-      ? 'Plan with Compatible AI sends this brief to the configured service and may incur charges. No request until you press it. Do not enter personal information.'
-    : mode === 'local-ai'
-      ? 'Plan with Local AI sends this brief to the configured Ollama on the BrickLab server host, not automatically your device. Requires a trusted local-only service; no cloud fallback.'
+      ? compatibleBriefHelp()
       : mode === 'azure'
         ? `${hosted ? 'No visitor sign-in is required. ' : 'Private planning requires Entra sign-in. '}Pressing Plan with Azure Foundry sends your brief to Azure and may incur charges for the service owner. Do not enter personal information.${publicAllowance ? ` ${publicAllowance}` : ''}`
         : 'Send brief to Copilot sends your instructions to GitHub and may consume quota. No request until you press it. Describe any static brick design; do not enter personal information.';
-  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'local-ai' ? 'Plan with Local AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
+  $('#plan').innerHTML = `${mode === 'local' ? 'Make a plan' : mode === 'compatible' ? 'Plan with Compatible AI' : mode === 'azure' ? 'Plan with Azure Foundry' : 'Send brief to Copilot'} ${icon('arrow')}`;
   brief.placeholder = mode === 'local' ? 'Describe a dinosaur or spaceship template…' : 'Describe your brick design…';
 }
 async function refreshStatus(inDialog = false) {
@@ -1095,14 +1094,14 @@ async function refreshStatus(inDialog = false) {
     copilotImagesEnabled = data.copilotImages === true && data.hosted !== true;
     plannerState = typeof data.planner?.state === 'string' ? data.planner.state : 'unavailable';
     plannerMessage = typeof data.planner?.message === 'string' ? data.planner.message : 'Planner status unavailable.';
-    if (data.localPlanner && typeof data.localPlanner.message === 'string')
-      localPlanner = { enabled: data.localPlanner.enabled === true, state: String(data.localPlanner.state), message: data.localPlanner.message };
     if (data.azurePlanner && typeof data.azurePlanner.message === 'string')
       azurePlanner = { enabled: data.azurePlanner.enabled === true, state: String(data.azurePlanner.state),
         authentication: data.azurePlanner.authentication === 'anonymous' ? 'anonymous' : 'entra', message: data.azurePlanner.message };
     azureImagesEnabled = data.azureImages === true;
     if (data.compatiblePlanner && typeof data.compatiblePlanner.message === 'string')
-      compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state), message: data.compatiblePlanner.message };
+      compatiblePlanner = { enabled: data.compatiblePlanner.enabled === true, state: String(data.compatiblePlanner.state),
+        message: data.compatiblePlanner.message, destination: typeof data.compatiblePlanner.destination === 'string' ? data.compatiblePlanner.destination : null,
+        vision: data.compatiblePlanner.vision === true };
     hosted = data.hosted === true;
     const allowance = data.publicAllowance;
     publicAllowance = hosted
@@ -1112,7 +1111,7 @@ async function refreshStatus(inDialog = false) {
         : 'Shared daily planning count is currently unavailable.'
       : '';
     if (hosted && !modeChosen) { mode = 'azure'; updateMode(); }
-    else if (mode === 'azure') updateMode();
+    else if (mode === 'azure' || mode === 'compatible') updateMode();
     imageInput?.refresh();
     if (!inDialog && mode === 'azure' && !azurePlanner.enabled) notice(azurePlanner.message);
     else if (!inDialog && mode === 'copilot' && !copilotEnabled) notice(plannerMessage);
@@ -1129,12 +1128,12 @@ async function refreshStatus(inDialog = false) {
   if (inDialog) {
     const status = document.querySelector<HTMLElement>('#planner-status');
     if (status) status.textContent = translateActivity(plannerMessage);
-    const localStatus = document.querySelector<HTMLElement>('#local-planner-status');
-    if (localStatus) localStatus.textContent = translate(localPlanner.message);
     const azureStatus = document.querySelector<HTMLElement>('#azure-planner-status');
     if (azureStatus) azureStatus.textContent = translate(azurePlanner.message);
     const compatibleStatus = document.querySelector<HTMLElement>('#compatible-planner-status');
     if (compatibleStatus) compatibleStatus.textContent = translateActivity(compatiblePlanner.message);
+    const compatibleDestination = document.querySelector<HTMLElement>('#compatible-destination');
+    if (compatibleDestination) compatibleDestination.textContent = compatiblePlanner.destination ?? translate('Not configured');
   }
   return apiKey;
 }

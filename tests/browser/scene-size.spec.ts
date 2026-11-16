@@ -22,10 +22,10 @@ test('rough selected target survives save and restore in plan provenance', async
 
 test('invalid scene target preserves image consent and avoids reading the attachment', async ({ page }) => {
   await page.route('**/api/status', route => route.fulfill({ json: {
-    sessionKey: 'fixture', localPlanner: { enabled: true, state: 'configured', message: 'Ready' },
+    sessionKey: 'fixture', compatiblePlanner: { enabled: true, state: 'configured', message: 'Ready', destination: 'https://provider.example', vision: true },
   } }));
   let requests = 0;
-  await page.route('**/api/local-plan', route => {
+  await page.route('**/api/compatible-plan', route => {
     requests++;
     return route.fulfill({ status: 503, json: { error: 'Must not be reached.' } });
   });
@@ -38,7 +38,7 @@ test('invalid scene target preserves image consent and avoids reading the attach
   });
   await page.goto('/');
   await page.locator('#settings').click();
-  await page.locator('#choose-local-ai').click();
+  await page.locator('#choose-compatible').click();
   await page.locator('#media-privacy > summary').click();
   await page.locator('#image-file').setInputFiles(resolve('tests', 'fixtures', 'vision-fixture.jpg'));
   await page.locator('#image-consent').check();
