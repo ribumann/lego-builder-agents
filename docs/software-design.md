@@ -119,9 +119,9 @@ provider and process cleanup settle; this cannot prove remote model computation
 or billing stopped. Native Windows Copilot text/image jobs use Job containment;
 unconfirmed cleanup retains capacity and quarantines planning until an operator
 verifies before restart. The merged PR #21 tree-equivalent test head
-`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed check run `43812538493`
-(286 passed, 10 skipped). Native Windows text timeout-isolation and host-loss
-quarantine checks are included in the reported CI evidence. The deployed
+`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed workflow run `43812538493`
+(286 passed, 10 skipped). That Linux run skipped the native Windows text
+timeout-isolation and host-loss quarantine tests. The deployed
 package and public endpoint were verified; package/status checks are distinct
 from the two live baseline requests above, which provide small text-inference
 evidence only. Local Copilot authentication, manual UAT,

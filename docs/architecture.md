@@ -168,8 +168,9 @@ correction/vision behavior, every cleanup edge case or user acceptance.
   stopped. CI covers the implemented abort, cleanup-wait and quarantine paths.
 
 The merged PR #21 tree-equivalent test head
-`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed check run
-`43812538493` (286 passed, 10 skipped). The separate prompt/output latency
+`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed workflow run
+`43812538493` (286 passed, 10 skipped, including native Windows process
+tests). The separate prompt/output latency
 experiment is not shipped; paired measurements did not demonstrate an
 end-to-end improvement. No 2x speed or throughput increase is measured.
 

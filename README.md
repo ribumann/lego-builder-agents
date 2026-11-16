@@ -438,11 +438,12 @@ Local runs retain Playwright's default worker count; use `--workers=1` to reprod
 Coverage includes scene growth and provenance, deterministic damage and repair,
 planner consent and failure handling, fake-clock 300-second limits, subprocess
 cancellation and browser journeys. The merged PR #21 tree-equivalent test head
-`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed check run `43812538493`
-(286 passed, 10 skipped); the merged release is
-`c0060c7af8bd5a1c748a76b10e7710e35cf051e6`. Native Windows text/image tests
-cover contained descendant cleanup, timeout, cancellation and host-loss
-failure. Automated checks do not replace user acceptance: final local
+`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed workflow run `43812538493`
+(286 passed, 10 skipped, including native Windows process tests); the merged
+release is `c0060c7af8bd5a1c748a76b10e7710e35cf051e6`. Windows text/image
+tests cover contained descendant cleanup, timeout, cancellation and host-loss
+failure, but the Linux workflow run did not exercise the native Windows paths.
+Automated checks do not replace user acceptance: final local
 Copilot authentication/inference and manual UAT, real Codespaces forwarding,
 real-microphone voice acceptance and real Ollama inference remain unverified.
 The separate latency experiment is not shipped and has no demonstrated
