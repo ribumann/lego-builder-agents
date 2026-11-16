@@ -68,8 +68,11 @@ and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. Azure
 owner then reported app settings `BRICKLAB_HOSTED=1` and
 `BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. A private
 VM runner was deallocated. These observations describe earlier infrastructure
-inventory. The current owner-confirmed live package is merged revision
-`c0060c7af8bd5a1c748a76b10e7710e35cf051e6`, with
+inventory, not the current planner setting. The owner confirms the live
+application runs merged revision
+`c0060c7af8bd5a1c748a76b10e7710e35cf051e6` with
+`BRICKLAB_HOSTED=1`, `BRICKLAB_AZURE_AI=1`, and the system-assigned identity.
+Its configured planner is
 `AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`,
 gpt-6.1-terra version 2026-10-26, GlobalStandard capacity 40, the
 `bricklab-public-safe` policy and automatic upgrades disabled. GPT-5.4 capacity
@@ -77,8 +80,22 @@ gpt-6.1-terra version 2026-10-26, GlobalStandard capacity 40, the
 call-count ledger remain preserved. GlobalStandard is not EU-processing
 restricted. The deployment owner verified the exact package/settings, and
 public HTTPS returned 200 with asset `index-B5T0Pdlt.js` on 2026-11-16. These
-checks confirm package/endpoint availability, not every runtime security
-control, a fresh paid inference request or user acceptance.
+checks confirm package/endpoint availability, not a fresh paid inference or
+user acceptance.
+
+The owner also verified HTTPS-only/TLS 1.2, HTTP-to-HTTPS redirect, Front Door
+routing with WAF Prevention and its approximate 10-per-minute planner rule,
+exact Front Door-ID-bound origin allow plus default deny, and independent SCM
+deny-all; direct App Service origin returned 403. The managed identity has
+`Cognitive Services OpenAI User` on the dedicated account,
+`Storage Blob Data Reader` on the package container, and
+`Storage Blob Data Contributor` on the usage container; storage is private.
+A same-origin invalid-world request returned 400 without changing quota status
+or calling the provider. These are bounded configuration/path checks, not a
+full security assessment. No live quota/capacity-denial,
+cancellation/disconnect, or 300-second timeout/cleanup test has been reported;
+Front Door's configured 240-second origin timeout does not verify delivery of
+a 300-second request.
 
 ### Simplified hosted-planning contract and evidence boundary
 
@@ -102,7 +119,7 @@ case or current live inference.
   billing cap. Each submission allows at most two same-provider requests, with
   one correction only for a completed invalid design. Up to 100 Azure model
   requests can therefore follow 50 submissions, with no second count,
-  refund or reset. Both attempts share one slot and deadline;
+  correction-specific refund or reset. Both attempts share one slot and deadline;
   transport/auth/429/timeout failures are not replayed. The revised design
   removes the estimated-dollar ledger, price
   verification, pinned model/version/region/price constraints, and six-minute
@@ -123,17 +140,17 @@ case or current live inference.
   configuration uses managed identity and the approved native Azure content
   policy. Public visitors remain anonymous; Codespaces additionally requires
   the private forwarded port and its separate temporary Basic-auth credential.
-  Deployment verification covered package/settings and endpoint availability,
-  not an independent end-to-end test of every runtime security control.
-  Consented and validated Azure image requests are implemented in source.
-  Live vision behavior has not been verified.
+  The owner confirmed live origin/SCM restrictions and direct-origin denial
+  above; this is not an independent end-to-end security assessment. Consented
+  and validated Azure image requests are implemented in source. Live vision
+  behavior has not been verified.
 - The backend applies a 300-second HTTP deadline to Copilot, Azure, and
   compatible-provider planning; Local AI has a separate 90-second limit. On
   timeout it aborts the provider request; capacity remains held until cleanup
   settles. Its tests cover the HTTP-to-Windows text-job timeout path, slot
   retention through confirmed cleanup, and quarantine when cleanup cannot be
   confirmed. An HTTP abort cannot prove remote model computation or billing
-  stopped; verify these properties again on the final revision.
+  stopped. CI covers the implemented abort, cleanup-wait and quarantine paths.
 
 The merged PR #21 tree-equivalent test head
 `0ad0b55740c99f9e59fff3511390ee0b26daf828` passed check run
