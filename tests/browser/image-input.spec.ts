@@ -139,11 +139,11 @@ test('Copilot image planning stays unavailable without verified process containm
   await page.route('**/api/plan', route => { requests++; return route.abort(); });
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
-  await expect(page.locator('#image-destination')).toContainText('unavailable');
+  await expect(page.locator('#image-provider-details')).toContainText('unavailable in Codespaces/Linux');
   await page.locator('#image-file').setInputFiles(image);
   await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
-  await expect(page.locator('#notice')).toContainText('unavailable');
+  await expect(page.locator('#notice')).toContainText('unavailable in Codespaces/Linux');
   expect(requests).toBe(0);
 });
 

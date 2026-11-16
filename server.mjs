@@ -503,7 +503,7 @@ const server = http.createServer(async (req, res) => {
           : compatibleAI ? compatiblePlanner.status().message : localAI ? localPlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
       if (copilotAI && image && !copilotImagesEnabled)
-        return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
+        return send(res, 503, { error: 'Copilot image planning is unavailable in Codespaces/Linux. It requires an opted-in private Windows server with verified process-tree containment. No image was sent.' });
       if (copilotAI && process.platform === 'win32' && !windowsCopilotRunner)
         return send(res, 503, { error: windowsContainmentMessage });
       const today = new Date().toISOString().slice(0, 10);

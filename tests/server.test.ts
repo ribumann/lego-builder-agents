@@ -1898,9 +1898,10 @@ test('Copilot images fail closed without a supported Windows opt-in before attac
     for (const headers of [{}, ndjson]) {
       const response = await server.post(headers, payload);
       assert.equal(response.status, 503, `${platform} must reject before any CLI invocation`);
-      assert.match((await response.json() as { error: string }).error, /process-tree containment/);
+      assert.match((await response.json() as { error: string }).error, /unavailable in Codespaces\/Linux.*process-tree containment.*No image was sent/);
     }
     const state = await server.command({ action: 'inspect' });
+    assert.equal((await (await server.get()).json() as { copilotImages: boolean }).copilotImages, false);
     assert.equal(state.count, 0, 'No CLI invocation can outlive an image file');
     assert.equal(state.imageDirectories, 0, 'No temporary image file is created');
     assert.deepEqual(state.signals, []);
