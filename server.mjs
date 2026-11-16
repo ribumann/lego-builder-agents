@@ -122,10 +122,13 @@ if (codespaces && process.env.BRICKLAB_GH_BIN !== undefined
     && (!isAbsolute(ghExecutable) || /\.(?:cmd|bat)$/i.test(ghExecutable)))
   throw new Error('BRICKLAB_GH_BIN must be an absolute path to the GitHub CLI executable.');
 const forwardedOrigin = codespaces ? `https://${codespaceName}-${port}.app.github.dev` : null;
+const loopbackHosts = new Set([`localhost:${port}`, `127.0.0.1:${port}`]);
 const allowedHosts = new Set(hosted ? [new URL(hostedOrigin).host] : codespaces
-  ? [new URL(forwardedOrigin).host] : [`localhost:${port}`, `127.0.0.1:${port}`]);
+  ? [new URL(forwardedOrigin).host] : loopbackHosts);
 const allowedOrigins = new Set(hosted ? [hostedOrigin] : codespaces
   ? [forwardedOrigin] : [`http://localhost:${port}`, `http://127.0.0.1:${port}`]);
+const codespaceRewrittenOrigins = new Set(['http', 'https'].flatMap(scheme =>
+  [...loopbackHosts].map(authority => `${scheme}://${authority}`)));
 const appPassword = codespaces ? randomBytes(24).toString('hex') : null;
 const appAuthorization = codespaces ? `Basic ${Buffer.from(`bricklab:${appPassword}`).toString('base64')}` : null;
 const codespacesDiagnostics = codespaces && process.env.BRICKLAB_CODESPACES_DIAGNOSTICS === '1';
@@ -150,10 +153,13 @@ const sameSecret = (value, expected) => typeof value === 'string'
   && timingSafeEqual(Buffer.from(value), Buffer.from(expected));
 const sameToken = token => sameSecret(token, sessionKey);
 const isRecord = value => value !== null && typeof value === 'object' && !Array.isArray(value);
-const acceptedRequestHost = req => allowedHosts.has(req.headers.host)
-  || (codespaces && [`localhost:${port}`, `127.0.0.1:${port}`].includes(req.headers.host)
-    && req.headers['x-forwarded-host'] === new URL(forwardedOrigin).host
-    && req.headers['x-forwarded-proto'] === 'https');
+const hasCodespaceProxyShape = req => codespaces && loopbackHosts.has(req.headers.host)
+  && req.headers['x-forwarded-host'] === new URL(forwardedOrigin).host
+  && req.headers['x-forwarded-proto'] === 'https';
+const acceptedRequestHost = req => allowedHosts.has(req.headers.host) || hasCodespaceProxyShape(req);
+// Dev Tunnels can rewrite Origin as well as Host; neither header establishes identity.
+const acceptedRequestOrigin = req => allowedOrigins.has(req.headers.origin)
+  || (hasCodespaceProxyShape(req) && codespaceRewrittenOrigins.has(req.headers.origin));
 
 async function readPlanningBody(req) {
   const declared = req.headers['content-length'];
@@ -378,7 +384,7 @@ const server = http.createServer(async (req, res) => {
     res.setHeader('Cache-Control', 'no-store');
     // This recognizes a proxy-shaped request, not a trusted proxy or an identity.
     const acceptedHost = acceptedRequestHost(req);
-    const acceptedOrigin = !req.headers.origin || allowedOrigins.has(req.headers.origin);
+    const acceptedOrigin = !req.headers.origin || acceptedRequestOrigin(req);
     if (codespacesDiagnostics && diagnosticRequests++ < 20) {
       const classify = (value, expected) => value === undefined ? 'absent'
         : value === expected ? 'expected' : 'other';
@@ -386,9 +392,10 @@ const server = http.createServer(async (req, res) => {
         requestKind: url.pathname.startsWith('/api/') ? 'api' : url.pathname === '/' ? 'navigation' : 'asset',
         access: !acceptedHost ? 'host-rejected' : !acceptedOrigin ? 'origin-rejected'
           : !sameSecret(req.headers.authorization, appAuthorization) ? 'app-auth-required' : 'private-port-check',
-        host: [`localhost:${port}`, `127.0.0.1:${port}`].includes(req.headers.host)
+        host: loopbackHosts.has(req.headers.host)
           ? 'loopback' : classify(req.headers.host, new URL(forwardedOrigin).host),
-        origin: classify(req.headers.origin, forwardedOrigin),
+        origin: codespaceRewrittenOrigins.has(req.headers.origin)
+          ? 'loopback' : classify(req.headers.origin, forwardedOrigin),
         forwardedHost: classify(req.headers['x-forwarded-host'], new URL(forwardedOrigin).host),
         forwardedProto: classify(req.headers['x-forwarded-proto'], 'https'),
         forwarded: req.headers.forwarded === undefined ? 'absent' : 'present',
@@ -406,7 +413,7 @@ const server = http.createServer(async (req, res) => {
   }
   if (url.pathname.startsWith('/api/')) {
     if (!acceptedRequestHost(req)) return send(res, 403, { error: 'API is local-only. Open the app on localhost.' });
-    if (req.method === 'POST' && !allowedOrigins.has(req.headers.origin))
+    if (req.method === 'POST' && !acceptedRequestOrigin(req))
       return send(res, 403, { error: 'API POST requests require this app\'s exact origin.' });
     if (req.method === 'GET' && url.pathname === '/api/status') {
       const planner = await plannerStatus();
@@ -421,7 +428,7 @@ const server = http.createServer(async (req, res) => {
     }
     if (req.method === 'GET' && url.pathname === '/api/azure-auth-config') {
       if (!azureAuthConfig) return send(res, 404, { error: 'Azure sign-in is unavailable.' });
-      if (req.headers.origin !== undefined && !allowedOrigins.has(req.headers.origin))
+      if (req.headers.origin !== undefined && !acceptedRequestOrigin(req))
         return send(res, 403, { error: 'Use this app\'s exact origin.' });
       return send(res, 200, {
         tenantId: azureAuthConfig.tenantId,
@@ -437,7 +444,7 @@ const server = http.createServer(async (req, res) => {
     const copilotAI = !localAI && !azureAI && !compatibleAI;
     if (req.method !== 'POST' || (copilotAI && url.pathname !== '/api/plan')) return send(res, 404, { error: 'Unknown API route.' });
     const origin = req.headers.origin;
-    if (!origin || !allowedOrigins.has(origin)
+    if (!origin || !acceptedRequestOrigin(req)
         || !sameToken(req.headers['x-bricklab-key']))
       return send(res, 403, { error: 'Planning requests must come from this app with its exact origin and request token.' });
     if (azureAI && !azureEnabled) return send(res, 403, { error: azurePlannerStatus.message });

@@ -124,7 +124,7 @@ fs.mkdtemp = (prefix, ...args) => {
 };
 fs.readFile = (file, ...args) => process.env.TEST_STATIC_FIXTURE === '1'
   && ((basename(String(file)) === 'index.html' && basename(dirname(String(file))) === 'dist')
-    || ['fake-runtime.mjs', 'fake-runtime.wasm'].includes(basename(String(file))))
+    || ['fake-runtime.mjs', 'fake-runtime.wasm', 'fake-style.css'].includes(basename(String(file))))
   ? Promise.resolve(Buffer.from('<!doctype html><title>Offline fixture</title>')) : actualReadFile(file, ...args);
 Object.defineProperty(process, 'platform', { value: ${JSON.stringify(platform)} });
 const realTimeout = globalThis.setTimeout;
@@ -2570,6 +2570,57 @@ test('Codespace proxy-shaped requests retain authentication, origin and port che
   })).status, 503);
 });
 
+test('Codespace rewritten Origins serve assets and planning without bypassing guards', { timeout: 25_000 }, async t => {
+  const server = await startLifecycleServer(t, 'linux', {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space', TEST_STATIC_FIXTURE: '1',
+  });
+  const proxy = { Host: `localhost:${server.port}`, 'X-Forwarded-Host': new URL(server.headers.Origin).host,
+    'X-Forwarded-Proto': 'https' };
+  for (const scheme of ['http', 'https']) {
+    for (const host of ['localhost', '127.0.0.1']) {
+      const headers = { ...proxy, Origin: `${scheme}://${host}:${server.port}` };
+      for (const [path, type] of [
+        ['/', 'text/html'], ['/assets/fake-style.css', 'text/css'], ['/assets/fake-runtime.mjs', 'text/javascript'],
+      ]) {
+        const response = await server.get(path, headers);
+        assert.equal(response.status, 200);
+        assert.equal(response.headers.get('content-type'), type);
+        assert.equal(response.headers.get('access-control-allow-origin'), null);
+      }
+      assert.equal((await server.get('/api/status', headers)).status, 200);
+      assert.equal((await server.post(headers, '{')).status, 400, 'Rewritten Origin reaches body validation');
+    }
+  }
+  const rewritten = { ...proxy, Origin: `http://localhost:${server.port}` };
+  assert.equal((await server.get('/assets/fake-style.css', { ...rewritten, Authorization: '' })).status, 401);
+  assert.equal((await server.post({ ...rewritten, 'X-Bricklab-Key': '' })).status, 403);
+  for (const invalid of [
+    { Origin: 'null' }, { Origin: '' }, { Origin: 'https://attacker.example' },
+    { Origin: `http://localhost:${server.port + 1}` }, { Origin: `http://localhost:${server.port}/` },
+    { Origin: `http://localhost:${server.port}.attacker.example` },
+    { Origin: `http://localhost:${server.port}, https://attacker.example` },
+    { Host: new URL(server.headers.Origin).host }, { 'X-Forwarded-Host': '' },
+    { 'X-Forwarded-Proto': 'http' },
+  ]) assert.equal((await server.post({ ...rewritten, ...invalid })).status, 403);
+  assert.equal((await server.command({})).count, 0, 'Rejected requests never start a provider');
+  const planning = server.post(rewritten);
+  await server.command({ action: 'started', count: 1 });
+  await server.command({ action: 'complete', spec: lifecycleSpec });
+  const result = await planning;
+  assert.equal(result.status, 200);
+  assert.deepEqual((await result.json()).spec, lifecycleSpec);
+
+  for (const env of [{ TEST_GH_FAILURE: 'timeout' }, { TEST_GH_VISIBILITY: 'public' }, { TEST_GH_VISIBILITY: 'org' }]) {
+    const unavailable = await startLifecycleServer(t, 'linux', {
+      BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space', ...env,
+    });
+    assert.equal((await unavailable.get('/assets/fake-style.css', {
+      Host: `localhost:${unavailable.port}`, Origin: `http://localhost:${unavailable.port}`,
+      'X-Forwarded-Host': new URL(unavailable.headers.Origin).host, 'X-Forwarded-Proto': 'https',
+    })).status, 503);
+  }
+});
+
 test('Codespace diagnostics redact headers and never trust forwarded values', { timeout: 15_000 }, async t => {
   const server = await startLifecycleServer(t, 'linux', {
     BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'fixture-space',
@@ -2588,9 +2639,14 @@ test('Codespace diagnostics redact headers and never trust forwarded values', { 
   assert.equal((await server.get('/api/status', { Origin: 'https://attacker.example' })).status, 403);
   assert.equal((await server.post({ Origin: 'https://attacker.example' })).status, 403);
   assert.equal((await server.post({ Host: `localhost:${server.port}`, 'X-Forwarded-Host': new URL(origin).host })).status, 403);
+  assert.equal((await server.get('/assets/fake-style.css', {
+    Host: `localhost:${server.port}`, Origin: `http://localhost:${server.port}`,
+    'X-Forwarded-Host': new URL(origin).host, 'X-Forwarded-Proto': 'https',
+  })).status, 200);
   await new Promise(resolve => setImmediate(resolve));
   assert.match(diagnostics, /"host":"other"/);
   assert.match(diagnostics, /"host":"loopback"/);
+  assert.match(diagnostics, /"origin":"loopback"/);
   assert.match(diagnostics, /"access":"host-rejected"/);
   assert.match(diagnostics, /"access":"origin-rejected"/);
   assert.match(diagnostics, /"requestKind":"navigation"/);
@@ -2599,6 +2655,7 @@ test('Codespace diagnostics redact headers and never trust forwarded values', { 
   assert.match(diagnostics, /"forwardedProto":"expected"/);
   assert.match(diagnostics, /"forwarded":"present"/);
   assert.doesNotMatch(diagnostics, /attacker\.example|secret-forwarded-value|Basic |fixture-space|bricklab-key/i);
+  assert.doesNotMatch(diagnostics, /https?:\/\/localhost|127\.0\.0\.1/);
 });
 
 test('Codespace private-port errors distinguish missing CLI and timeout without exposing output', { timeout: 15_000 }, async t => {
