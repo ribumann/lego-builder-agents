@@ -368,6 +368,13 @@ This removes the four-template subject restriction **for AI-planned designs**, n
 
 The shared custom contract supports legacy `design.bricks` or named groups in `design.objects`, with **1-256 compact brick records in total**, optional `repeat: {count, dx, dy, dz}`, up to **32 objects**, **8,192 expanded bricks** and **262,144 occupied cells**. Each brick has integer dimensions **1-8** per axis; every occupied cell must stay within **x/z -64..63 and y 0..63**. Colors are allowlisted and overlaps are rejected, including between objects. Separate objects may be apart; PlanBot and CheckBot check face connectivity within each object. Missing-brick repair cannot fix a fundamentally disconnected blueprint. Invalid output fails explicitly, without automatic paid retries. Old template and single-object custom saves remain supported; new saves retain validated object geometry. A novel design's semantic quality and large-scene live model reliability remain unverified.
 
+Future custom-planning prompts ask distinct fronts to face +X unless the brief
+requests otherwise; existing builds are not reoriented. **Flip camera 180
+degrees** reversibly views the other side at the current elevation and distance,
+without changing geometry, saves or sending a planning request. Drag still
+orbits freely; **Reset camera** restores the default front-side view. This is
+manual view control, not automatic detection of an arbitrary model's front.
+
 Each **Copilot plan** starts **one CLI planning invocation**, maximum 300 seconds, **128 KB of final response content** and **1 MiB of CLI event data**, with two concurrent invocations allowed by default. The planning dialog shows actual elapsed time and a rough, sample-based estimate, not model progress; at 100 and 200 seconds it offers abort or continued waiting for the same invocation. The deadline still applies without a response. The CLI may make internal provider retries, so one invocation is not a guaranteed single model request or billing unit.
 
 Private local servers and Codespaces default to **8 total planning slots and 2 per provider**. `BRICKLAB_PLANNING_CONCURRENCY` and `BRICKLAB_PROVIDER_CONCURRENCY` can set each limit from 1 to 20, with the provider limit no higher than total. A 20-slot hosted deployment requires one worker and one Node process; none of these bounds guarantees upstream throughput. Slots cover request-body reading, provider work, and cleanup. Full shared capacity returns HTTP 429 rather than queuing work, and application requests are not retried or sent to a fallback provider. Cancellation and timeout do not release a slot until cleanup is confirmed; ambiguous Copilot process cleanup locks all planning until an operator verifies before restarting.

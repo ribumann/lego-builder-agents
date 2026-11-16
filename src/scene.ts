@@ -252,7 +252,11 @@ export class Workbench {
   explode(value: boolean) { this.exploded = value; this.modelBatch?.setExploded(value, performance.now()); }
   flipCamera() {
     this.cameraFlipped = !this.cameraFlipped;
-    this.applyCameraView();
+    const offset = this.camera.position.clone().sub(this.controls.target);
+    offset.x = -offset.x;
+    offset.z = -offset.z;
+    this.camera.position.copy(this.controls.target).add(offset);
+    this.controls.update();
     return this.cameraFlipped;
   }
   resetCamera() {
