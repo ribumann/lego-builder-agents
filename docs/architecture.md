@@ -187,8 +187,11 @@ Live long-stream reliability and real-timeout behavior remain unverified.
   a per-process request token, bounded input, and provider opt-ins protect its
   planning routes; this is not a hardened public multi-user service.
 - Codespaces accepts the exact public Host or the observed loopback Host plus
-  exact forwarded host/protocol shape. Forwarding headers are forgeable and
-  establish neither proxy identity nor privacy; exact Origin checks, separate
+  exact forwarded host/protocol shape. Only that full proxy shape also accepts
+  the tunnel's rewritten HTTP/HTTPS loopback Origin on the configured port.
+  Arbitrary, null, wrong-port and multi-value origins remain rejected.
+  Forwarding headers are forgeable and establish neither proxy identity nor
+  privacy; bounded Origin checks, separate
   app login, request tokens and a fresh GitHub CLI private-port check remain
   mandatory. GitHub/Copilot sign-in and
   BrickLab's app password are distinct credentials. Never publish the port or

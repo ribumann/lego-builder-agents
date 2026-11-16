@@ -82,13 +82,18 @@ export async function diagnoseCodespaces({ env = process.env, run = exec, httpPr
     ['spoofedForwarding', { Host: 'diagnostic.invalid', 'X-Forwarded-Host': host, 'X-Forwarded-Proto': 'https' }],
     ['loopbackHost', { Host: `127.0.0.1:${port}` }],
     ['proxyShape', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host, 'X-Forwarded-Proto': 'https' }],
+    ['proxyRewrittenOrigin', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host,
+      'X-Forwarded-Proto': 'https', Origin: `http://localhost:${port}` }],
     ['proxyForeignOrigin', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host,
       'X-Forwarded-Proto': 'https', Origin: 'https://diagnostic.invalid' }],
+    ['proxyNullOrigin', { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': host,
+      'X-Forwarded-Proto': 'https', Origin: 'null' }],
   ]) report.http[label] = await httpProbe(port, headers);
   report.server = report.http.expectedHost === 401 && report.http.expectedOrigin === 401
     && report.http.foreignOrigin === 403 && report.http.spoofedForwarding === 403
     && report.http.loopbackHost === 403 && report.http.proxyShape === 401
-    && report.http.proxyForeignOrigin === 403 ? 'private-app-guard-observed'
+    && report.http.proxyRewrittenOrigin === 401 && report.http.proxyForeignOrigin === 403
+    && report.http.proxyNullOrigin === 403 ? 'private-app-guard-observed'
     : report.http.expectedHost === 'unreachable' ? 'server-unreachable' : 'unexpected-guard-check-startup-mode';
   return report;
 }

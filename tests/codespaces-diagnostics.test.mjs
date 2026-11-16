@@ -10,10 +10,12 @@ const env = { CODESPACES: 'true', CODESPACE_NAME: 'fixture-space', PORT: '4173',
 const origin = 'https://fixture-space-4173.app.github.dev';
 const ports = [{ sourcePort: 4173, visibility: 'private', browseUrl: origin }];
 const guardedProbe = async (_port, headers) => {
-  const acceptedHost = headers.Host === new URL(origin).host
-    || (headers.Host === '127.0.0.1:4173' && headers['X-Forwarded-Host'] === new URL(origin).host
-      && headers['X-Forwarded-Proto'] === 'https');
-  return !acceptedHost || (headers.Origin && headers.Origin !== origin) ? 403 : 401;
+  const proxyShape = headers.Host === '127.0.0.1:4173' && headers['X-Forwarded-Host'] === new URL(origin).host
+    && headers['X-Forwarded-Proto'] === 'https';
+  const acceptedHost = headers.Host === new URL(origin).host || proxyShape;
+  const acceptedOrigin = !headers.Origin || headers.Origin === origin
+    || (proxyShape && headers.Origin === 'http://localhost:4173');
+  return !acceptedHost || !acceptedOrigin ? 403 : 401;
 };
 const run = async () => ({ stdout: JSON.stringify(ports) });
 
@@ -22,7 +24,17 @@ test('Codespace preflight reports private visibility and local guards independen
   assert.equal(report.ports, 'verified-private');
   assert.equal(report.server, 'private-app-guard-observed');
   assert.equal(report.http.proxyShape, 401);
+  assert.equal(report.http.proxyRewrittenOrigin, 401);
   assert.equal(report.http.proxyForeignOrigin, 403);
+  assert.equal(report.http.proxyNullOrigin, 403);
+});
+
+test('Codespace preflight detects the Host-only fix that still rejects rewritten Origins', async () => {
+  const report = await diagnoseCodespaces({ env, run, httpProbe: async (port, headers) =>
+    headers.Origin === 'http://localhost:4173' ? 403 : guardedProbe(port, headers) });
+  assert.equal(report.http.proxyShape, 401);
+  assert.equal(report.http.proxyRewrittenOrigin, 403);
+  assert.equal(report.server, 'unexpected-guard-check-startup-mode');
 });
 
 test('Codespace preflight separates metadata authorization from tunnel inspection and does not expose secrets', async () => {
