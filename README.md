@@ -11,7 +11,7 @@ passed manual acceptance.
 | --- | --- | --- |
 | Local server | In scope | Offline templates need no provider. Copilot planning requires an explicit submission and separate server-side CLI setup. Earlier local candidates completed bounded text and consented synthetic-image requests; Copilot authentication, inference and manual acceptance on the merged release remain unverified. |
 | Private Codespaces | In scope | Keep the forwarded port private and use the production server. Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. |
-| Azure deployment | In scope, constrained | Azure owner confirms merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with GPT-6.1 Terra selected. The owner verified the package and settings; public HTTPS returned 200 with the expected release asset on 2026-11-16. One earlier synthetic 100-brick airplane planned and built successfully; this is not broad reliability, current live inference, correction-path validation or user acceptance. |
+| Azure deployment | In scope, constrained | Azure owner confirms merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with GPT-6.1 Terra selected. The owner verified the package/settings and two guarded live baseline UI plans (22.332s, 27.123s); this is not broad reliability, correction/vision validation or user acceptance. |
 | Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
 | Parallel planning controls | In scope, merged | The merged release has bounded shared capacity and Azure-only daily submission counting. This enables bounded concurrency; it is not evidence of faster individual plans. |
 | Planning latency experiment | Not shipped | Separate prompt/output experiments are not part of this release. A small isolated paired sample showed no end-to-end gain; no 2x improvement is claimed. |
@@ -178,13 +178,19 @@ personal Copilot credential. The Azure owner confirms merged revision
 `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` is live with
 `bricklab-planner-terra` (`gpt-6.1-terra`) selected. The owner verified the
 package and settings; public HTTPS returned 200 with release asset
-`index-B5T0Pdlt.js` on 2026-11-16. One earlier synthetic 100-brick airplane
-planned in 29.619 seconds with one model request and no correction, then built
-100/100 bricks with 4/4 tasks and 3/3 inspection checks. This is one-case
-evidence, not broad reliability, a current live inference/correction-path test,
-or user acceptance. The merged revision also does not include the separate
-planning-latency experiment or demonstrate faster plans. Azure usage can incur
-charges. See
+`index-B5T0Pdlt.js` on 2026-11-16. Two sequential guarded baseline UI plans
+also ran against that release: a visually recognizable 99-brick spaceship
+(22.332 seconds) and a hollow observatory with a separate rover, 97 bricks
+(27.123 seconds); each passed 3/3 local checks. The browser request windows
+and adapter-attempt details are in the [architecture evidence](docs/architecture.md#deployment-and-release-evidence).
+They were text-only, one-attempt calls, not a matched performance experiment;
+the first view did not independently verify every requested spaceship feature.
+An earlier synthetic 100-brick airplane planned in 29.619 seconds, then built
+100/100 bricks with 4/4 tasks and 3/3 inspection checks. These are bounded
+examples, not broad reliability or user acceptance, and do not test correction,
+vision, cancellation, or deployed timeout/cleanup behavior. The merged
+revision also does not include the separate planning-latency experiment or
+demonstrate faster plans. Azure usage can incur charges. See
 [Azure planner setup](docs/azure-planner.md).
 
 ## Run in a private GitHub Codespace

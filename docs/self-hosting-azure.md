@@ -7,9 +7,14 @@ revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with the Terra planner
 selected, and verified the package/settings and public HTTPS response with
 asset `index-B5T0Pdlt.js` on 2026-11-16. One earlier synthetic 100-brick
 airplane completed planning in 29.619 seconds with valid geometry and then
-built 100/100 bricks with 4/4 tasks and 3/3 inspection checks. This single case
-does not establish broad reliability, a fresh live inference, correction or
-vision behavior, end-to-end timeout/cleanup, or user acceptance. Private
+built 100/100 bricks with 4/4 tasks and 3/3 inspection checks. Separately, two
+guarded text-only baseline plans ran through the deployed
+UI: a 99-brick spaceship (22.332s) and a hollow observatory with separate
+rover (97 bricks, 27.123s), each one adapter attempt and 3/3 local checks.
+Their exact UTC request windows are in the
+[architecture evidence](architecture.md#deployment-and-release-evidence).
+These examples do not establish broad reliability, correction or vision
+behavior, end-to-end timeout/cleanup, or user acceptance. Private
 Codespaces setup and real-microphone voice acceptance are also unverified.
 The owner also confirms hosted Azure is enabled with managed identity, HTTPS
 only, Front Door-only app ingress using the exact Front Door ID and default

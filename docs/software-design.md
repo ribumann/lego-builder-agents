@@ -72,21 +72,26 @@ spec validation, and tests. The current boundaries are:
 - Azure uses backend managed identity; hosted visitors remain anonymous.
   Azure owner confirms merged package
   `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with the selected Terra
-  planner, and verified the package/settings and public HTTPS response. An
-  earlier synthetic 100-brick airplane planned in 29.619 seconds with one
-  model request and no correction, then built 100/100 bricks with 4/4 tasks
-  and 3/3 inspection checks. This is one-case evidence, not broad reliability,
-  current live inference/correction-path validation or user acceptance. The
-  adapter counts valid public submissions against a shared UTC-day limit of
-  50 by default (`BRICKLAB_AZURE_DAILY_CALLS`, integer 1-100); its Blob
+  planner, and verified the package/settings and public HTTPS response. Two
+  sequential guarded text-only baseline plans ran against the deployed
+  Terra UI: a 99-brick spaceship in 22.332 seconds and a 97-brick hollow
+  observatory/rover in 27.123 seconds, each with one adapter attempt and 3/3
+  local checks. An earlier synthetic 100-brick airplane also planned in
+  29.619 seconds, then built 100/100 bricks with 4/4 tasks and 3/3 checks.
+  These examples verify baseline live text inference, not broad reliability,
+  correction/vision behavior or user acceptance. Exact UTC windows and
+  limitations are in the [architecture evidence](architecture.md#deployment-and-release-evidence).
+  The adapter counts valid public submissions against a shared UTC-day limit
+  of 50 by default (`BRICKLAB_AZURE_DAILY_CALLS`, integer 1-100); its Blob
   counter uses ETag conditional writes. Up to 100 provider requests may result
   from 50 submissions when each requires its one allowed invalid-design
   correction. This is a call-count control, not a billing cap. Private/local
   servers and Codespaces have no application daily quota. Azure accepts
-  validated images only with explicit consent. The deployed endpoint check is
-  not a fresh paid inference or vision test. It removes the estimated-dollar
-  ledger, live price verification, model/version/region/price pins, and
-  six-minute day-boundary blackout while retaining the approved native Azure
+  validated images only with explicit consent. The baseline requests do not
+  validate live correction or vision behavior. The simplified design removes
+  the estimated-dollar ledger, live price verification, model/version/region/
+  price pins, and six-minute day-boundary blackout while retaining the
+  approved native Azure
   content policy and network protections. The application call limit is not
   an invoice cap.
 - Local AI and OpenAI-compatible adapters exist in code but are backlog, not
@@ -117,8 +122,9 @@ verifies before restart. The merged PR #21 tree-equivalent test head
 `0ad0b55740c99f9e59fff3511390ee0b26daf828` passed check run `43812538493`
 (286 passed, 10 skipped). Native Windows text timeout-isolation and host-loss
 quarantine checks are included in the reported CI evidence. The deployed
-package and public endpoint were verified, but no fresh paid inference was
-performed for that check. Local Copilot authentication/inference, manual UAT,
+package and public endpoint were verified; package/status checks are distinct
+from the two live baseline requests above, which provide small text-inference
+evidence only. Local Copilot authentication, manual UAT,
 real Codespaces forwarding, real-microphone voice acceptance and real Ollama
 inference remain unverified. The separate prompt/output latency experiment is
 not shipped; its paired measurements did not demonstrate end-to-end speedup.

@@ -58,7 +58,7 @@ plan. The five visible roles are application logic, not five model calls.
 | --- | --- | --- |
 | Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | Earlier Windows ARM64 candidates completed bounded text and consented synthetic-image requests. Copilot authentication, inference and manual acceptance on merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` remain unverified. |
 | Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | Anonymous hosted planning uses backend managed identity and the shared submission limit. | Azure owner confirms merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with GPT-6.1 Terra selected, exact package/settings verified, and public HTTPS 200 with the expected asset on 2026-11-16. One earlier synthetic 100-brick airplane completed planning and local build; this is not broad reliability, current live inference/correction-path validation or user acceptance. |
+| Azure-hosted app | Anonymous hosted planning uses backend managed identity and the shared submission limit. | Azure owner confirms merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with GPT-6.1 Terra selected, exact package/settings verified, and public HTTPS 200 with the expected asset on 2026-11-16. Two guarded baseline UI plans completed against the release; this does not establish broad reliability, correction/vision behavior or user acceptance. |
 
 Earlier read-only Azure inventory recorded Front Door Standard
 with WAF Prevention and a 240-second profile origin-response timeout; Linux
@@ -79,9 +79,24 @@ gpt-6.1-terra version 2026-10-26, GlobalStandard capacity 40, the
 200 is retained without automatic fallback; all existing guards and the
 call-count ledger remain preserved. GlobalStandard is not EU-processing
 restricted. The deployment owner verified the exact package/settings, and
-public HTTPS returned 200 with asset `index-B5T0Pdlt.js` on 2026-11-16. These
-checks confirm package/endpoint availability, not a fresh paid inference or
-user acceptance.
+public HTTPS returned 200 with asset `index-B5T0Pdlt.js` on 2026-11-16.
+The deployment record ties this revision to package SHA-256
+`e62792405c2f59b2f4f60521eda270a8c1eca52fc440a98b1695a5036fa716df`.
+
+The Azure owner also recorded two sequential guarded text-only baseline plans
+through the deployed UI, both on that package and deployment. Request A ran
+from `2026-11-16T08:25:50.337Z` to `2026-11-16T08:26:12.670Z` (reported elapsed
+22.332s): a visually recognizable spaceship with 99 bricks. Request B ran
+from `2026-11-16T08:27:40.984Z` to `2026-11-16T08:28:08.107Z` (27.123s): a
+hollow observatory with a separate rover, 97 bricks. Each was one browser POST and
+one reported adapter attempt (`correctionAttempted=false`,
+`outcome=not-attempted`, `images=false`) and passed 3/3 local build checks.
+These are observed end-to-end UI durations, not separately measured upstream
+model latency. The first view did not independently establish every requested
+spaceship feature. Together with the earlier 100-brick airplane case, this is
+small example evidence, not broad reliability, a matched compact-versus-
+canonical comparison, correction or vision validation, cancellation or
+timeout/cleanup verification, or final user acceptance.
 
 The owner also verified HTTPS-only/TLS 1.2, HTTP-to-HTTPS redirect, Front Door
 routing with WAF Prevention and its approximate 10-per-minute planner rule,
@@ -101,9 +116,9 @@ a 300-second request.
 
 The source implements the following user-approved simplification, covered by
 mock/unit and browser checks. The owner confirms the merged release package and
-settings are live. The single earlier Terra result above verifies one
-representative planning/build path, not broad reliability, every cleanup edge
-case or current live inference.
+settings are live. The two baseline requests above verify current text
+inference through the deployed UI; they do not establish broad reliability,
+correction/vision behavior, every cleanup edge case or user acceptance.
 
 - Hosted visitors are anonymous; the backend uses managed identity for Azure
   services. Visitor Entra sign-in and visitor client-hash keys are not used.

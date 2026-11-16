@@ -9,6 +9,8 @@ returned geometry locally, not as five model calls. This describes the source
 contract; deployment evidence is separate.
 For the current preview revision, verified settings, and evidence limits, see
 [architecture and release status](architecture.md#deployment-and-release-evidence).
+The owner recorded two text-only one-attempt baseline plans through the live
+UI; neither exercised correction or vision.
 
 ## Anonymous hosted preview
 
@@ -160,8 +162,8 @@ cancellation does not prove that the remote service stops computing or billing.
 
 Private local/Codespaces Azure keeps its Entra verifier and exact request
 protections, without a daily counter or obsolete spend-budget opt-in. Local
-capacity remains 8 total / 2 per provider. The current public preview's
-package/settings and HTTPS response are owner-verified; the earlier single
-synthetic planning/build case is described in the architecture notes. These
-facts do not establish a fresh inference, live correction/vision behavior,
-broad provider reliability, or user acceptance.
+capacity remains 8 total / 2 per provider. The owner verified the current
+public preview package/settings and two baseline text plans through its UI;
+the earlier synthetic planning/build case is also described in the architecture
+notes. These examples do not establish correction/vision behavior, broad
+provider reliability, or user acceptance.
