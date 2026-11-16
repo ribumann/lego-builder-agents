@@ -16,9 +16,11 @@ for deployment and release evidence.
 3. `validateCustomSpec` canonicalizes the spec and checks object/record counts,
    expanded brick and occupied-cell limits, bounds, colors, budget, repeats,
    and overlap. The browser validates the returned spec again before execution.
-4. `createPlan` converts geometry to build tasks. `Team` runs the deterministic
-   coordinator, dependency verifier, two construction roles, and inspector.
-   The renderer reflects the team's canonical brick state.
+4. `createCustomPlan` validates provider input and constructs build tasks in
+   one browser pass. Direct `createPlan` calls still validate custom specs.
+   `Team` runs the deterministic coordinator, dependency verifier, two
+   construction roles, and inspector. The renderer reflects the team's
+   canonical brick state.
 5. The user can damage and repair a completed build, scrub placement replay,
    append another plan, save locally, restore it, or download JSON.
 
@@ -55,10 +57,10 @@ saves or provider settings.
 There is one browser workshop and one Node server, not a separate application
 core for each provider. `src/main.ts` selects an explicit planning route;
 `server.mjs` wires those routes to provider-specific code. Accepted AI results
-pass the same `validateSpec`/`createPlan`/`Team` flow in the browser. The shared
+pass through `createCustomPlan` and `Team` in the browser; offline templates
+use `createPlan` and the same engine without calling a model. The shared
 `planning-prompt.mjs` prompt and `src/custom-design.mjs` geometry contract keep
-provider output aligned with that core. Offline templates enter the same engine
-without calling a model.
+provider output aligned with that core.
 
 The adapters are explicit modules/routes, not a dynamic plugin system. There is
 no runtime discovery or drop-in registration API: adding a provider requires
