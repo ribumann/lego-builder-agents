@@ -15,7 +15,7 @@ passed manual acceptance.
 | Current product | In scope | Deterministic agent simulation, geometry validation, scene append, repair, replay, local saves, downloadable builds, and the playground are application features. The five agents are not five model calls. |
 | Parallel planning controls | In scope, merged | The merged release has bounded shared capacity and Azure-only daily submission counting. This enables bounded concurrency; it is not evidence of faster individual plans. |
 | Planning latency experiment | Not shipped | Separate prompt/output experiments are not part of this release. A small isolated paired sample showed no end-to-end gain; no 2x improvement is claimed. |
-| Voice | Stretch | Opt-in browser-local transcription uses manual start/stop with a 30-second cap. Automated tests use mocked microphones or simulated audio; real-microphone usability and acceptance remain unverified. Automatic onset/silence handling is not implemented. See [voice limitations](docs/voice-integration.md) and #15. |
+| Voice | Backlog | Not available in local, Codespaces, or Azure modes. Typed briefs remain available; see [voice integration backlog](docs/voice-integration.md) and #15. |
 | Refactoring | Stretch | Refactor only where needed for MVP correctness or reliability. |
 | Operator-configured LLM | Private workshop | OpenAI-compatible chat-completions provider configured on the server. |
 
@@ -63,8 +63,7 @@ Public hosted Azure defaults to **20 total and 20 Azure requests** per process
 Azure requests have separate provider slots: a busy Copilot provider does not
 serialize them. Set `BRICKLAB_PLANNING_CONCURRENCY` (integer 1-20) and
 `BRICKLAB_PROVIDER_CONCURRENCY` (integer 1-20, no greater than total) to lower or
-raise these bounded limits. Invalid configuration prevents startup. The local
-adapter also defaults to 2 simultaneous requests when used independently.
+raise these bounded limits. Invalid configuration prevents startup.
 
 Capacity is shared across clients/tabs, not a browser-local lock or a
 cross-instance semaphore. Excess requests receive HTTP 429, without queuing,
@@ -427,8 +426,8 @@ release is `c0060c7af8bd5a1c748a76b10e7710e35cf051e6`. Windows text/image
 tests cover contained descendant cleanup, timeout, cancellation and host-loss
 failure, but the Linux workflow run did not exercise the native Windows paths.
 Automated checks do not replace user acceptance: final local
-Copilot authentication/inference and manual UAT, real Codespaces forwarding,
-real-microphone voice acceptance remains unverified.
+Copilot authentication/inference and manual UAT, and real Codespaces forwarding,
+remain unverified. Voice input is excluded and backlogged across modes.
 The separate latency experiment is not shipped and has no demonstrated
 end-to-end speedup. Proxy buffering or hosting request limits may prevent a hosted
 connection from remaining open for 300 seconds; local tests do not establish
@@ -442,23 +441,14 @@ Models use stylized solid bricks, not official LEGO part geometry. Face connecti
 
 Reference images are optional. The image controls identify the destination and require consent before a planning request sends the original PNG or JPEG. Embedded metadata, including possible location or camera information, is **not removed**. The server limits images to 1 MB, 4,096 pixels per dimension and 8 million pixels. Offline templates do not accept images. The Azure backend accepts consented, validated multimodal requests in source; current live vision behavior remains unverified. A compatible service requires the separate `BRICKLAB_COMPATIBLE_VISION=1` operator opt-in, which is an assertion rather than a verified capability. Model or provider vision accuracy has not been established by mock tests.
 
-### Brief, images and voice
+### Brief and images
 
-The rounded brief composer keeps **Choose image (+)** on the left and **Voice input**
-on the right. Choosing an image reveals its removable filename chip, destination
-and unchecked consent box; it does not upload anything. **Media & privacy**
-contains the full metadata, model-download and recovery disclosures.
-
-The microphone button first opens a permission explanation, not a recording.
-Choose **Allow and record**, then stop or cancel; active recording remains visible
-and stops after 30 seconds. Transcription runs on this device. First use downloads
-about 45 MB from Hugging Face/CDN, exposing ordinary network metadata including
-your IP address, not audio or transcripts. The bundled WebAssembly runtime is
-about 22 MB uncompressed; model files can remain in browser cache. Review and edit
-the result, then explicitly replace the brief; this does not submit a plan.
-Typing remains available if recording or transcription is unsupported, slow or
-inaccurate. The selected planner may subsequently receive the brief when you
-submit it.
+The brief composer keeps **Choose image (+)** beside the typed brief. Choosing an
+image reveals its removable filename chip, destination and unchecked consent
+box; it does not upload anything. **Media & privacy** contains image metadata and
+recovery disclosures. Voice input is unavailable in every BrickLab mode; type
+your brief instead. The interactive GitHub Copilot CLI has its own local
+`/voice` feature, but BrickLab does not integrate it as an app API.
 
 ### Optional Windows Copilot images (private server only)
 

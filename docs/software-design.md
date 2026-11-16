@@ -126,9 +126,9 @@ verifies before restart. The merged PR #21 tree-equivalent test head
 timeout-isolation and host-loss quarantine tests. The deployed
 package and public endpoint were verified; package/status checks are distinct
 from the two live baseline requests above, which provide small text-inference
-evidence only. Local Copilot authentication, manual UAT,
-real Codespaces forwarding and real-microphone voice acceptance remain unverified.
-The separate prompt/output latency experiment is
+evidence only. Local Copilot authentication, manual UAT, real Codespaces
+forwarding remain unverified. Voice input is excluded and backlogged across
+modes. The separate prompt/output latency experiment is
 not shipped; its paired measurements did not demonstrate end-to-end speedup.
 The reported CI covers implemented abort, cleanup-wait and quarantine paths;
 a live HTTP abort cannot prove remote compute termination or billing.
@@ -147,12 +147,10 @@ the original image, including embedded metadata, may reach the selected
 provider. Consented, validated Azure image support is implemented in source; live
 Azure vision behavior is not verified.
 
-Voice input is an opt-in browser capability, separate from planning. Recording
-starts and stops through explicit user actions, has a 30-second bound, and the
-user reviews and applies the transcript before it changes the brief; submitting
-that brief is another explicit action. Automatic onset/silence handling is not
-implemented. Real-microphone usability has not been accepted; voice quality
-and device support remain stretch validation.
+Voice input is unavailable in local, Codespaces and Azure modes. GitHub Copilot
+CLI has an interactive local `/voice` feature, but no supported reusable app API
+has been established. BrickLab has no microphone capture, transcription worker
+or audio endpoint. See the [voice backlog](voice-integration.md).
 
 ## Validation and release checks
 

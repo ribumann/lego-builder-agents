@@ -51,7 +51,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
       BRICKLAB_COPILOT_IMAGES: '0', BRICKLAB_COPILOT_MODEL: undefined,
       // Historical lifecycle cases explicitly exercise a one-slot configuration.
       BRICKLAB_PLANNING_CONCURRENCY: '1', BRICKLAB_PROVIDER_CONCURRENCY: '1',
-      BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
+      BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   t.after(async () => {
@@ -1791,7 +1791,7 @@ test('hosted mode is anonymous static/offline only with exact host/origin bounds
   assert.equal((await azurePost(ndjson)).status, 403);
   assert.equal((await fetchWithHost(base + '/api/local-plan', { method: 'POST', headers,
     body: JSON.stringify({ world: 'space', brief: 'test' }) })).status, 404);
-  for (const path of ['/api/azure-plan', '/api/unknown']) {
+  for (const path of ['/api/azure-plan', '/api/voice-transcribe', '/api/unknown']) {
     assert.equal((await fetchWithHost(base + path, { method: 'POST', headers: { ...headers, Origin: '' }, body: '{}' })).status, 403);
   }
   const state = await command({ action: 'inspect' });

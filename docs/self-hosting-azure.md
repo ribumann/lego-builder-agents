@@ -15,7 +15,8 @@ Their exact UTC request windows are in the
 [architecture evidence](architecture.md#deployment-and-release-evidence).
 These examples do not establish broad reliability, correction or vision
 behavior, end-to-end timeout/cleanup, or user acceptance. Private
-Codespaces setup and real-microphone voice acceptance are also unverified.
+Codespaces setup is also unverified; voice is excluded and backlogged across
+modes.
 The owner also confirms hosted Azure is enabled with managed identity, HTTPS
 only, Front Door-only app ingress using the exact Front Door ID and default
 deny, and independent SCM deny-all. These are deployment-owner checks, not a
@@ -306,11 +307,10 @@ slash, port, path, or credentials.
 
 Build the exact reviewed application revision in a clean Linux environment
 using `npm ci`, `npm run build`, then `npm prune --omit=dev`.
-Transformers, Three.js and MSAL Browser are build-time dependencies: Vite emits
-the application, browser voice worker and WebAssembly assets into `dist`.
-Keep those built assets, but do not ship unused browser libraries or Node/ONNX
-inference dependencies with the server. Azure Identity, Azure Blob Storage
-and JOSE remain server runtime dependencies.
+Three.js and MSAL Browser are build-time dependencies: Vite emits the
+application and its assets into `dist`. Keep those built assets, but do not
+ship unused browser libraries with the server. Azure Identity, Azure Blob
+Storage and JOSE remain server runtime dependencies.
 Create the release using the repository packager, which verifies the runtime module
 closure, production dependency tree, required worker/runtime assets and
 Windows helper, and writes a per-file SHA-256 manifest. The archive is

@@ -15,10 +15,8 @@ flowchart LR
     Engine["Deterministic team engine"]
     Scene["Three.js scene"]
     Save["Browser localStorage / JSON download"]
-    Voice["Opt-in local voice transcription"]
     UI --> Engine --> Scene
     Engine --> Save
-    Voice --> UI
   end
 
   subgraph Host["BrickLab Node server"]
@@ -209,10 +207,10 @@ Live long-stream reliability and real-timeout behavior remain unverified.
   compatible service, or Azure. Consented, validated Azure image planning is
   implemented in source. Image planning requires explicit consent; original
   image metadata is not stripped.
-- Voice transcription runs in the browser after explicit microphone consent.
-  First use downloads the model from its publisher; audio and transcript are
-  not sent by the voice module. A later plan submission follows the selected
-  planner's separate disclosure.
+- Voice input is excluded across local, Codespaces and Azure modes and remains
+  backlogged until a supported reusable integration and real-microphone
+  acceptance establish a consistent reliable experience. See
+  [voice integration](voice-integration.md).
 - Browser saves and playground memory are local to the browser. Downloads are
   files, not a sharing service. A shared application call limit is not an
   invoice cap.
@@ -226,11 +224,13 @@ operator responsibilities, not product deliverables or release blockers.
 - **MVP:** offline templates, the deterministic team and inspector, custom
   planning subject to validation, scene append, replay, local persistence, and
   the documented local/Codespaces/Azure deployment boundaries.
-- **Stretch:** improve and validate voice input; automatic onset/silence handling
-  is not implemented and real-microphone usability is not accepted. Refactor
-  existing code only where required to meet MVP behavior and reliability.
+- **Stretch:** refactor existing code only where needed for MVP correctness or
+  reliability.
 - **Private workshops:** operators may configure an OpenAI-compatible endpoint;
   supported protocol requirements and limitations are documented in the README.
+- **Backlog:** voice input is excluded across modes until a supported reusable
+  integration and real-microphone acceptance establish a consistent reliable
+  experience.
 - **Not a physical simulator:** face connectivity and occupied-cell checks do
   not prove clutch strength, collision safety, stability, or buildability.
 

@@ -7,8 +7,6 @@ import { appendScene, restoreSceneAppend, snapshotSceneAppend } from './scene-ap
 import { agentInsights } from './agent-insights';
 import { mountAgentPlayground } from './agent-playground';
 import { elapsedText, getLanguage, languages, planningDescription, setLanguage, translate, translateActivity, translateCheckDetail, translateInterface, translateTaskName, type Language } from './i18n';
-import { createVoiceInput, type VoiceUpdate } from './voice-input';
-import { voiceLabels } from './voice-labels';
 import { createPlanningImageInput } from './planning-image-input';
 import { resolveSceneSize } from './scene-size.mjs';
 import { acquireAzurePlanningToken } from './azure-auth';
@@ -123,35 +121,12 @@ app.innerHTML = `
         <div class="brief-input" id="brief-composer">
           <button id="image-choose" class="composer-tool" type="button" aria-label="Choose image">${icon('plus')}</button>
           <textarea id="brief" rows="1" maxlength="1000" aria-describedby="brief-help" placeholder="Describe your dinosaur…"></textarea>
-          <button id="voice-entry" class="composer-tool" type="button" aria-label="Optional voice input" aria-expanded="false" aria-controls="voice-panel">${icon('mic')}</button>
         </div>
         <div id="image-input"></div>
-        <section id="voice-panel" class="voice-panel" aria-labelledby="voice-title" hidden>
-          <h3 id="voice-title">Optional voice input</h3>
-          <p id="voice-permission"></p>
-          <div class="voice-controls">
-            <button id="voice-start" class="button outline" type="button">Allow and record</button>
-            <button id="voice-stop" class="button outline" type="button" disabled>Stop and transcribe</button>
-            <button id="voice-cancel" class="text-button" type="button">Cancel voice input</button>
-          </div>
-          <p id="voice-status" class="voice-status" role="status" aria-live="polite" aria-atomic="true">Ready for voice input</p>
-          <div id="voice-activity" class="voice-activity" hidden>
-            <progress id="voice-progress" aria-labelledby="voice-status" aria-describedby="voice-progress-help"></progress>
-            <span id="voice-progress-value" aria-hidden="true"></span>
-            <p id="voice-progress-help"></p>
-          </div>
-          <div id="voice-review" hidden>
-            <label id="voice-transcript-label" for="voice-transcript">Review and edit the transcription</label>
-            <textarea id="voice-transcript" rows="3" aria-describedby="voice-review-help voice-count voice-length-warning"></textarea>
-            <div class="voice-meta"><p id="voice-review-help">Review and edit the text before planning. It stays separate until you choose to use it.</p><p id="voice-count">0 / 1,000 characters</p></div>
-            <p id="voice-length-warning" class="voice-warning" role="status" hidden></p>
-            <div id="voice-pending" class="voice-pending" hidden><p id="voice-pending-note"></p><p id="voice-pending-text"></p><button id="voice-use-pending" class="button outline" type="button">Replace with new transcription</button> <button id="voice-discard-pending" class="button outline" type="button">Discard new transcription</button></div>
-            <button id="voice-apply" class="button outline voice-apply" type="button" disabled>Use transcription in brief</button>
-          </div>
-        </section>
+        <p id="voice-unavailable">Voice input is unavailable in BrickLab across all modes. Type your brief instead.</p>
         <div class="composer-footer">
           <details id="media-privacy" class="media-privacy"><summary>Media & privacy</summary>
-            <div id="image-privacy"></div><p id="voice-disclosure"></p><p id="voice-language"></p>
+            <div id="image-privacy"></div>
             <p>If a Copilot image helper crashes, private temporary files may remain. Unconfirmed cleanup locks planning; the server operator must verify processes and files before restarting.</p>
           </details>
           <button id="plan" class="button primary" type="submit">Make a plan ${icon('arrow')}</button>
@@ -203,82 +178,7 @@ app.innerHTML = `
 let noticeSource = '';
 let answerSource: { id: AgentId; response: string } | undefined;
 let sceneErrorDetail = '';
-let voiceUpdate: VoiceUpdate = { state: 'idle' };
-let voiceTranscriptAtStart = '';
-let voiceTranscriptRevision = 0;
-let voiceRevisionAtStart = 0;
-let pendingVoiceTranscript: string | null = null;
-let voicePanelOpen = false;
-let voiceReviewAvailable = false;
-let voiceInput: ReturnType<typeof createVoiceInput> | undefined;
 let imageInput: ReturnType<typeof createPlanningImageInput> | undefined;
-const refreshVoiceUI = () => {
-  const focused = document.activeElement;
-  const labels = voiceLabels[getLanguage()];
-  const transcript = $<HTMLTextAreaElement>('#voice-transcript');
-  const active = ['requesting', 'recording', 'processing'].includes(voiceUpdate.state);
-  const start = $<HTMLButtonElement>('#voice-start');
-  const stop = $<HTMLButtonElement>('#voice-stop');
-  const apply = $<HTMLButtonElement>('#voice-apply');
-  const entry = $<HTMLButtonElement>('#voice-entry');
-  const tooLong = transcript.value.length > 1000;
-  start.disabled = active || pendingVoiceTranscript !== null;
-  start.hidden = active;
-  stop.disabled = voiceUpdate.state !== 'recording';
-  stop.hidden = voiceUpdate.state !== 'recording';
-  entry.disabled = voiceUpdate.state === 'requesting' || voiceUpdate.state === 'processing';
-  entry.classList.toggle('recording', voiceUpdate.state === 'recording');
-  entry.innerHTML = icon(voiceUpdate.state === 'recording' ? 'stop' : 'mic');
-  entry.setAttribute('aria-label', voiceUpdate.state === 'recording' ? labels.stop : labels.title);
-  entry.setAttribute('title', voiceUpdate.state === 'recording' ? labels.stop : labels.title);
-  entry.setAttribute('aria-expanded', String(voicePanelOpen || active));
-  $('#voice-panel').hidden = !voicePanelOpen && !active;
-  $('#voice-permission').hidden = active;
-  $('#voice-review').hidden = !voiceReviewAvailable;
-  if ((start.hidden && focused === start) || (stop.hidden && focused === stop) || (entry.disabled && focused === entry))
-    (voiceUpdate.state === 'recording' ? stop : $('#voice-cancel')).focus();
-  apply.disabled = active || !transcript.value.trim() || tooLong;
-  const progress = voiceUpdate.state === 'processing' ? voiceUpdate.progress : undefined;
-  const statusText = `${progress ? labels.progress[progress.stage] : labels.states[voiceUpdate.state]}${voiceUpdate.error ? `: ${labels.errors[voiceUpdate.error]}` : ''}`;
-  if ($('#voice-status').textContent !== statusText) $('#voice-status').textContent = statusText;
-  $('#voice-activity').hidden = voiceUpdate.state !== 'processing';
-  const progressBar = $<HTMLProgressElement>('#voice-progress');
-  const loaded = progress?.loaded;
-  const total = progress?.total;
-  const fraction = progress?.stage === 'downloading' && typeof loaded === 'number' && typeof total === 'number'
-    && Number.isFinite(loaded) && Number.isFinite(total) && total > 0 && loaded >= 0 && loaded <= total
-    ? loaded / total : undefined;
-  progressBar.max = 1;
-  if (fraction !== undefined) progressBar.value = fraction;
-  else progressBar.removeAttribute('value');
-  $('#voice-progress-value').textContent = fraction !== undefined
-    ? new Intl.NumberFormat(getLanguage(), { style: 'percent', maximumFractionDigits: 0 }).format(progressBar.value) : '';
-  $('#voice-progress-help').textContent = progress?.stage === 'downloading' ? labels.downloadHelp
-    : progress?.stage === 'loading' ? labels.loadingHelp : labels.processingHelp;
-  $('#voice-count').textContent = labels.count.replace('{count}', String(transcript.value.length));
-  const warning = $<HTMLParagraphElement>('#voice-length-warning');
-  warning.textContent = tooLong ? labels.tooLong.replace('{count}', String(transcript.value.length)) : '';
-  warning.hidden = !tooLong;
-  $('#voice-pending').hidden = pendingVoiceTranscript === null;
-  $('#voice-pending-note').textContent = pendingVoiceTranscript === null ? '' : labels.pending;
-  $('#voice-pending-text').textContent = pendingVoiceTranscript ?? '';
-};
-const applyVoiceLabels = () => {
-  const labels = voiceLabels[getLanguage()];
-  $('#voice-title').textContent = labels.title;
-  $('#voice-disclosure').textContent = `${labels.disclosure} ${labels.runtime}`;
-  $('#voice-permission').textContent = labels.permission;
-  $('#voice-language').textContent = labels.language;
-  $('#voice-start').textContent = labels.start;
-  $('#voice-stop').textContent = labels.stop;
-  $('#voice-cancel').textContent = labels.cancel;
-  $('#voice-transcript-label').textContent = labels.transcript;
-  $('#voice-review-help').textContent = labels.review;
-  $('#voice-use-pending').textContent = labels.replace;
-  $('#voice-discard-pending').textContent = labels.discard;
-  $('#voice-apply').textContent = labels.apply;
-  refreshVoiceUI();
-};
 try {
   const savedLanguage = localStorage.getItem('bricklab-language');
   if (languages.some(language => language === savedLanguage)) setLanguage(savedLanguage as Language);
@@ -289,7 +189,6 @@ const applyLanguage = () => {
   languageSelect.value = getLanguage();
   translateInterface(app);
   playground.setLanguage(getLanguage());
-  applyVoiceLabels();
   imageInput?.refresh();
   if (mode === 'compatible') $('#brief-help').textContent = compatibleBriefHelp();
   if (noticeSource) $('#notice').textContent = translateActivity(noticeSource);
@@ -381,55 +280,6 @@ imageInput = createPlanningImageInput({
   target: () => mode === 'local' ? 'local' : hosted && mode !== 'azure' ? 'hosted' : mode,
   copilotImages: () => copilotImagesEnabled, azureImages: () => azureImagesEnabled,
   compatibleDestination: () => compatiblePlanner.destination, compatibleImages: () => compatiblePlanner.vision,
-});
-const voiceTranscript = $<HTMLTextAreaElement>('#voice-transcript');
-voiceInput = createVoiceInput(
-  update => { voiceUpdate = update; refreshVoiceUI(); },
-  text => {
-    voiceReviewAvailable = true;
-    if (!voiceTranscriptAtStart && voiceTranscriptRevision === voiceRevisionAtStart) voiceTranscript.value = text;
-    else pendingVoiceTranscript = text;
-    refreshVoiceUI();
-  },
-);
-voiceTranscript.addEventListener('input', () => { voiceTranscriptRevision++; refreshVoiceUI(); });
-$('#voice-entry').addEventListener('click', () => {
-  if (voiceUpdate.state === 'recording') { voiceInput?.stop(); return; }
-  voicePanelOpen = true;
-  refreshVoiceUI();
-  $('#voice-start').focus();
-});
-$('#voice-start').addEventListener('click', () => {
-  voiceTranscriptAtStart = voiceTranscript.value;
-  voiceRevisionAtStart = voiceTranscriptRevision;
-  void voiceInput?.start(true, getLanguage());
-});
-$('#voice-stop').addEventListener('click', () => voiceInput?.stop());
-$('#voice-cancel').addEventListener('click', () => {
-  voiceInput?.cancel();
-  voicePanelOpen = false;
-  refreshVoiceUI();
-  $('#voice-entry').focus();
-});
-$('#voice-use-pending').addEventListener('click', () => {
-  if (pendingVoiceTranscript === null) return;
-  voiceTranscript.value = pendingVoiceTranscript;
-  pendingVoiceTranscript = null;
-  refreshVoiceUI();
-  voiceTranscript.focus();
-});
-$('#voice-discard-pending').addEventListener('click', () => {
-  pendingVoiceTranscript = null;
-  refreshVoiceUI();
-  voiceTranscript.focus();
-});
-$('#voice-apply').addEventListener('click', () => {
-  if (!voiceTranscript.value.trim() || voiceTranscript.value.length > 1000) return;
-  brief.value = voiceTranscript.value;
-  updateSceneSize();
-  voicePanelOpen = false;
-  refreshVoiceUI();
-  brief.focus();
 });
 const notice = (message: string) => { noticeSource = message; $('#notice').textContent = translateActivity(message); $('#notice').hidden = false; };
 const clearNotice = () => { noticeSource = ''; $('#notice').hidden = true; };
@@ -578,7 +428,7 @@ function renderInsights() {
   }
   const view = agentInsights(team);
   const sourceNames = {
-    local: 'Local rule-based agents', copilot: 'Copilot cloud planning · custom designs', 'local-ai': 'Local AI · server-host model',
+    local: 'Local rule-based agents', copilot: 'Copilot cloud planning · custom designs', 'local-ai': 'Legacy local AI · server-host model',
     azure: 'Azure Foundry planning · custom designs', compatible: 'Compatible AI · custom designs', 'github-models': 'Imported model decisions',
   } as const;
   $('#insight-state').innerHTML = [
@@ -913,7 +763,7 @@ function answer(question: string, agent?: AgentId) {
   else if (/repair|missing|broken/.test(q)) response = 'We compare the actual brick grid with the planned grid. The specialist who owns a missing brick reopens that task and replaces it. That is an observe–act–check loop.';
   else if (/prompt|brief|change|color/.test(q)) response = 'Try a body color, species or ship type, and one feature. For example: “purple brachiosaurus” or “blue explorer with wide wings.” Then make a new plan. Unspecified choices are shown as assumptions.';
   else if (/why.*plan|plan.*why/.test(q)) response = 'A shared plan tells each specialist what to do and which parts must exist first. Without dependencies, an agent could add eyes before there is a head!';
-  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. A selected cloud or local model can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
+  else if (/\b(real|ai|model|llm)\b/.test(q)) response = 'In local mode all five agents follow rules, not language models. A selected AI provider can interpret the brief; all five agents still work locally. Our messages explain program decisions, not hidden model thoughts.';
   else if (!agent && !/who|what|job|help|team|wait|frame|detail|build|structure|planbot|checkbot|inspect|quality|dependencies/.test(q)) response = 'I’m a local teaching guide, not an open-ended chat model. Ask about our jobs, dependencies, the brief, repair, AI mode, or cost.';
   answerSource = { id, response };
   $('#crew-answer').textContent = `${AGENTS[id].name}: ${translate(response)}`;
@@ -1006,7 +856,7 @@ $('#guide').addEventListener('click', () => dialog('You’re the director. They�
   <p>Try a purple brachiosaurus, a green stegosaurus with a long tail, or a white cargo ship; add a second object and compare the team’s handoffs. With a configured AI planner, try a lighthouse or a space station with a visiting ship.</p>
   <p>${esc(translate('Try the hollow-interior preference with custom planning, then use Cutaway view to inspect the cross-section. It is a preference, not a guarantee; connectivity checks do not prove physical stability.'))}</p>
   <details><summary>Planning choices and privacy</summary>
-    <p>${hosted ? 'The hosted demo sends your brief and any image you explicitly consent to share to Azure when you choose Plan. No visitor sign-in is required. Voice transcription runs in your browser; only text you review and apply to the brief is sent with a later planning request. No input is sent on page load or while selecting media.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
+    <p>${hosted ? 'The hosted demo sends your brief and any image you explicitly consent to share to Azure when you choose Plan. No visitor sign-in is required. Voice input is unavailable in BrickLab; type your brief instead. No input is sent on page load or while selecting media.' : 'Cloud Copilot planning is the default: describe any static brick design, not just these themes. Pressing Send brief to Copilot sends the brief to GitHub and may consume quota.'} No model request happens on load.</p>
     <p>Explicit offline template mode supports <strong>stegosaurus and brachiosaurus</strong>, both from the Jurassic, and explorer/cargo ships. Body colors: green, orange, blue, purple, red, white. Features: long tail, wide wings. You can add “budget 500 bricks”. Other requests may not change these templates. Guided demos and local examples use no model calls.</p>
     <p>Additional offline template body colors: black, yellow, gray, brown and pink.</p>
     <p>AI planners must return custom geometry; template responses fail visibly. Five local agents coordinate, verify, build and inspect the result. Messages explain decisions, not private model reasoning.</p>
@@ -1059,8 +909,8 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); }
 });
-window.addEventListener('beforeunload', () => { planningController?.abort(); voiceInput?.cancel(); });
-window.addEventListener('pagehide', () => { planningController?.abort(); voiceInput?.cancel(); });
+window.addEventListener('beforeunload', () => { planningController?.abort(); save(); });
+window.addEventListener('pagehide', () => { planningController?.abort(); });
 restore();
 render();
 function compatibleBriefHelp() {
@@ -1075,7 +925,7 @@ function updateMode() {
   $('#brief-help').textContent = mode === 'local'
     ? 'Offline template mode builds dinosaur and spaceship templates only; other ideas may be mapped to a template.'
     : hosted
-      ? `This hosted demo uses Azure Foundry. Voice transcription stays in your browser; only text you review and apply to the brief is sent when you press Plan. Any selected image is sent only with image consent and Plan.${publicAllowance ? ` ${publicAllowance}` : ''}`
+      ? `This hosted demo uses Azure Foundry. Voice input is unavailable in BrickLab. Any selected image is sent only with image consent and Plan.${publicAllowance ? ` ${publicAllowance}` : ''}`
     : mode === 'compatible'
       ? compatibleBriefHelp()
       : mode === 'azure'

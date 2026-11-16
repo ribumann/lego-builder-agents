@@ -120,8 +120,8 @@ Images require explicit `imageConsent:true`, with
 type, at most 1,000,000 decoded bytes, dimensions at most 4096 each and at most
 8 million pixels before counting or inference. The adapter sends one user
 message containing text plus an `image_url` data URL. There are no Azure image
-temporary files. Voice is browser-local Whisper with explicit review/apply,
-not Azure Speech or a server audio upload.
+temporary files. BrickLab has no audio-transcription route; voice remains
+backlogged across modes.
 
 ## Lifecycle and output
 

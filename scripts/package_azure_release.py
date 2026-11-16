@@ -105,10 +105,8 @@ def collect_runtime_files(root: Path, verify_npm: bool = True) -> list[Path]:
                 raise PackageError(f"Runtime import is not packaged: {specifier}")
 
     dist_files = [root / path for path in files if Path("dist") in path.parents]
-    if not any(path.suffix == ".wasm" for path in dist_files):
-        raise PackageError("Built release has no WebAssembly runtime asset.")
-    if not any(path.suffix == ".mjs" for path in dist_files):
-        raise PackageError("Built release has no JavaScript module runtime asset.")
+    if not any(path.suffix == ".js" for path in dist_files):
+        raise PackageError("Built release has no JavaScript application asset.")
     return sorted(files, key=lambda path: path.as_posix())
 
 

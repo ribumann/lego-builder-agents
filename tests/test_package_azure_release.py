@@ -23,16 +23,15 @@ class PackageAzureReleaseTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "source"
         self.root.mkdir()
         for name, content in (
-            ("package.json", json.dumps({"dependencies": {"@huggingface/transformers": "3.8.1"}})),
+            ("package.json", json.dumps({"dependencies": {"fixture-runtime": "1.0.0"}})),
             ("server.mjs", "import './src/windows-copilot-job-runner.mjs';\n"),
             ("planning.mjs", "export const ready = true;\n"),
             ("src/windows-copilot-job-runner.mjs", "import '../planning.mjs';\n"),
             ("src/custom-design.mjs", "export const prompt = 'ok';\n"),
             ("scripts/windows-copilot-job-host.ps1", "Write-Output 'ok'\n"),
-            ("dist/assets/voice-worker.mjs", "export {};\n"),
-            ("dist/assets/runtime.wasm", "wasm"),
-            ("node_modules/@huggingface/transformers/package.json", '{"version":"3.8.1"}'),
-            ("node_modules/@huggingface/transformers/index.mjs", "export {};\n"),
+            ("dist/assets/app.js", "export {};\n"),
+            ("node_modules/fixture-runtime/package.json", '{"version":"1.0.0"}'),
+            ("node_modules/fixture-runtime/index.js", "export {};\n"),
         ):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,13 +43,12 @@ class PackageAzureReleaseTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_release_contains_runtime_import_closure_worker_assets_and_manifest_only(self):
+    def test_release_contains_runtime_import_closure_application_assets_and_manifest_only(self):
         files = {path.as_posix() for path in collect_runtime_files(self.root, verify_npm=False)}
         self.assertIn("src/windows-copilot-job-runner.mjs", files)
         self.assertIn("scripts/windows-copilot-job-host.ps1", files)
-        self.assertIn("dist/assets/voice-worker.mjs", files)
-        self.assertIn("dist/assets/runtime.wasm", files)
-        self.assertIn("node_modules/@huggingface/transformers/index.mjs", files)
+        self.assertIn("dist/assets/app.js", files)
+        self.assertIn("node_modules/fixture-runtime/index.js", files)
         self.assertNotIn(".env", files)
         self.assertNotIn("tests/secret-fixture.txt", files)
 
@@ -75,7 +73,7 @@ class PackageAzureReleaseTests(unittest.TestCase):
             names = set(archive.namelist())
         self.assertEqual(manifest["revision"], "b" * 40)
         self.assertIn("src/windows-copilot-job-runner.mjs", names)
-        self.assertIn("dist/assets/runtime.wasm", names)
+        self.assertIn("dist/assets/app.js", names)
         second = Path(self.temporary.name) / "release-second.zip"
         second_result = build_package(self.root, "b" * 40, second, verify_npm=False)
         self.assertEqual(result["sha256"], second_result["sha256"])
