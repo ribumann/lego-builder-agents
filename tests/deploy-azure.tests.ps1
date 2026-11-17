@@ -68,6 +68,10 @@ try {
     $script:blobExists = $false
     $script:active = 0
     $script:wrongAccount = $false
+    $script:groupExists = $false
+    $script:groupManaged = $true
+    $script:provisionStorageBlocked = $false
+    $script:planWorkers = 1
     function Invoke-RestMethod { return @{ hosted = $true; planningCapacity = @{ active = $script:active; quarantined = $false } } }
     function Invoke-Azure {
         param([string[]] $Arguments, [switch] $Json)
@@ -75,9 +79,9 @@ try {
         switch ($Arguments[0..1] -join ' ') {
             'account show' { return @{ id = $(if ($script:wrongAccount) { 'wrong' } else { '11111111-1111-1111-1111-111111111111' })
                 tenantId = '33333333-3333-3333-3333-333333333333'; environmentName = 'AzureCloud' } }
-            'group exists' { return $false }
+            'group exists' { return $script:groupExists }
             'group create' { return }
-            'group show' { return @{ tags = @{ 'bricklab-installation' = 'deploy-azure-v1' } } }
+            'group show' { return @{ tags = @{ 'bricklab-installation' = $(if ($script:groupManaged) { 'deploy-azure-v1' } else { 'not-ours' }) } } }
             'resource list' { return @() }
             'deployment group' {
                 if ($Arguments[2] -eq 'list') { return @() }
@@ -87,7 +91,9 @@ try {
                     origin = @{ value = 'https://bricklab-test.azurewebsites.net' }
                 } } }
             }
-            'webapp show' { return @{ httpsOnly = $true; identity = @{ type = 'SystemAssigned'; principalId = 'identity' } } }
+            'webapp show' { return @{ httpsOnly = $true; identity = @{ type = 'SystemAssigned'; principalId = 'identity' }
+                serverFarmId = 'plan-id'; virtualNetworkSubnetId = 'subnet-id' } }
+            'appservice plan' { return @{ sku = @{ capacity = $script:planWorkers } } }
             'webapp restart' { return }
             'webapp config' {
                 if ($Arguments[2] -eq 'show') { return $script:config }
@@ -103,7 +109,16 @@ try {
                     return
                 }
             }
-            'storage account' { return @{ publicNetworkAccess = 'Disabled'; allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; enableHttpsTrafficOnly = $true } }
+            'storage account' {
+                if ($Arguments -contains 'show' -and $script:inProvision) {
+                    return @{ publicNetworkAccess = $(if ($script:provisionStorageBlocked) { 'Disabled' } else { 'Enabled' })
+                        allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; enableHttpsTrafficOnly = $true
+                        networkRuleSet = @{ defaultAction = 'Deny'; bypass = 'None'
+                            ipRules = @(@{ ipAddressOrRange = '203.0.113.7' })
+                            virtualNetworkRules = @(@{ virtualNetworkResourceId = 'subnet-id' }) } }
+                }
+                return @{ publicNetworkAccess = 'Disabled'; allowSharedKeyAccess = $false; allowBlobPublicAccess = $false; enableHttpsTrafficOnly = $true }
+            }
             'storage container' { return @{ properties = @{ publicAccess = $null } } }
             'storage blob' {
                 if ($Arguments[2] -eq 'exists') { return @{ exists = ($Arguments -contains 'packages' -and $script:blobExists) } }
@@ -129,6 +144,7 @@ try {
         OperatorIpv4Cidr = '203.0.113.7/32'; WebAppName = 'bricklab-test'; StorageAccountName = 'bricklabtest'
         PackagePath = $packagePath; Revision = $revision; MaintenanceConfirmed = $true; InitializeNewInstallation = $false
     }
+    $script:inProvision = $false
     Assert-Release $packagePath $revision
     Assert-Throws { Assert-Release $packagePath ('c' * 40) } 'mismatch'
     Assert-Throws { Assert-ExactOrigin 'https://example.com:443' } 'exact HTTPS'
@@ -145,6 +161,9 @@ try {
     $script:config.scmIpSecurityRestrictionsUseMain = $true
     Assert-Throws { Invoke-BrickLabDeployment $options } 'default-deny'
     $script:config.scmIpSecurityRestrictionsUseMain = $false
+    $script:planWorkers = 2
+    Assert-Throws { Invoke-BrickLabDeployment $options } 'one App Service plan worker'
+    $script:planWorkers = 1
     Assert-Test (-not @($script:calls | Where-Object { $_ -contains 'set' -or $_ -contains 'upload' }).Count) 'Rejected operations must not write'
 
     Invoke-BrickLabDeployment $options
@@ -178,9 +197,18 @@ try {
         Location = 'italynorth'; OperatorIpv4Cidr = $options.OperatorIpv4Cidr
         UploaderObjectId = '22222222-2222-2222-2222-222222222222'; UploaderPrincipalType = 'ServicePrincipal'
     }
+    $script:inProvision = $true
+    $script:groupExists = $true
+    $script:groupManaged = $false
+    Assert-Throws { Invoke-BrickLabDeployment $provision } 'existing resource groups'
+    Assert-Test (@($script:calls | Where-Object { $_ -contains 'create' }).Count -eq 0) 'Unmarked group is not modified'
+    $script:groupExists = $false
+    $script:groupManaged = $true
     Invoke-BrickLabDeployment $provision
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'create' -and $_ -contains 'deployment' }).Count -eq 1) 'Provision deploys only isolated installation template'
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'cognitiveservices' -or $_ -contains 'afd' -or $_ -contains 'dns' }).Count -eq 0) 'No model, edge or domain commands'
+    $script:provisionStorageBlocked = $true
+    Assert-Throws { Invoke-BrickLabDeployment $provision } 'possibly by Azure Policy'
     Write-Host 'PASS: offline release, target, boundary, idle, preservation, immutable rollout, initialization and provisioning tests.'
 } finally {
     # Only this test's newly created, resolved temporary directory.

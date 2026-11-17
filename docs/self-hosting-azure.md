@@ -56,6 +56,20 @@ The uploader must have a stable public IPv4 address that matches the `/32`,
 and the browser used for acceptance must use that same egress. A VPN, proxy,
 IPv6 preference or another network may produce an intentional 403. No script
 discovers, broadens or changes the allowlist automatically.
+Check the source IP **as seen by Azure**, not only a generic IP-check service:
+corporate proxies can use different egress addresses for different destinations.
+App Service's `x-ms-forbidden-ip` response header can identify such a mismatch.
+Treat it as diagnostic evidence, not permission to change the allowlist.
+
+Subscription/management-group policy can rewrite a requested Storage
+`publicNetworkAccess=Enabled` to `Disabled`. Provision detects that condition
+after ARM completes and fails with an explicit **resources still exist and
+incur charges** message. The selected-network recipe is not deployable in that
+environment without an approved architecture change. Use a Blob private
+endpoint, private DNS and an approved network-connected uploader/runner instead;
+do not request an exemption, enable shared keys or relax policy as a workaround.
+The existing private-storage template assumes its original VNet layout; do not
+blindly apply it over this installation's integrated service-endpoint subnet.
 
 Use a new, dedicated resource group and explicit subscription and tenant IDs.
 The selected Azure account must match both; sovereign-cloud targets are
@@ -266,7 +280,7 @@ targets, unsafe restrictions, active planning and initialization of an existing
 deployment. They cover setting/ledger preservation and conditional immutable
 uploads. Python tests check package closure/assets/manifests and compile the
 templates with Bicep without deploying resources. CI runs the package and
-orchestration checks. None of these offline checks uses a model.
+orchestration and Bicep checks. None of these offline checks uses a model.
 
 ## Prerequisites and costs
 
@@ -431,8 +445,10 @@ az deployment group create --subscription "$SUBSCRIPTION" --resource-group "$RG"
 Save the deployment outputs `webAppName`, `storageAccountName`,
 `openAiAccountId`, `openAiEndpoint` and `openAiDeployment`. The base template
 creates a dedicated model with key authentication disabled, managed identity
-and scoped Blob permissions. App Service **public access is disabled** until
-the edge has been verified. Template redeployment also disables it again.
+and scoped Blob permissions. App Service's public endpoint exists, but
+**all origin traffic is denied** while `frontDoorId` is empty. A base-template
+redeployment without that parameter denies origin traffic again and may reset
+runtime settings; it is not an application-update operation.
 
 Deploy `infra/private-storage.bicep` with `webAppName` and
 `storageAccountName` from those outputs. It creates a VNet, private Blob
@@ -631,6 +647,17 @@ Ensure failures do not expose credentials or raw provider errors. A live
 status endpoint alone is not evidence that inference or controls work.
 
 ## Operations and teardown
+
+For the no-domain installation, there are no DNS records to remove. Before
+cleanup, inspect the exact dedicated group's inventory with
+`az resource list --subscription $Subscription --resource-group $Group --output table`
+and verify it contains only the installation you intend to retire. Only after
+separate deletion approval, run
+`az group delete --subscription $Subscription --name $Group` and answer its
+confirmation. Stopping the web app does **not** stop B1 plan charges; deleting
+the dedicated plan/group is necessary to retire those resources. Retain the
+release and usage state first if recovery is needed. The deploy script and
+workflow never perform teardown.
 
 Monitor availability, application errors, WAF blocks, usage counts,
 actual Azure costs and model configuration. Restrict permission to

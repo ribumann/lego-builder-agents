@@ -22,6 +22,8 @@ jobs:
       - name: Check Azure deployment orchestration offline
         shell: pwsh
         run: ./tests/deploy-azure.tests.ps1
+      - name: Compile Azure template safety regressions offline
+        run: python -B -m unittest discover -s tests -p test_azure_templates.py
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - name: Record build provenance

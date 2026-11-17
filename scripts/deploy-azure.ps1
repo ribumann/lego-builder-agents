@@ -86,7 +86,9 @@ function Assert-DeploymentBoundary {
             @($Storage.networkRuleSet.ipRules).Count -ne 1 -or
             $Storage.networkRuleSet.ipRules[0].ipAddressOrRange -notin @($OperatorCidr, ($OperatorCidr -split '/')[0]) -or
             @($Storage.networkRuleSet.virtualNetworkRules).Count -ne 1 -or
-            $Storage.networkRuleSet.virtualNetworkRules[0].virtualNetworkResourceId -ne $Web.virtualNetworkSubnetId) {
+            $Storage.networkRuleSet.virtualNetworkRules[0].virtualNetworkResourceId -ne $Web.virtualNetworkSubnetId -or
+            ($Storage.networkRuleSet.ContainsKey('resourceAccessRules') -and @($Storage.networkRuleSet.resourceAccessRules | Where-Object { $null -ne $_ }).Count) -or
+            ($Storage.networkRuleSet.ContainsKey('ipv6Rules') -and @($Storage.networkRuleSet.ipv6Rules).Count)) {
             throw 'Selected-network storage must allow only the operator /32 and the integrated app subnet.'
         }
     }
@@ -208,13 +210,24 @@ function Invoke-BrickLabDeployment {
         }
         $record = Invoke-Azure (@('deployment', 'group', 'show') + $scope + @('--name', $name)) -Json
         $base = $record.properties.outputs
-        Write-Host "Provisioning complete: app=$($base.webAppName.value), storage=$($base.storageAccountName.value)."
+        Write-Host "Resources provisioned: app=$($base.webAppName.value), storage=$($base.storageAccountName.value)."
+        $actualStorage = Invoke-Azure (@('storage', 'account', 'show') + $scope +
+            @('--name', $base.storageAccountName.value)) -Json
+        if ($actualStorage.publicNetworkAccess -ne 'Enabled') {
+            throw 'Resources were provisioned and incur charges, but Storage public networking is disabled (possibly by Azure Policy). The selected-network profile cannot upload or fetch packages. Use an approved private-endpoint architecture/connected runner; never relax the policy.'
+        }
+        $actualTarget = $scope + @('--name', $base.webAppName.value)
+        $actualWeb = Invoke-Azure (@('webapp', 'show') + $actualTarget) -Json
+        $actualConfig = Invoke-Azure (@('webapp', 'config', 'show') + $actualTarget) -Json
+        Assert-DeploymentBoundary $actualWeb $actualConfig $actualStorage $Options.OperatorIpv4Cidr
         Write-Host "Default HTTPS origin=$($base.origin.value). Provision never enables planning or selects a package. Completed stages are not reconciled; run initial Deploy only for a new app."
         return
     }
 
     $target = $scope + @('--name', $Options.WebAppName)
     $web = Invoke-Azure (@('webapp', 'show') + $target) -Json
+    $plan = Invoke-Azure @('appservice', 'plan', 'show', '--subscription', $Options.SubscriptionId, '--ids', $web.serverFarmId) -Json
+    if ($plan.sku.capacity -ne 1) { throw 'Exactly one App Service plan worker is required.' }
     $config = Invoke-Azure (@('webapp', 'config', 'show') + $target) -Json
     $storage = Invoke-Azure (@('storage', 'account', 'show') + $scope + @('--name', $Options.StorageAccountName)) -Json
     $settings = Get-AppSettings $target
