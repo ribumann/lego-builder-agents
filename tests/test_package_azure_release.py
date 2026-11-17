@@ -29,6 +29,8 @@ class PackageAzureReleaseTests(unittest.TestCase):
             ("src/windows-copilot-job-runner.mjs", "import '../planning.mjs';\n"),
             ("src/custom-design.mjs", "export const prompt = 'ok';\n"),
             ("scripts/windows-copilot-job-host.ps1", "Write-Output 'ok'\n"),
+            ("dist/index.html", '<script type="module" src="/assets/app.js"></script>'),
+            ("dist/assets/app.js", "export {};\n"),
             ("dist/assets/voice-worker.mjs", "export {};\n"),
             ("dist/assets/runtime.wasm", "wasm"),
             ("node_modules/@huggingface/transformers/package.json", '{"version":"3.8.1"}'),
@@ -59,6 +61,16 @@ class PackageAzureReleaseTests(unittest.TestCase):
             "import './missing-runtime.mjs';\n", encoding="utf-8"
         )
         with self.assertRaisesRegex(PackageError, "Unresolved local runtime import"):
+            collect_runtime_files(self.root, verify_npm=False)
+
+    def test_missing_browser_entry_or_bundle_fails_closed(self):
+        entry = self.root / "dist" / "index.html"
+        entry.unlink()
+        with self.assertRaisesRegex(PackageError, "dist/index.html"):
+            collect_runtime_files(self.root, verify_npm=False)
+        entry.write_text("app", encoding="utf-8")
+        (self.root / "dist" / "assets" / "app.js").unlink()
+        with self.assertRaisesRegex(PackageError, "browser application asset"):
             collect_runtime_files(self.root, verify_npm=False)
 
     def test_build_writes_manifest_hash_and_refuses_overwrite(self):

@@ -17,6 +17,11 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run check
+      - name: Check Azure release packaging
+        run: python -B -m unittest discover -s tests -p test_package_azure_release.py
+      - name: Check Azure deployment orchestration offline
+        shell: pwsh
+        run: ./tests/deploy-azure.tests.ps1
       - run: npx playwright install --with-deps chromium
       - run: npm run test:e2e
       - name: Record build provenance

@@ -23,6 +23,251 @@ new end-to-end security test in this guide. Live status reports Azure
 configured for anonymous use, with the shared 50/day allowance and 20/20
 capacity settings.
 
+## PowerShell and manual GitHub Actions (no custom domain)
+
+For a new isolated installation, use `scripts/deploy-azure.ps1` and
+`infra/installation.bicep`. The manually dispatched
+`.github/workflows/azure-deploy.yml` calls that **same script**, rather than a
+second deployment implementation. This path uses the default
+`https://<app>.azurewebsites.net` hostname and its Azure-managed certificate.
+It creates **no DNS records, Front Door, OpenAI account or model deployment**.
+It serves the static/offline lab with paid planning **off**. A public paid
+deployment is a separate architecture and authorization decision; the
+edge/private-endpoint recipe later in this guide is not silently replaced.
+
+The new installation includes one Linux B1 worker, a dedicated system identity,
+private `packages` and `usage` Blob containers, a VNet and an App Service
+integration subnet. App ingress allows **one explicitly supplied IPv4 /32**;
+all other clients and all SCM traffic are denied. Storage has shared keys and
+anonymous blobs disabled, HTTPS required, and a default-deny firewall allowing
+only that operator/runner IP and the app's integrated subnet via a Storage
+service endpoint. This is **selected-network storage**, not a private endpoint:
+its public endpoint exists but is firewall restricted and requires Entra
+authentication. It does not relax an existing deployment's private-storage
+policy. Do not select this profile where policy requires Private Link.
+`10.91.0.0/24` must not overlap a connected network. Provisioning never
+grants model access or enables any provider.
+
+### Prerequisites, permission boundaries and cost
+
+Use PowerShell **7.4+**, Azure CLI with Bicep, Node.js **24**, npm, Python 3.12+
+and Git. Build on a clean trusted Linux checkout (the workflow does this).
+The uploader must have a stable public IPv4 address that matches the `/32`,
+and the browser used for acceptance must use that same egress. A VPN, proxy,
+IPv6 preference or another network may produce an intentional 403. No script
+discovers, broadens or changes the allowlist automatically.
+
+Use a new, dedicated resource group and explicit subscription and tenant IDs.
+The selected Azure account must match both; sovereign-cloud targets are
+rejected. Provision can create a new group when the operator is authorized for
+subscription-level group creation. Prefer an administrator precreating the
+dedicated group with tag `bricklab-installation=deploy-azure-v1` and granting
+the provisioning identity **Contributor** and narrowly scoped **Role Based
+Access Control Administrator** there, not Owner across the subscription.
+Role assignments should be constrained to the Blob Reader/Contributor roles
+and intended uploader/app principals by your organization's RBAC conditions.
+Provision refuses an existing unmarked group. A marker is a safety guard, not
+an authorization boundary: review that the group really is empty and dedicated.
+
+Updates need app/config read and app-settings write/restart permission,
+storage account/network configuration read, and **Storage Blob Data
+Contributor** on `packages`. Initial setup also needs deployment/group reads
+and Blob Data Contributor on `usage` to create the count-only ledger.
+Provision assigns the uploader these **container-scoped** roles and the app
+package-reader/usage-writer roles; it does not grant the uploader subscription
+access. For ongoing updates, separate the deployment identity from the
+provisioner and remove its usage-container write role through a separately
+authorized RBAC change. RBAC propagation can delay an upload; the script
+fails clearly and does not retry writes or open a firewall.
+
+**Costs begin at provisioning and continue after testing.** The B1 App Service
+plan is billed while it exists, even with no traffic or a stopped web app.
+Storage capacity, operations and network egress also incur charges.
+There is no model, Front Door or private-endpoint charge from this template;
+the daily application limit is not a spending cap. Check your region and
+agreement in the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/)
+and set independent cost alerts before running. There is no automatic teardown.
+
+### Local PowerShell: provision, then deploy
+
+Review the templates and choose the subscription/tenant, a new group and an
+approved region with Linux B1 capacity. Sign in explicitly with
+`az login --tenant <tenant-id>`; do not paste credentials into this script.
+Replace every placeholder below, including the example documentation-only IP:
+
+```powershell
+$Subscription = '<subscription-guid>'
+$Tenant = '<tenant-guid>'
+$Group = '<new-dedicated-resource-group>'
+$OperatorCidr = '203.0.113.7/32' # Replace with the approved stable egress IPv4.
+$Uploader = '<signed-in-entra-user-object-guid>'
+$Target = @{
+  SubscriptionId = $Subscription
+  TenantId = $Tenant
+  ResourceGroup = $Group
+  OperatorIpv4Cidr = $OperatorCidr
+}
+.\scripts\deploy-azure.ps1 @Target -Operation Provision `
+  -Location italynorth -UploaderObjectId $Uploader -UploaderPrincipalType User
+```
+
+Save the emitted app, storage and default HTTPS origin. Provision records
+`bricklab-installation` in ARM. A repeat with a completed deployment does not
+reapply the template or reset app settings. This is a **resume-only bootstrap,
+not ongoing infrastructure reconciliation**; changing parameters on a repeat
+is not a way to update a running installation. A partial failed deployment can
+be resumed only while any app has no package pointer and paid planning is off.
+Do not delete the deployment record or reapply the Bicep template to roll out
+application updates.
+
+Build the exact reviewed commit from a clean checkout. Archive output must be
+outside the checkout and not already exist. Build-time browser dependencies
+are pruned only **after** Vite emits the browser bundle, voice worker and WASM:
+
+```powershell
+$Revision = (git rev-parse HEAD).Trim()
+npm ci
+if ($LASTEXITCODE) { throw 'npm ci failed' }
+npm run check
+if ($LASTEXITCODE) { throw 'Checks/build failed' }
+npm prune --omit=dev
+if ($LASTEXITCODE) { throw 'Production pruning failed' }
+$Package = Join-Path ([IO.Path]::GetTempPath()) "bricklab-$Revision.zip"
+python scripts\package_azure_release.py --revision $Revision --output $Package
+if ($LASTEXITCODE) { throw 'Packaging failed' }
+$Web = '<emitted-web-app-name>'
+$Storage = '<emitted-storage-account-name>'
+.\scripts\deploy-azure.ps1 @Target -Operation Deploy `
+  -WebAppName $Web -StorageAccountName $Storage `
+  -PackagePath $Package -Revision $Revision `
+  -InitializeNewInstallation -MaintenanceConfirmed
+```
+
+`-MaintenanceConfirmed` attests that you prevented new submissions, drained
+active requests and hold the exclusive operator deployment lock. Do not treat
+an idle status snapshot as a lock. For this paid-off isolated installation,
+keep other browsers/operators out during rollout. For an existing paid
+installation, use your approved maintenance procedure without resetting its
+ledger or enabling another provider.
+
+Initial deploy is limited to this automation's uninitialized app, paid off
+and with no existing ledger alias or package. It creates `daily-usage.json`
+**conditionally, only if absent**, never overwriting existing state, sets the
+exact default hosted origin and storage settings, and selects the package
+using managed identity. If initialization stopped after creating the ledger,
+rerunning cannot reset it. If it stopped after selecting the package, inspect
+the saved configuration and rerun as an ordinary update, without `-InitializeNewInstallation`.
+
+For subsequent releases, repeat the clean build/package steps with the new
+reviewed commit, then invoke **Deploy without `-InitializeNewInstallation`**.
+Updates verify hosted/idle/non-quarantined status, single-worker runtime,
+system identity, origin and SCM restrictions, and storage protections before
+writing. They preserve the selected model (including an existing Terra
+selection), paid opt-in, allowance/concurrency settings, legacy budget aliases,
+and every unrelated app setting. They never deploy infrastructure, switch
+models, create/reset usage state or call inference. An existing edge-based
+installation can omit `OperatorIpv4Cidr` only when it already has exact
+Front Door-only ingress and private-endpoint storage; its operator/runner must
+reach both the existing app status endpoint and private Blob endpoint.
+
+The script validates every archive manifest hash, exact revision and required
+server/dependency/browser/worker/WASM entries before Azure writes. Blobs are
+named `<revision>-<archive-sha256>.zip` and uploaded using Entra login with
+`If-None-Match: *`, never SAS, account keys, publishing profiles or SCM.
+An existing blob must match metadata, length and downloaded SHA-256.
+Repeating an already selected package does not change settings or restart.
+Only the package URL and `SystemAssigned` reader setting are changed for a
+normal update; the previous package is retained for a separately authorized
+rollback using the same script and its original artifact/revision.
+Treat retained release artifacts as trusted deployable code.
+
+A selected package and requested restart are **not runtime acceptance**.
+From the allowed network, verify HTTPS `/`, referenced JavaScript/worker/WASM
+assets and `/api/status` (`hosted: true`, Azure planner off for a new install),
+confirm SCM and disallowed ingress remain denied, and inspect Azure
+configuration for the expected immutable package. Verify representative
+browser interaction before accepting the release. No model invocation is
+necessary or authorized by these steps. A failed operation may have created
+resources, uploaded a blob or selected settings before stopping; inspect the
+reported stage securely rather than assuming rollback or retrying blindly.
+Azure CLI failure output and app settings are deliberately not printed, as
+they may contain secrets; use authorized Azure diagnostics privately.
+
+### Manual GitHub Actions with Azure OIDC
+
+Repository configuration below is an **administrator prerequisite**, not
+something the workflow creates. No credential is stored in this repository.
+
+1. Create a dedicated Entra application/service principal or user-assigned
+   identity with a GitHub federated credential: issuer
+   `https://token.actions.githubusercontent.com`, audience
+   `api://AzureADTokenExchange`, subject
+   `repo:<owner>/<repo>:environment:azure-deployment`. Apply the resource-scoped
+   permissions above; client/application ID and Entra **object** ID differ.
+2. Create the GitHub environment **azure-deployment**, require human approval,
+   restrict deployment branches to protected `main`, and restrict who can
+   dispatch workflows. Configure environment variables `AZURE_CLIENT_ID`,
+   `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`,
+   `AZURE_LOCATION`, `AZURE_UPLOADER_OBJECT_ID` and
+   `AZURE_OPERATOR_IPV4_CIDR`. These are identifiers, not client secrets.
+   Never add a stored Azure password, secret, token or publishing profile.
+3. Register a **dedicated trusted Linux self-hosted runner** with labels
+   `self-hosted`, `linux`, `bricklab-azure`, fixed egress matching the `/32`,
+   PowerShell 7.4+, Azure CLI/Bicep and Git. Allow its management-plane/Entra
+   outbound connections and app/Blob data access. For the older private-storage
+   architecture it instead needs private DNS/network reachability. Never run
+   untrusted PR code on this runner. Do not broaden storage or SCM to make a
+   GitHub-hosted runner work.
+4. On reviewed `main`, dispatch **Azure installation or update**, selecting
+   **Provision**. Approve the environment deployment. Save its emitted names
+   as environment variables `AZURE_WEB_APP_NAME` and
+   `AZURE_STORAGE_ACCOUNT_NAME`.
+5. Dispatch **Deploy**, selecting **initialize** for the first package only,
+   and confirm maintenance after doing the maintenance work. Subsequent
+   releases use Deploy with initialize unchecked. The workflow builds/tests
+   and prunes on an unprivileged GitHub-hosted Linux runner, then transfers
+   that run's artifact to the environment-gated deployment job.
+6. Perform the runtime acceptance checks above from the allowed network.
+   A workflow result does not establish browser acceptance or authorize
+   enabling inference.
+
+There are no push/PR/scheduled deployment triggers. Only `main` can deploy;
+checkout credentials are not persisted. Only the environment-gated job gets
+`id-token: write`; repository content permission is read-only. Workflow input
+strings go through environment variables/typed PowerShell arguments, not shell
+interpolation. All workflow runs share one non-cancelling concurrency group;
+local operators must separately coordinate to avoid concurrent deployment.
+The workflow cannot be exercised until an administrator configures the
+identity, environment, runner and variables. Offline mocks are not evidence of
+OIDC or runner connectivity.
+
+### Changing the allowed operator address
+
+A different egress receives 403 by design. An authorized administrator must
+first verify the new single IPv4 address and explicitly update **both** the
+web app's `operator-only` access rule and Storage's selected-network IP rule,
+removing the old IP, without changing either default-deny action, SCM deny,
+subnet rule, private-container setting or shared-key policy. Use the Azure
+portal's scoped Networking panes or reviewed resource-scoped CLI operations;
+never use `0.0.0.0/0`, public-all-networks or a public container as a workaround.
+Then update the script argument and environment variable. Do not rerun
+Provision or the full template to rotate an IP on an initialized app.
+
+### Offline checks
+
+```powershell
+pwsh -NoProfile -File tests\deploy-azure.tests.ps1
+python -B -m unittest discover -s tests -p test_package_azure_release.py
+python -B -m unittest discover -s tests -p test_azure_templates.py
+```
+
+The PowerShell tests mock all Azure and HTTP operations and reject wrong
+targets, unsafe restrictions, active planning and initialization of an existing
+deployment. They cover setting/ledger preservation and conditional immutable
+uploads. Python tests check package closure/assets/manifests and compile the
+templates with Bicep without deploying resources. CI runs the package and
+orchestration checks. None of these offline checks uses a model.
+
 ## Prerequisites and costs
 
 Use your own Azure subscription, a dedicated resource group, and a DNS name

@@ -1,0 +1,120 @@
+name: Azure installation or update
+run-name: Azure ${{ inputs.operation }} by ${{ github.actor }}
+on:
+  workflow_dispatch:
+    inputs:
+      operation:
+        description: Provision creates isolated infrastructure; Deploy selects an immutable app package
+        type: choice
+        options: [Provision, Deploy]
+        required: true
+      initialize:
+        description: First package only (new automation-created installation, paid planning OFF)
+        type: boolean
+        default: false
+      maintenance_confirmed:
+        description: Deploy only - new submissions prevented and active requests drained
+        type: boolean
+        default: false
+permissions:
+  contents: read
+concurrency:
+  group: azure-installation
+  cancel-in-progress: false
+jobs:
+  package:
+    if: github.ref == 'refs/heads/main' && inputs.operation == 'Deploy'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: npm ci
+      - run: npm run check
+      - run: python -B -m unittest discover -s tests -p test_package_azure_release.py
+      - name: Check deployment orchestration without Azure
+        shell: pwsh
+        run: ./tests/deploy-azure.tests.ps1
+      - run: npm prune --omit=dev
+      - name: Package exact reviewed checkout
+        env:
+          RELEASE_REVISION: ${{ github.sha }}
+        run: python scripts/package_azure_release.py --revision "$RELEASE_REVISION" --output "$RUNNER_TEMP/bricklab.zip"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: azure-package
+          path: ${{ runner.temp }}/bricklab.zip
+          if-no-files-found: error
+          retention-days: 7
+  deploy:
+    needs: [package]
+    if: >-
+      always() && github.ref == 'refs/heads/main' &&
+      ((inputs.operation == 'Provision' && needs.package.result == 'skipped') ||
+      (inputs.operation == 'Deploy' && needs.package.result == 'success' && inputs.maintenance_confirmed))
+    # A dedicated trusted runner with fixed egress /32 (or private-endpoint access
+    # for the older edge-based installation). Never route untrusted PR jobs here.
+    runs-on: [self-hosted, linux, bricklab-azure]
+    environment: azure-deployment
+    timeout-minutes: 45
+    permissions:
+      contents: read
+      id-token: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - name: Validate deployment script offline
+        shell: pwsh
+        run: ./tests/deploy-azure.tests.ps1
+      - uses: actions/download-artifact@v4
+        if: inputs.operation == 'Deploy'
+        with:
+          name: azure-package
+          path: ${{ runner.temp }}/bricklab-release
+      - uses: azure/login@v2
+        with:
+          client-id: ${{ vars.AZURE_CLIENT_ID }}
+          tenant-id: ${{ vars.AZURE_TENANT_ID }}
+          subscription-id: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+      - name: Run shared deployment implementation
+        shell: pwsh
+        env:
+          DEPLOY_OPERATION: ${{ inputs.operation }}
+          INITIALIZE: ${{ inputs.initialize }}
+          MAINTENANCE: ${{ inputs.maintenance_confirmed }}
+          SUBSCRIPTION: ${{ vars.AZURE_SUBSCRIPTION_ID }}
+          TENANT: ${{ vars.AZURE_TENANT_ID }}
+          GROUP: ${{ vars.AZURE_RESOURCE_GROUP }}
+          LOCATION: ${{ vars.AZURE_LOCATION }}
+          UPLOADER: ${{ vars.AZURE_UPLOADER_OBJECT_ID }}
+          OPERATOR_CIDR: ${{ vars.AZURE_OPERATOR_IPV4_CIDR }}
+          WEB_APP: ${{ vars.AZURE_WEB_APP_NAME }}
+          STORAGE: ${{ vars.AZURE_STORAGE_ACCOUNT_NAME }}
+          REVISION: ${{ github.sha }}
+        run: |
+          $options = @{
+            Operation = $env:DEPLOY_OPERATION
+            SubscriptionId = $env:SUBSCRIPTION
+            TenantId = $env:TENANT
+            ResourceGroup = $env:GROUP
+            Location = $env:LOCATION
+            UploaderObjectId = $env:UPLOADER
+            UploaderPrincipalType = 'ServicePrincipal'
+            OperatorIpv4Cidr = $env:OPERATOR_CIDR
+            WebAppName = $env:WEB_APP
+            StorageAccountName = $env:STORAGE
+            PackagePath = Join-Path $env:RUNNER_TEMP 'bricklab-release/bricklab.zip'
+            Revision = $env:REVISION
+            InitializeNewInstallation = $env:INITIALIZE -eq 'true'
+            MaintenanceConfirmed = $env:MAINTENANCE -eq 'true'
+          }
+          ./scripts/deploy-azure.ps1 @options

@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -22,6 +23,7 @@ REQUIRED_RUNTIME_FILES = (
     Path("server.mjs"),
     Path("src/windows-copilot-job-runner.mjs"),
     Path("scripts/windows-copilot-job-host.ps1"),
+    Path("dist/index.html"),
 )
 OMIT_DIRECTORY_PARTS = {".bin"}
 
@@ -79,7 +81,7 @@ def collect_runtime_files(root: Path, verify_npm: bool = True) -> list[Path]:
             raise PackageError(f"Production dependency is missing: {dependency}")
     if verify_npm:
         result = subprocess.run(
-            ["npm", "ls", "--omit=dev", "--depth=0", "--json"],
+            [shutil.which("npm") or "npm", "ls", "--omit=dev", "--depth=0", "--json"],
             cwd=root,
             check=False,
             capture_output=True,
@@ -105,6 +107,8 @@ def collect_runtime_files(root: Path, verify_npm: bool = True) -> list[Path]:
                 raise PackageError(f"Runtime import is not packaged: {specifier}")
 
     dist_files = [root / path for path in files if Path("dist") in path.parents]
+    if not any(path.suffix == ".js" for path in dist_files):
+        raise PackageError("Built release has no browser application asset.")
     if not any(path.suffix == ".wasm" for path in dist_files):
         raise PackageError("Built release has no WebAssembly runtime asset.")
     if not any(path.suffix == ".mjs" for path in dist_files):
