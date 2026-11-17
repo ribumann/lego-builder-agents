@@ -40,7 +40,7 @@ GlobalStandard capacity 40, with the existing native content policy and
 automatic upgrades disabled. Preserve its startup app setting across package
 updates; the retained GPT-5.4 capacity 200 is not an automatic fallback.
 The isolated deployment template and operational boundaries are documented in
-[the Azure runbook](self-hosting-azure.md#selected-default-gpt-61-terra).
+[the Azure runbook](self-hosting-azure.md#current-public-preview-planner-not-a-general-model-requirement).
 This is deployment configuration, not a hardcoded model requirement in the
 adapter or permission to enable paid planning.
 

@@ -364,7 +364,7 @@ input requires user consent and validation of image type and size before
 provider invocation.
 
 These settings are **not authorization to enable the paid route**. Do not
-enable Copilot, Codespaces, or local-model modes on the public instance. The
+enable Copilot, Codespaces, or Compatible AI on the public instance. The
 hosted setting defaults to `BRICKLAB_AZURE_AI=0`. The origin/session-token check
 is not user authentication: a public visitor can obtain the browser token.
 The durable shared count provides the application call boundary;
