@@ -5,6 +5,9 @@ param location string = resourceGroup().location
 @description('One stable public operator/runner IPv4 address with /32 suffix. No broad networks.')
 param operatorIpv4Cidr string
 
+@description('Use private Blob networking where public Storage endpoints are prohibited. The shared script also deploys the isolated private endpoint/DNS stage.')
+param privateStorage bool = false
+
 @description('Entra object ID, not application/client ID, of the package uploader.')
 param packageUploaderObjectId string
 
@@ -83,11 +86,11 @@ resource storage 'Microsoft.Storage/storageAccounts@2023-05-01' = {
     supportsHttpsTrafficOnly: true
     allowBlobPublicAccess: false
     allowSharedKeyAccess: false
-    publicNetworkAccess: 'Enabled'
+    publicNetworkAccess: privateStorage ? 'Disabled' : 'Enabled'
     networkAcls: {
       defaultAction: 'Deny'
       bypass: 'None'
-      ipRules: [
+      ipRules: privateStorage ? [] : [
         {
           action: 'Allow'
           value: split(operatorIpv4Cidr, '/')[0]

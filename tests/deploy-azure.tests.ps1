@@ -25,6 +25,7 @@ try {
         'src/windows-copilot-job-runner.mjs' = 'export {};'
         'scripts/windows-copilot-job-host.ps1' = 'exit 0'
         'dist/index.html' = '<html>fixture</html>'
+        'dist/release.json' = (@{ revision = $revision } | ConvertTo-Json -Compress)
         'dist/assets/app.js' = 'export {};'
         'dist/assets/voice.mjs' = 'export {};'
         'dist/assets/runtime.wasm' = 'fixture'
@@ -194,6 +195,12 @@ try {
     $script:calls.Clear()
     Invoke-BrickLabDeployment $options
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'restart' -or $_ -contains 'set' }).Count -eq 0) 'Same package does not restart'
+    $script:config.ipSecurityRestrictions += @{ action = 'Allow'; ipAddress = '203.0.113.8/32' }
+    Assert-Throws { Invoke-BrickLabDeployment $options } 'explicit set'
+    $options.OperatorIpv4Cidr = @('203.0.113.7/32', '203.0.113.8/32')
+    Invoke-BrickLabDeployment $options
+    $options.OperatorIpv4Cidr = @('203.0.113.7/32')
+    $script:config.ipSecurityRestrictions = @($script:config.ipSecurityRestrictions[0])
 
     $script:calls.Clear()
     $initial = $options.Clone()
@@ -230,6 +237,9 @@ try {
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'create' -or $_ -contains 'set' }).Count -eq 0) 'Completed provisioning is resume-only and never reapplies settings'
     $script:provisionStorageBlocked = $true
     Assert-Throws { Invoke-BrickLabDeployment $provision } 'possibly by Azure Policy'
+    $provision.PrivateStorage = $true
+    Invoke-BrickLabDeployment $provision
+    Assert-Test (@($script:calls | Where-Object { $_ -contains 'bricklab-private-package' -and $_ -contains 'create' }).Count -eq 1) 'Private storage adds only the isolated endpoint stage'
     Write-Host 'PASS: offline release, target, boundary, idle, preservation, immutable rollout, initialization and provisioning tests.'
 } finally {
     # Only this test's newly created, resolved temporary directory.

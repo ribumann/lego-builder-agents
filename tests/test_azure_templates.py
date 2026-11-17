@@ -11,7 +11,7 @@ class AzureTemplateTests(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[1]
         cls.templates = {}
-        for name in ("azure", "edge", "installation"):
+        for name in ("azure", "edge", "installation", "installation-private-storage", "temporary-uploader"):
             result = subprocess.run(
                 [shutil.which("az"), "bicep", "build", "--file",
                  str(root / "infra" / f"{name}.bicep"), "--stdout"],
@@ -70,8 +70,19 @@ class AzureTemplateTests(unittest.TestCase):
         self.assertFalse(storage["allowBlobPublicAccess"])
         self.assertEqual(storage["networkAcls"]["defaultAction"], "Deny")
         self.assertEqual(storage["networkAcls"]["bypass"], "None")
-        self.assertEqual(len(storage["networkAcls"]["ipRules"]), 1)
+        self.assertIn("parameters('privateStorage')", storage["networkAcls"]["ipRules"])
         self.assertEqual(len(storage["networkAcls"]["virtualNetworkRules"]), 1)
+
+    def test_private_stage_has_only_isolated_networking_and_uploader_denies_inbound(self):
+        private = self.templates["installation-private-storage"]["resources"]
+        self.assertTrue(any(item["type"] == "Microsoft.Network/privateEndpoints" for item in private))
+        self.assertFalse(any("peerings" in item["type"].lower() for item in private))
+        nsg = self.resource("temporary-uploader", "Microsoft.Network/networkSecurityGroups")["properties"]
+        rule = nsg["securityRules"][0]["properties"]
+        self.assertEqual((rule["access"], rule["direction"], rule["sourceAddressPrefix"]), ("Deny", "Inbound", "*"))
+        vm = self.resource("temporary-uploader", "Microsoft.Compute/virtualMachines")["properties"]
+        self.assertTrue(vm["osProfile"]["linuxConfiguration"]["disablePasswordAuthentication"])
+        self.assertEqual(vm["storageProfile"]["osDisk"]["deleteOption"], "Detach")
 
 
 if __name__ == "__main__":

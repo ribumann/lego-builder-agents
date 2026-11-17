@@ -85,6 +85,7 @@ class PackageAzureReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(output) as archive:
             manifest = json.loads(archive.read("release-manifest.json"))
             names = set(archive.namelist())
+            self.assertEqual(json.loads(archive.read("dist/release.json")), {"revision": "b" * 40})
         self.assertEqual(manifest["revision"], "b" * 40)
         self.assertIn("src/windows-copilot-job-runner.mjs", names)
         self.assertIn("dist/assets/runtime.wasm", names)

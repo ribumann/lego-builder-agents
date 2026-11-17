@@ -6,7 +6,8 @@ param(
     [string] $TenantId,
     [string] $ResourceGroup,
     [string] $Location,
-    [string] $OperatorIpv4Cidr,
+    [string[]] $OperatorIpv4Cidr,
+    [switch] $PrivateStorage,
     [string] $UploaderObjectId,
     [ValidateSet('User', 'ServicePrincipal')][string] $UploaderPrincipalType = 'User',
     [string] $WebAppName,
@@ -69,7 +70,7 @@ function Assert-OperatorIpv4 {
 }
 
 function Assert-DeploymentBoundary {
-    param([hashtable] $Web, [hashtable] $Config, [hashtable] $Storage, [string] $OperatorCidr)
+    param([hashtable] $Web, [hashtable] $Config, [hashtable] $Storage, [string[]] $OperatorCidr)
     if (-not $Web.identity.principalId -or $Web.identity.type -notmatch 'SystemAssigned' -or
         $Web.httpsOnly -ne $true -or $Config.ftpsState -ne 'Disabled' -or
         $Config.linuxFxVersion -ne 'NODE|24-lts' -or $Config.appCommandLine -ne 'npm start' -or
@@ -81,10 +82,11 @@ function Assert-DeploymentBoundary {
         throw 'Storage must deny public blobs and shared keys, and require HTTPS.'
     }
     if ($Storage.publicNetworkAccess -ne 'Disabled') {
-        Assert-OperatorIpv4 $OperatorCidr
+        foreach ($cidr in $OperatorCidr) { Assert-OperatorIpv4 $cidr }
+        $storageIps = @($OperatorCidr | ForEach-Object { $_; ($_ -split '/')[0] })
         if ($Storage.networkRuleSet.defaultAction -ne 'Deny' -or $Storage.networkRuleSet.bypass -ne 'None' -or
-            @($Storage.networkRuleSet.ipRules).Count -ne 1 -or
-            $Storage.networkRuleSet.ipRules[0].ipAddressOrRange -notin @($OperatorCidr, ($OperatorCidr -split '/')[0]) -or
+            @($Storage.networkRuleSet.ipRules).Count -lt 1 -or
+            @($Storage.networkRuleSet.ipRules | Where-Object { $_.ipAddressOrRange -notin $storageIps }).Count -or
             @($Storage.networkRuleSet.virtualNetworkRules).Count -ne 1 -or
             $Storage.networkRuleSet.virtualNetworkRules[0].virtualNetworkResourceId -ne $Web.virtualNetworkSubnetId -or
             ($Storage.networkRuleSet.ContainsKey('resourceAccessRules') -and @($Storage.networkRuleSet.resourceAccessRules | Where-Object { $null -ne $_ }).Count) -or
@@ -100,9 +102,11 @@ function Assert-DeploymentBoundary {
     }
     $allows = @($Config.ipSecurityRestrictions | Where-Object { $_.action -eq 'Allow' })
     if ($OperatorCidr) {
-        Assert-OperatorIpv4 $OperatorCidr
-        if ($allows.Count -ne 1 -or $allows[0].ipAddress -ne $OperatorCidr) {
-            throw 'App ingress must allow only the explicit operator /32.'
+        foreach ($cidr in $OperatorCidr) { Assert-OperatorIpv4 $cidr }
+        if ($OperatorCidr.Count -gt 3 -or @($OperatorCidr | Select-Object -Unique).Count -ne $OperatorCidr.Count -or
+            $allows.Count -ne $OperatorCidr.Count -or
+            @($allows | Where-Object { $_.ipAddress -notin $OperatorCidr }).Count) {
+            throw 'App ingress must match the explicit set of at most three verified operator /32s.'
         }
         return
     }
@@ -131,12 +135,15 @@ function Assert-Release {
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
         if ($manifest.revision -cne $ExpectedRevision -or $manifest.fileCount -ne $manifest.files.Count -or
             $names.Count -ne ($manifest.files.Count + 1)) { throw 'Release manifest/revision mismatch.' }
-        foreach ($required in @('package.json', 'server.mjs', 'dist/index.html',
+        foreach ($required in @('package.json', 'server.mjs', 'dist/index.html', 'dist/release.json',
             'src/windows-copilot-job-runner.mjs', 'scripts/windows-copilot-job-host.ps1',
             'node_modules/@azure/identity/package.json', 'node_modules/@azure/storage-blob/package.json',
             'node_modules/jose/package.json')) {
             if ($required -notin $names) { throw "Missing release artifact: $required" }
         }
+        $reader = [IO.StreamReader]::new($archive.GetEntry('dist/release.json').Open())
+        try { $metadata = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+        if ($metadata.revision -cne $ExpectedRevision) { throw 'Served release metadata/revision mismatch.' }
         if (-not @($names | Where-Object { $_ -match '^dist/.+\.wasm$' }).Count -or
             -not @($names | Where-Object { $_ -match '^dist/.+\.mjs$' }).Count -or
             -not @($names | Where-Object { $_ -match '^dist/.+\.js$' }).Count) {
@@ -156,6 +163,8 @@ function Assert-Release {
 
 function Invoke-BrickLabDeployment {
     param([hashtable] $Options)
+    if ($Options.OperatorIpv4Cidr) { $Options.OperatorIpv4Cidr = [string[]] @($Options.OperatorIpv4Cidr) }
+    if (-not $Options.ContainsKey('PrivateStorage')) { $Options.PrivateStorage = $false }
     Assert-Required @{ Operation = $Options.Operation; SubscriptionId = $Options.SubscriptionId
         TenantId = $Options.TenantId; ResourceGroup = $Options.ResourceGroup }
     if ($Options.Operation -notin @('Provision', 'Deploy')) { throw 'Operation must be Provision or Deploy.' }
@@ -163,7 +172,8 @@ function Invoke-BrickLabDeployment {
         $Options.ResourceGroup -notmatch '^[a-zA-Z0-9_-]{1,90}$') { throw 'Invalid explicit Azure target.' }
     if ($Options.Operation -eq 'Provision') {
         Assert-Required @{ Location = $Options.Location; UploaderObjectId = $Options.UploaderObjectId }
-        Assert-OperatorIpv4 $Options.OperatorIpv4Cidr
+        if (@($Options.OperatorIpv4Cidr).Count -ne 1) { throw 'Provision requires one initial operator /32.' }
+        Assert-OperatorIpv4 $Options.OperatorIpv4Cidr[0]
         if ($Options.UploaderObjectId -notmatch '^[0-9a-fA-F-]{36}$') { throw 'Uploader must be an Entra object ID.' }
     } else {
         Assert-Required @{ WebAppName = $Options.WebAppName; StorageAccountName = $Options.StorageAccountName
@@ -201,7 +211,8 @@ function Invoke-BrickLabDeployment {
                     throw 'Refusing to reapply the installation template to an initialized or paid-enabled app.'
                 }
             }
-            $parameters = @("location=$($Options.Location)", "operatorIpv4Cidr=$($Options.OperatorIpv4Cidr)",
+            $parameters = @("location=$($Options.Location)", "operatorIpv4Cidr=$($Options.OperatorIpv4Cidr[0])",
+                "privateStorage=$(([bool]$Options.PrivateStorage).ToString().ToLowerInvariant())",
                 "packageUploaderObjectId=$($Options.UploaderObjectId)",
                 "packageUploaderPrincipalType=$($Options.UploaderPrincipalType)")
             Invoke-Azure (@('deployment', 'group', 'create') + $scope + @('--name', $name,
@@ -211,10 +222,22 @@ function Invoke-BrickLabDeployment {
         $record = Invoke-Azure (@('deployment', 'group', 'show') + $scope + @('--name', $name)) -Json
         $base = $record.properties.outputs
         Write-Host "Resources provisioned: app=$($base.webAppName.value), storage=$($base.storageAccountName.value)."
+        if ($Options.PrivateStorage) {
+            $privatePrevious = @($deployments | Where-Object { $_.name -eq 'bricklab-private-package' -and $_.properties.provisioningState -eq 'Succeeded' })
+            if (-not $privatePrevious.Count) {
+                Invoke-Azure (@('deployment', 'group', 'create') + $scope +
+                    @('--name', 'bricklab-private-package', '--mode', 'Incremental', '--template-file',
+                        (Join-Path $script:RepositoryRoot 'infra\installation-private-storage.bicep'), '--parameters',
+                        "storageAccountName=$($base.storageAccountName.value)", "location=$($Options.Location)"))
+            }
+        }
         $actualStorage = Invoke-Azure (@('storage', 'account', 'show') + $scope +
             @('--name', $base.storageAccountName.value)) -Json
-        if ($actualStorage.publicNetworkAccess -ne 'Enabled') {
+        if (-not $Options.PrivateStorage -and $actualStorage.publicNetworkAccess -ne 'Enabled') {
             throw 'Resources were provisioned and incur charges, but Storage public networking is disabled (possibly by Azure Policy). The selected-network profile cannot upload or fetch packages. Use an approved private-endpoint architecture/connected runner; never relax the policy.'
+        }
+        if ($Options.PrivateStorage -and $actualStorage.publicNetworkAccess -ne 'Disabled') {
+            throw 'PrivateStorage requires the Storage public endpoint disabled; no policy relaxation is performed.'
         }
         $actualTarget = $scope + @('--name', $base.webAppName.value)
         $actualWeb = Invoke-Azure (@('webapp', 'show') + $actualTarget) -Json
@@ -330,7 +353,7 @@ function Invoke-BrickLabDeployment {
 if ($MyInvocation.InvocationName -ne '.') {
     Invoke-BrickLabDeployment @{
         Operation = $Operation; SubscriptionId = $SubscriptionId; TenantId = $TenantId; ResourceGroup = $ResourceGroup
-        Location = $Location; OperatorIpv4Cidr = $OperatorIpv4Cidr
+        Location = $Location; OperatorIpv4Cidr = $OperatorIpv4Cidr; PrivateStorage = $PrivateStorage
         UploaderObjectId = $UploaderObjectId; UploaderPrincipalType = $UploaderPrincipalType
         WebAppName = $WebAppName; StorageAccountName = $StorageAccountName; PackagePath = $PackagePath
         Revision = $Revision; InitializeNewInstallation = $InitializeNewInstallation; MaintenanceConfirmed = $MaintenanceConfirmed

@@ -97,6 +97,7 @@ jobs:
           LOCATION: ${{ vars.AZURE_LOCATION }}
           UPLOADER: ${{ vars.AZURE_UPLOADER_OBJECT_ID }}
           OPERATOR_CIDR: ${{ vars.AZURE_OPERATOR_IPV4_CIDR }}
+          PRIVATE_STORAGE: ${{ vars.AZURE_PRIVATE_STORAGE }}
           WEB_APP: ${{ vars.AZURE_WEB_APP_NAME }}
           STORAGE: ${{ vars.AZURE_STORAGE_ACCOUNT_NAME }}
           REVISION: ${{ github.sha }}
@@ -109,7 +110,8 @@ jobs:
             Location = $env:LOCATION
             UploaderObjectId = $env:UPLOADER
             UploaderPrincipalType = 'ServicePrincipal'
-            OperatorIpv4Cidr = $env:OPERATOR_CIDR
+            OperatorIpv4Cidr = $env:OPERATOR_CIDR.Split(',', [StringSplitOptions]::RemoveEmptyEntries -bor [StringSplitOptions]::TrimEntries)
+            PrivateStorage = $env:PRIVATE_STORAGE -eq 'true'
             WebAppName = $env:WEB_APP
             StorageAccountName = $env:STORAGE
             PackagePath = Join-Path $env:RUNNER_TEMP 'bricklab-release/bricklab.zip'

@@ -126,7 +126,9 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
     if output.exists():
         raise PackageError(f"Refusing to overwrite an existing release: {output}")
 
-    files = collect_runtime_files(root, verify_npm=verify_npm)
+    files = [path for path in collect_runtime_files(root, verify_npm=verify_npm)
+             if path != Path("dist/release.json")]
+    release_metadata = (json.dumps({"revision": revision}, sort_keys=True) + "\n").encode()
     entries = []
     for relative in files:
         content = (root / relative).read_bytes()
@@ -135,6 +137,12 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         })
+    entries.append({
+        "path": "dist/release.json",
+        "size": len(release_metadata),
+        "sha256": hashlib.sha256(release_metadata).hexdigest(),
+    })
+    entries.sort(key=lambda entry: entry["path"])
     manifest = {
         "revision": revision,
         "files": entries,
@@ -152,8 +160,10 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
                     source = root / relative
                     info = zipfile.ZipInfo(relative.as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
                     info.compress_type = zipfile.ZIP_DEFLATED
-                    info.external_attr = (stat.S_IMODE(source.stat().st_mode) & 0xFFFF) << 16
-                    archive.writestr(info, (root / relative).read_bytes())
+                    mode = 0o644 if entry["path"] == "dist/release.json" else stat.S_IMODE(source.stat().st_mode)
+                    info.external_attr = (mode & 0xFFFF) << 16
+                    content = release_metadata if entry["path"] == "dist/release.json" else source.read_bytes()
+                    archive.writestr(info, content)
                 info = zipfile.ZipInfo("release-manifest.json", date_time=(1980, 1, 1, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")

@@ -65,10 +65,18 @@ Subscription/management-group policy can rewrite a requested Storage
 `publicNetworkAccess=Enabled` to `Disabled`. Provision detects that condition
 after ARM completes and fails with an explicit **resources still exist and
 incur charges** message. The selected-network recipe is not deployable in that
-environment without an approved architecture change. Use a Blob private
-endpoint, private DNS and an approved network-connected uploader/runner instead;
+environment. Use **`-PrivateStorage`** for the approved private-endpoint profile
+and an approved network-connected uploader/runner instead;
 do not request an exemption, enable shared keys or relax policy as a workaround.
-The existing private-storage template assumes its original VNet layout; do not
+The separate `infra/installation-private-storage.bicep` stage creates a Blob
+private endpoint in `10.91.0.64/26` and internal DNS linked only to the isolated
+app VNet. It can be added to a completed bootstrap without reapplying the base
+app template. For a brand-new private installation, pass `-PrivateStorage` on
+the initial Provision command; Storage public networking is requested disabled.
+For a completed selected-network bootstrap that policy already locked down,
+repeat the same Provision target with `-PrivateStorage`; the existing app is
+not redeployed and only the missing private-network stage is added.
+The existing older private-storage template assumes its original VNet layout; do not
 blindly apply it over this installation's integrated service-endpoint subnet.
 
 Use a new, dedicated resource group and explicit subscription and tenant IDs.
@@ -223,7 +231,8 @@ something the workflow creates. No credential is stored in this repository.
    dispatch workflows. Configure environment variables `AZURE_CLIENT_ID`,
    `AZURE_TENANT_ID`, `AZURE_SUBSCRIPTION_ID`, `AZURE_RESOURCE_GROUP`,
    `AZURE_LOCATION`, `AZURE_UPLOADER_OBJECT_ID` and
-   `AZURE_OPERATOR_IPV4_CIDR`. These are identifiers, not client secrets.
+   `AZURE_OPERATOR_IPV4_CIDR`. Set `AZURE_PRIVATE_STORAGE=true` when provisioning
+   the private-endpoint profile. These are identifiers, not client secrets.
    Never add a stored Azure password, secret, token or publishing profile.
 3. Register a **dedicated trusted Linux self-hosted runner** with labels
    `self-hosted`, `linux`, `bricklab-azure`, fixed egress matching the `/32`,
@@ -266,6 +275,55 @@ portal's scoped Networking panes or reviewed resource-scoped CLI operations;
 never use `0.0.0.0/0`, public-all-networks or a public container as a workaround.
 Then update the script argument and environment variable. Do not rerun
 Provision or the full template to rotate an IP on an initialized app.
+
+Deploy accepts an explicit array of at most **three independently verified `/32`
+addresses**, for example a trusted private runner and the intended browser's
+destination-specific proxy egress. Its safety check requires the actual app
+allowlist to match that set exactly; it does not add rules. In the workflow,
+`AZURE_OPERATOR_IPV4_CIDR` can be a comma-separated list (Provision still
+requires one initial address). Never infer a normal user's address from a
+tool's proxy address. After temporary-runner testing, remove its app allow rule.
+
+### Separately approved temporary private uploader
+
+Where no existing trusted runner has a route to the new VNet, the optional
+`infra/temporary-uploader.bicep` is a **separate, explicit infrastructure
+operation**, not something Deploy or the workflow creates automatically.
+It creates a tagged temporary VM with managed identity, scoped package/usage
+Blob roles, Reader on the isolated group and Website Contributor on just the
+isolated app. It has password authentication off and an NSG denying **all
+inbound traffic**, including SSH/RDP; use authorized Azure VM Run Command.
+Its Standard public IP is for explicit outbound tool/package downloads only,
+not public management access. Generate an ephemeral SSH public key for the VM
+schema and dispose of the unused private key; never put credentials in scripts.
+
+The helper defaults to a dedicated Sweden Central VNet (`10.93.0.0/24`) because
+VM SKU availability can differ from the app's region. Check current availability
+and approved cost before choosing its size/region. It adds a **temporary second
+Blob private endpoint** in that VNet, with no peering or production-network
+changes. Do not attach this second endpoint to the app's private DNS zone:
+multiple unreachable private A records can break the app's package fetch.
+On the disposable VM only, map the exact Blob hostname to that temporary
+endpoint's verified private IP (for example via `/etc/hosts`), retain normal
+HTTPS certificate validation, and verify resolution and managed-identity
+data access before deployment. The app keeps its own persistent endpoint/DNS.
+
+Build the exact clean reviewed Git revision on that VM, then run the same
+PowerShell Deploy implementation with its managed identity. A public repository
+can be cloned without credentials; local unpushed commits can be transferred as
+a verified Git bundle through authorized Run Command. Do not expose a private
+repository or package publicly to make this work, or copy developer credentials.
+The packager emits a hash-covered `dist/release.json`; verify `/release.json`
+and actual asset hashes through HTTPS after both initial deployment and update.
+
+This helper adds VM, managed-disk, public-IP and Private Link charges. Once
+testing finishes, verify the helper's exact ownership tag, VM-to-disk/NIC links,
+endpoint/NIC association and scoped principal before removing **only** its
+role assignments, VM, detached OS disk, NIC, public IP, NSG, temporary endpoint
+and temporary VNet. Do not remove the application's persistent private endpoint,
+private DNS, integrated VNet, app, package blobs or usage state. The helper is
+not a persistent GitHub Actions runner; actual OIDC dispatch still needs the
+separately configured trusted runner/environment described above.
 
 ### Offline checks
 
