@@ -157,6 +157,21 @@ try {
     }
     $script:inProvision = $false
     Assert-Release $packagePath $revision
+    $legacy = Join-Path $temporary 'legacy.zip'
+    Copy-Item -LiteralPath $packagePath -Destination $legacy
+    $legacyArchive = [IO.Compression.ZipFile]::Open($legacy, [IO.Compression.ZipArchiveMode]::Update)
+    try {
+        $legacyArchive.GetEntry('dist/release.json').Delete()
+        $manifestEntry = $legacyArchive.GetEntry('release-manifest.json')
+        $reader = [IO.StreamReader]::new($manifestEntry.Open())
+        try { $legacyManifest = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+        $legacyManifest.files = @($legacyManifest.files | Where-Object { $_.path -ne 'dist/release.json' })
+        $legacyManifest.fileCount = $legacyManifest.files.Count
+        $manifestEntry.Delete()
+        $writer = [IO.StreamWriter]::new($legacyArchive.CreateEntry('release-manifest.json').Open())
+        try { $writer.Write(($legacyManifest | ConvertTo-Json -Depth 5)) } finally { $writer.Dispose() }
+    } finally { $legacyArchive.Dispose() }
+    Assert-Release $legacy $revision
     Assert-Throws { Assert-Release $packagePath ('c' * 40) } 'mismatch'
     Assert-Throws { Assert-ExactOrigin 'https://example.com:443' } 'exact HTTPS'
     Assert-Throws { Assert-ExactOrigin 'https://example.com/' } 'exact HTTPS'

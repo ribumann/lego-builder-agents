@@ -30,7 +30,8 @@ For a new isolated installation, use `scripts/deploy-azure.ps1` and
 `.github/workflows/azure-deploy.yml` calls that **same script**, rather than a
 second deployment implementation. This path uses the default
 `https://<app>.azurewebsites.net` hostname and its Azure-managed certificate.
-It creates **no DNS records, Front Door, OpenAI account or model deployment**.
+It creates **no public DNS records, custom domain, Front Door, OpenAI account or
+model deployment**. The private-storage profile adds internal Blob DNS only.
 It serves the static/offline lab with paid planning **off**. A public paid
 deployment is a separate architecture and authorization decision; the
 edge/private-endpoint recipe later in this guide is not silently replaced.
@@ -105,8 +106,9 @@ fails clearly and does not retry writes or open a firewall.
 **Costs begin at provisioning and continue after testing.** The B1 App Service
 plan is billed while it exists, even with no traffic or a stopped web app.
 Storage capacity, operations and network egress also incur charges.
-There is no model, Front Door or private-endpoint charge from this template;
-the daily application limit is not a spending cap. Check your region and
+There is no model or Front Door charge. The selected-network profile has no
+private-endpoint charge; `-PrivateStorage` adds Private Link and internal DNS costs.
+The daily application limit is not a spending cap. Check your region and
 agreement in the [Azure pricing calculator](https://azure.microsoft.com/pricing/calculator/)
 and set independent cost alerts before running. There is no automatic teardown.
 
@@ -315,6 +317,9 @@ a verified Git bundle through authorized Run Command. Do not expose a private
 repository or package publicly to make this work, or copy developer credentials.
 The packager emits a hash-covered `dist/release.json`; verify `/release.json`
 and actual asset hashes through HTTPS after both initial deployment and update.
+Older pre-metadata packages remain eligible for rollback after the same manifest,
+revision and artifact-hash checks; they do not have `/release.json`, so use the
+saved package pointer and known served asset hashes for their acceptance checks.
 
 This helper adds VM, managed-disk, public-IP and Private Link charges. Once
 testing finishes, verify the helper's exact ownership tag, VM-to-disk/NIC links,

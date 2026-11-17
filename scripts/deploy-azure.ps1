@@ -135,15 +135,18 @@ function Assert-Release {
         try { $manifest = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
         if ($manifest.revision -cne $ExpectedRevision -or $manifest.fileCount -ne $manifest.files.Count -or
             $names.Count -ne ($manifest.files.Count + 1)) { throw 'Release manifest/revision mismatch.' }
-        foreach ($required in @('package.json', 'server.mjs', 'dist/index.html', 'dist/release.json',
+        foreach ($required in @('package.json', 'server.mjs', 'dist/index.html',
             'src/windows-copilot-job-runner.mjs', 'scripts/windows-copilot-job-host.ps1',
             'node_modules/@azure/identity/package.json', 'node_modules/@azure/storage-blob/package.json',
             'node_modules/jose/package.json')) {
             if ($required -notin $names) { throw "Missing release artifact: $required" }
         }
-        $reader = [IO.StreamReader]::new($archive.GetEntry('dist/release.json').Open())
-        try { $metadata = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
-        if ($metadata.revision -cne $ExpectedRevision) { throw 'Served release metadata/revision mismatch.' }
+        $metadataEntry = $archive.GetEntry('dist/release.json')
+        if ($metadataEntry) {
+            $reader = [IO.StreamReader]::new($metadataEntry.Open())
+            try { $metadata = $reader.ReadToEnd() | ConvertFrom-Json -AsHashtable } finally { $reader.Dispose() }
+            if ($metadata.revision -cne $ExpectedRevision) { throw 'Served release metadata/revision mismatch.' }
+        }
         if (-not @($names | Where-Object { $_ -match '^dist/.+\.wasm$' }).Count -or
             -not @($names | Where-Object { $_ -match '^dist/.+\.mjs$' }).Count -or
             -not @($names | Where-Object { $_ -match '^dist/.+\.js$' }).Count) {
