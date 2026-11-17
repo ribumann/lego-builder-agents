@@ -2771,7 +2771,7 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   assert.deepEqual(await planned.json(), { spec, calls: 1, limit: null, source: 'copilot' });
   const compatiblePlanned = await fetchWithHost(`${base}/api/compatible-plan`, {
     method: 'POST', headers: { ...headers, Origin: origin, 'X-Bricklab-Key': status.sessionKey },
-    body: JSON.stringify({ world: 'space', brief: 'A private Codespaces-compatible provider check', sceneSize: 700 }),
+    body: JSON.stringify({ world: 'space', brief: 'A private Codespaces-compatible provider check', sceneSize: 500 }),
   });
   assert.equal(compatiblePlanned.status, 200);
   assert.deepEqual(await compatiblePlanned.json(), { spec: lifecycleSpec, source: 'compatible' });
