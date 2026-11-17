@@ -14,6 +14,9 @@ They are not five language-model calls.
 
 *A completed offline example, not model-generated output.*
 
+See the [screenshot gallery](docs/screenshots.md) for a space fleet, task board
+and playground repair.
+
 ## Try it
 
 **Local computer:** with Node.js 22.12+ and npm, run from the repository root:
