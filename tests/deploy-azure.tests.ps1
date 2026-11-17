@@ -82,6 +82,7 @@ try {
     $script:tamperedBlob = $false
     $script:legacyPlanField = $false
     $script:outsidePlanScope = $false
+    $script:ledgerExists = $false
     function Invoke-RestMethod { return @{ hosted = $true; planningCapacity = @{ active = $script:active; quarantined = $false } } }
     function Invoke-Azure {
         param([string[]] $Arguments, [switch] $Json)
@@ -142,9 +143,12 @@ try {
             }
             'storage container' { return @{ properties = @{ publicAccess = $null } } }
             'storage blob' {
-                if ($Arguments[2] -eq 'exists') { return @{ exists = ($Arguments -contains 'packages' -and $script:blobExists) } }
+                if ($Arguments[2] -eq 'exists') {
+                    return @{ exists = $(if ($Arguments -contains 'usage') { $script:ledgerExists } else { $script:blobExists }) }
+                }
                 if ($Arguments[2] -eq 'upload') {
                     if ($Arguments -contains 'packages') { $script:blobExists = $true }
+                    if ($Arguments -contains 'usage') { $script:ledgerExists = $true }
                     return
                 }
                 if ($Arguments[2] -eq 'show') {
@@ -249,6 +253,12 @@ try {
     $ledgerUploads = @($script:calls | Where-Object { $_ -contains 'daily-usage.json' -and $_ -contains 'upload' })
     Assert-Test ($ledgerUploads.Count -eq 1) 'Initial ledger conditionally created once'
     Assert-ConditionalUpload $ledgerUploads[0]
+
+    $script:calls.Clear()
+    $script:settings = @{ BRICKLAB_AZURE_AI = '0' }
+    Invoke-BrickLabDeployment $initial
+    Assert-Test (@($script:calls | Where-Object { $_ -contains 'usage' -and $_ -contains 'upload' }).Count -eq 0) 'Interrupted initialization preserves an existing ledger'
+    Assert-Test ($script:settings.BRICKLAB_AZURE_USAGE_CONTAINER -eq 'usage') 'Interrupted initialization finishes app configuration'
 
     $script:calls.Clear()
     $provision = @{
