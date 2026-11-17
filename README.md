@@ -296,6 +296,21 @@ This mode supports only the production server, loopback listener, and standard `
 
 For a private-port verification failure, check the selected CLI's version and run `GH_PROMPT_DISABLED=1 timeout 20s "${BRICKLAB_GH_BIN:-gh}" auth status` and `GH_PROMPT_DISABLED=1 timeout 20s "${BRICKLAB_GH_BIN:-gh}" codespace ports --codespace "$CODESPACE_NAME" --json sourcePort,visibility,browseUrl` in the Codespace terminal. In one reported Codespace, gh 2.23.0 timed out after 45 seconds while a checksum-verified gh 2.104.0 enumerated the private port using the same authentication. The [older CLI](https://github.com/cli/cli/blob/v2.23.0/pkg/cmd/codespace/ports.go) uses Live Share and constructs `preview.app.github.dev` URLs; the newer CLI uses Dev Tunnels and the standard URL. The exact stall was not traced, and other timeouts can have other causes: check authentication, access/scope and connectivity without sharing credentials. The Codespaces metadata API's `allowed_port_privacy_settings` describes allowed settings, not this port's actual visibility; it is not an equivalent substitute. No independent reliable visibility lookup has been established, so a timeout continues to deny access.
 
+To enable optional Copilot images, also set `BRICKLAB_COPILOT_IMAGES=1` before
+starting the server. Each request requires explicit consent and uses the CLI's
+documented [`--attachment`](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference).
+On Linux, BrickLab uses private per-request temporary files, stops the managed
+process group on cancellation or timeout, and attempts deletion after the
+managed process exits. A remaining or escaped process, or an abrupt crash, can
+leave data behind; process groups cannot prove that every descendant stopped.
+Closing a browser tab does not stop the Codespace, and stopping it preserves
+stored data. Lab operators should **delete
+disposable Codespaces after labs**, rather than relying on closing or stopping.
+The [Copilot CLI stores session data locally and can sync it to your GitHub
+account](https://docs.github.com/en/copilot/concepts/security-governance-and-network-settings/session-data);
+deleting the Codespace does not delete synced session data. No provider fallback
+is automatic.
+
 For a shareable diagnostic, leave the app running and execute **`node scripts/diagnose-codespaces.mjs` in a second Codespace terminal** (set the same `PORT` there if customized). It prints only fixed classifications and HTTP status codes. Each CLI step is limited to 15 seconds and each HTTP probe to 2 seconds. It never prompts for sign-in, changes visibility, sends app credentials or makes a planning request. GitHub API authentication, access to this Codespace's metadata, and port enumeration are tested separately: metadata success followed by a ports timeout isolates the failing command, not the exact stalled operation or its network root cause. The [GitHub CLI implementation](https://github.com/cli/cli/blob/v2.83.1/pkg/cmd/codespace/ports.go) opens a Codespace connection and tunnel to enumerate ports and also waits for a concurrent devcontainer repository lookup; the command is not just a REST visibility lookup. An API scope denial is a different result from that timeout. `private-app-guard-observed` means only that local unauthenticated probes saw the expected 401/403 boundary; it is **not live browser/proxy verification**. `unexpected-guard-check-startup-mode` means check the running server's production/Codespaces settings before investigating forwarding; bare `npm start` without `BRICKLAB_CODESPACES=1` deliberately leaves the API local-only.
 
 To investigate a browser 403 without changing the trust policy, restart with `BRICKLAB_CODESPACES_DIAGNOSTICS=1` in addition to the normal settings. The first 20 requests log only whether Host, Origin and forwarded host/protocol match the expected values, are absent, or differ (Host and Origin may also be classified as loopback); the `Forwarded` header is recorded only as present or absent. Each entry identifies navigation/API/asset and the host/origin rejection, app-auth requirement, or next private-port check, not successful authorization. No header values, URLs, credentials or cookies are logged by this diagnostic. Disable it after collecting the classifications. Share only the diagnostic JSON/lines, never raw startup logs (manual-start logs can contain the temporary password; automated-worker logs are private too). These classifications are not proof that forwarded headers are trustworthy or that a request is authenticated. The preflight includes `proxyRewrittenOrigin` (expected 401 without app credentials) and `proxyNullOrigin` (expected 403), so a server with only the earlier Host fix no longer reports all local guards passing.
@@ -544,10 +559,11 @@ Typing remains available if recording or transcription is unsupported, slow or
 inaccurate. The selected planner may subsequently receive the brief when you
 submit it.
 
-### Optional Windows Copilot images (private server only)
+### Optional Copilot images (private server only)
 
-Copilot images are **off by default** and unavailable on POSIX or public hosted
-deployments. The Windows path requires the Microsoft Store PowerShell 7 package,
+Copilot images are **off by default** and unavailable on public hosted
+deployments. Linux supports the opt-in with the cleanup limitations above.
+The Windows path requires the Microsoft Store PowerShell 7 package,
 an absolute native Copilot `.exe` path, and both server opt-ins. For example, in
 PowerShell after installing and authenticating the standalone CLI:
 

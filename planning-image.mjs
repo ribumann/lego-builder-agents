@@ -1,4 +1,4 @@
-import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { lstat, mkdtemp, open, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -104,9 +104,8 @@ export function validatePlanningImage(image, imageConsent) {
 }
 
 /**
- * The callback must not resolve until the CLI and its descendants have stopped
- * using the file, including on cancellation. Mode bits do not establish Windows
- * ACLs; the server must run under a trusted account with a private temp directory.
+ * The callback must settle only after managed child cleanup. POSIX process
+ * groups cannot guarantee that escaped descendants have stopped.
  */
 export async function withCopilotImageAttachment({ image, imageConsent, signal }, run) {
   if (typeof run !== 'function' || (signal !== undefined && !(signal instanceof AbortSignal)))
@@ -118,13 +117,27 @@ export async function withCopilotImageAttachment({ image, imageConsent, signal }
   try {
     dir = await mkdtemp(join(tmpdir(), 'bricklab-image-'));
     const file = join(dir, validated.mimeType === 'image/png' ? 'image.png' : 'image.jpg');
-    await writeFile(file, validated.bytes, { flag: 'wx', mode: 0o600, signal });
+    const directoryStat = await lstat(dir);
+    if (typeof process.getuid === 'function' && (!directoryStat.isDirectory()
+        || directoryStat.uid !== process.getuid() || (directoryStat.mode & 0o077) !== 0))
+      throw new Error('Private image storage is unavailable.');
+    const handle = await open(file, 'wx', 0o600);
+    try {
+      const fileStat = await handle.stat();
+      if (typeof process.getuid === 'function' && (!fileStat.isFile()
+          || fileStat.uid !== process.getuid() || (fileStat.mode & 0o077) !== 0))
+        throw new Error('Private image storage is unavailable.');
+      await handle.writeFile(validated.bytes, { signal });
+    } finally { await handle.close(); }
     if (signal?.aborted) throw new Error('Image planning was cancelled.');
     return await run(file);
   } catch (error) {
     if (signal?.aborted) throw new Error('Image planning was cancelled.');
     throw error;
   } finally {
-    if (dir) await rm(dir, { recursive: true, force: true });
+    if (dir) {
+      try { await rm(dir, { recursive: true, force: true }); }
+      catch { throw Object.assign(new Error('Image attachment cleanup could not be confirmed.'), { cleanupConfirmed: false }); }
+    }
   }
 }
