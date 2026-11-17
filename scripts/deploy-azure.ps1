@@ -26,7 +26,7 @@ function Invoke-Azure {
     param([string[]] $Arguments, [switch] $Json)
     # Never echo command output on failure: app settings can contain credentials.
     $result = & az @Arguments --only-show-errors --output $(if ($Json) { 'json' } else { 'none' }) 2>&1
-    if ($LASTEXITCODE -ne 0) { throw "Azure CLI operation failed ($($Arguments[0..1] -join ' ')); inspect Azure diagnostics securely. No retry was attempted." }
+    if ($LASTEXITCODE -ne 0) { throw "Azure CLI operation failed ($(($Arguments | Select-Object -First 3) -join ' ')); inspect Azure diagnostics securely. No retry was attempted." }
     if ($Json) {
         if (-not $result) { throw 'Azure CLI returned no JSON.' }
         return ($result -join "`n" | ConvertFrom-Json -AsHashtable)
@@ -311,7 +311,7 @@ function Invoke-BrickLabDeployment {
                 [IO.File]::WriteAllText($temporary, '{"day":"2000-01-01","count":0}')
                 Invoke-Azure (@('storage', 'blob', 'upload') + $blobScope +
                     @('--container-name', 'usage', '--name', 'daily-usage.json', '--file', $temporary,
-                        '--if-none-match', '*', '--overwrite', 'false'))
+                        '--type', 'block', '--overwrite', 'false'))
             } finally { Remove-Item -LiteralPath $temporary }
         }
     }
@@ -336,7 +336,7 @@ function Invoke-BrickLabDeployment {
         } finally { Remove-Item -LiteralPath $download }
     } else {
         Invoke-Azure (@('storage', 'blob', 'upload') + $blobScope + @('--container-name', 'packages', '--name', $blobName,
-            '--file', $Options.PackagePath, '--if-none-match', '*', '--overwrite', 'false', '--metadata', "sha256=$hash"))
+            '--file', $Options.PackagePath, '--type', 'block', '--overwrite', 'false', '--metadata', "sha256=$hash"))
     }
     if ($settings['WEBSITE_RUN_FROM_PACKAGE'] -ceq $url -and
         $settings['WEBSITE_RUN_FROM_PACKAGE_BLOB_MI_RESOURCE_ID'] -ceq 'SystemAssigned') {

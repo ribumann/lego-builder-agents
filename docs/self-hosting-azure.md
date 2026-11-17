@@ -198,6 +198,9 @@ The script validates every archive manifest hash, exact revision and required
 server/dependency/browser/worker/WASM entries before Azure writes. Blobs are
 named `<revision>-<archive-sha256>.zip` and uploaded using Entra login with
 `If-None-Match: *`, never SAS, account keys, publishing profiles or SCM.
+Uploads explicitly use block blobs and `--overwrite false`, which makes the
+Blob SDK perform a conditional create. No literal wildcard is passed through
+the native-command argument boundary, where Unix launchers can expand it.
 An existing blob must match metadata, length and downloaded SHA-256.
 Repeating an already selected package does not change settings or restart.
 Only the package URL and `SystemAssigned` reader setting are changed for a
@@ -295,6 +298,11 @@ It creates a tagged temporary VM with managed identity, scoped package/usage
 Blob roles, Reader on the isolated group and Website Contributor on just the
 isolated app. It has password authentication off and an NSG denying **all
 inbound traffic**, including SSH/RDP; use authorized Azure VM Run Command.
+On the disposable guest, explicitly set `HOME`, `XDG_CACHE_HOME` and
+`AZURE_CONFIG_DIR` to private locations **outside the checkout** before invoking
+Azure CLI/PowerShell; minimal Run Command environments may omit `HOME`.
+Keep the clean-source guard: do not ignore unexpected telemetry/cache files in
+the release checkout to get packaging past a failure.
 Its Standard public IP is for explicit outbound tool/package downloads only,
 not public management access. Generate an ephemeral SSH public key for the VM
 schema and dispose of the unused private key; never put credentials in scripts.

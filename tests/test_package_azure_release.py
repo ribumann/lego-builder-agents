@@ -109,6 +109,15 @@ class PackageAzureReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(output) as archive:
             self.assertIn("dist/assets/large.bin", archive.namelist())
 
+    def test_served_revision_metadata_replaces_stale_build_metadata_only_in_archive(self):
+        stale = self.root / "dist" / "release.json"
+        stale.write_text('{"revision":"stale"}', encoding="utf-8")
+        output = Path(self.temporary.name) / "metadata-release.zip"
+        build_package(self.root, "c" * 40, output, verify_npm=False)
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(json.loads(archive.read("dist/release.json")), {"revision": "c" * 40})
+        self.assertEqual(json.loads(stale.read_text()), {"revision": "stale"})
+
     def test_output_must_be_outside_release_source(self):
         with self.assertRaisesRegex(PackageError, "outside the repository"):
             build_package(

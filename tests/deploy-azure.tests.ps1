@@ -13,6 +13,11 @@ function Assert-Throws([scriptblock] $Action, [string] $Message) {
     }
     Assert-Test $caught "Expected rejection containing: $Message"
 }
+function Assert-ConditionalUpload([string[]] $Command) {
+    Assert-Test ($Command[[array]::IndexOf($Command, '--overwrite') + 1] -eq 'false' -and
+        $Command[[array]::IndexOf($Command, '--type') + 1] -eq 'block' -and
+        $Command -notcontains '*') 'Atomic block-blob create without shell wildcard expansion'
+}
 
 $temporary = Join-Path ([IO.Path]::GetTempPath()) "bricklab-deploy-tests-$([guid]::NewGuid())"
 New-Item -ItemType Directory -Path $temporary | Out-Null
@@ -75,6 +80,8 @@ try {
     $script:planWorkers = 1
     $script:deploymentSucceeded = $false
     $script:tamperedBlob = $false
+    $script:legacyPlanField = $false
+    $script:outsidePlanScope = $false
     function Invoke-RestMethod { return @{ hosted = $true; planningCapacity = @{ active = $script:active; quarantined = $false } } }
     function Invoke-Azure {
         param([string[]] $Arguments, [switch] $Json)
@@ -99,9 +106,14 @@ try {
                     origin = @{ value = 'https://bricklab-test.azurewebsites.net' }
                 } } }
             }
-            'webapp show' { return @{ httpsOnly = $true; identity = @{ type = 'SystemAssigned'; principalId = 'identity' }
-                appServicePlanId = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-bricklab-test/providers/Microsoft.Web/serverfarms/bricklab-plan'
-                virtualNetworkSubnetId = 'subnet-id' } }
+            'webapp show' {
+                $result = @{ httpsOnly = $true; identity = @{ type = 'SystemAssigned'; principalId = 'identity' }
+                    virtualNetworkSubnetId = 'subnet-id' }
+                $planGroup = if ($script:outsidePlanScope) { 'unrelated-group' } else { 'rg-bricklab-test' }
+                $field = if ($script:legacyPlanField) { 'serverFarmId' } else { 'appServicePlanId' }
+                $result[$field] = "/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/$planGroup/providers/Microsoft.Web/serverfarms/bricklab-plan"
+                return $result
+            }
             'appservice plan' { return @{ sku = @{ capacity = $script:planWorkers } } }
             'webapp restart' { return }
             'webapp config' {
@@ -191,6 +203,9 @@ try {
     $script:planWorkers = 2
     Assert-Throws { Invoke-BrickLabDeployment $options } 'one App Service plan worker'
     $script:planWorkers = 1
+    $script:outsidePlanScope = $true
+    Assert-Throws { Invoke-BrickLabDeployment $options } 'explicit subscription/resource group'
+    $script:outsidePlanScope = $false
     Assert-Test (-not @($script:calls | Where-Object { $_ -contains 'set' -or $_ -contains 'upload' }).Count) 'Rejected operations must not write'
 
     Invoke-BrickLabDeployment $options
@@ -201,7 +216,8 @@ try {
     }
     Assert-Test ($script:settings.WEBSITE_RUN_FROM_PACKAGE -like "*/$revision-*.zip") 'Content-addressed package selected'
     $uploads = @($script:calls | Where-Object { $_ -contains 'upload' })
-    Assert-Test ($uploads.Count -eq 1 -and $uploads[0] -contains '--if-none-match') 'Immutable conditional upload'
+    Assert-Test ($uploads.Count -eq 1) 'One immutable conditional upload'
+    Assert-ConditionalUpload $uploads[0]
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'daily-usage.json' -or $_ -contains 'daily-budget.json' }).Count -eq 0) 'Update never touches ledger'
     $script:calls.Clear()
     $script:tamperedBlob = $true
@@ -211,6 +227,9 @@ try {
     $script:calls.Clear()
     Invoke-BrickLabDeployment $options
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'restart' -or $_ -contains 'set' }).Count -eq 0) 'Same package does not restart'
+    $script:legacyPlanField = $true
+    Invoke-BrickLabDeployment $options
+    $script:legacyPlanField = $false
     $script:config.ipSecurityRestrictions += @{ action = 'Allow'; ipAddress = '203.0.113.8/32' }
     Assert-Throws { Invoke-BrickLabDeployment $options } 'explicit set'
     $options.OperatorIpv4Cidr = @('203.0.113.7/32', '203.0.113.8/32')
@@ -227,7 +246,9 @@ try {
     Invoke-BrickLabDeployment $initial
     Assert-Test ($script:settings.BRICKLAB_AZURE_USAGE_CONTAINER -eq 'usage') 'Initial ledger configured'
     Assert-Test ($script:settings.BRICKLAB_AZURE_AI -eq '0') 'Initial paid planning remains off'
-    Assert-Test (@($script:calls | Where-Object { $_ -contains 'daily-usage.json' -and $_ -contains '--if-none-match' }).Count -eq 1) 'Initial ledger conditionally created once'
+    $ledgerUploads = @($script:calls | Where-Object { $_ -contains 'daily-usage.json' -and $_ -contains 'upload' })
+    Assert-Test ($ledgerUploads.Count -eq 1) 'Initial ledger conditionally created once'
+    Assert-ConditionalUpload $ledgerUploads[0]
 
     $script:calls.Clear()
     $provision = @{
