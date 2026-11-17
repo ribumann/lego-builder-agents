@@ -252,7 +252,14 @@ function Invoke-BrickLabDeployment {
 
     $target = $scope + @('--name', $Options.WebAppName)
     $web = Invoke-Azure (@('webapp', 'show') + $target) -Json
-    $plan = Invoke-Azure @('appservice', 'plan', 'show', '--subscription', $Options.SubscriptionId, '--ids', $web.serverFarmId) -Json
+    $planId = if ($web.ContainsKey('appServicePlanId')) { $web.appServicePlanId }
+        elseif ($web.ContainsKey('serverFarmId')) { $web.serverFarmId }
+        else { throw 'Azure returned no App Service plan ID.' }
+    $expectedPlanPrefix = "/subscriptions/$($Options.SubscriptionId)/resourceGroups/$($Options.ResourceGroup)/providers/Microsoft.Web/serverfarms/"
+    if (-not $planId -or -not $planId.StartsWith($expectedPlanPrefix, [StringComparison]::OrdinalIgnoreCase)) {
+        throw 'App Service plan must be in the explicit subscription/resource group.'
+    }
+    $plan = Invoke-Azure @('appservice', 'plan', 'show', '--subscription', $Options.SubscriptionId, '--ids', $planId) -Json
     if ($plan.sku.capacity -ne 1) { throw 'Exactly one App Service plan worker is required.' }
     $config = Invoke-Azure (@('webapp', 'config', 'show') + $target) -Json
     $storage = Invoke-Azure (@('storage', 'account', 'show') + $scope + @('--name', $Options.StorageAccountName)) -Json

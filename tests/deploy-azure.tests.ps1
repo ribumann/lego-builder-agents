@@ -100,7 +100,8 @@ try {
                 } } }
             }
             'webapp show' { return @{ httpsOnly = $true; identity = @{ type = 'SystemAssigned'; principalId = 'identity' }
-                serverFarmId = 'plan-id'; virtualNetworkSubnetId = 'subnet-id' } }
+                appServicePlanId = '/subscriptions/11111111-1111-1111-1111-111111111111/resourceGroups/rg-bricklab-test/providers/Microsoft.Web/serverfarms/bricklab-plan'
+                virtualNetworkSubnetId = 'subnet-id' } }
             'appservice plan' { return @{ sku = @{ capacity = $script:planWorkers } } }
             'webapp restart' { return }
             'webapp config' {
