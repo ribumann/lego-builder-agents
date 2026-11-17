@@ -127,8 +127,10 @@ not in the learner's setup path.
 
 ## Deployment and release evidence
 
-**Historical evidence snapshot: 2026-11-17; not re-verified live.** The source
-reviewed for these guides is merged main through `dbce924` (PR #26).
+**Historical evidence snapshot: 2026-11-17; no new provider acceptance test.**
+Core source was reviewed locally through `dbce924` (PR #26); the subsequently
+merged #27 change at `1acde76` was inspected from GitHub without merging it into
+the documentation capture worktree.
 A merge, automated fixture, deployment and real user acceptance are different
 claims.
 
@@ -139,7 +141,20 @@ claims.
 | Codespaces | Startup, proxy and diagnostic paths have automated fixture coverage | Real private forwarding, device login and classroom UAT on this revision |
 | Azure preview | Existing owner record confirms `c0060c7` package/settings live on 2026-11-16 and two text-only baseline UI plans, each one adapter attempt and 3/3 local checks | Deployment of later main changes; broad reliability, live correction/vision, cancellation, quota denial or timeout cleanup |
 | Optional features | Voice and Actions mission paths have automated fixtures | Real microphone usability and real GitHub Models workflow inference |
-| Pending work | #27 is open at this snapshot and proposes private Linux Copilot images | It is not merged/released support; this baseline's Copilot images remain Windows-only opt-in |
+| Merged Linux images | #27 (`1acde76`) adds opt-in private Linux/Codespaces Copilot attachments and per-request consent | Real Codespace image UAT and live provider inference are not established; Linux process-group/file cleanup is best-effort |
+| Pending integration | Voice removal, bring-your-own-provider (BYO) and design-consistency work remain separate integration work | Do not assume these changes are in this documented baseline or deployed Azure |
+
+Linux image operators must preserve explicit private-server opt-in and consent,
+and delete disposable lab Codespaces after preserving wanted work. Crashes or
+escaped descendants can leave attachments behind; stopping a Codespace keeps its
+storage, and deletion does not remove any synced Copilot session data.
+The [organizer guide](lab-organizer.md#optional-private-copilot-images) summarizes
+the operational choice.
+
+The [genuine offline UI capture](images/offline-jurassic-herd.png) was made from
+the isolated `a952527` documentation worktree with all providers disabled.
+Only status requests were observed, and its temporary server was stopped.
+It illustrates that earlier source revision, not the pending redesign.
 
 The retained Azure baseline record is a 99-brick spaceship in **22.332s**
 (`2026-11-16T08:25:50.337Z` to `08:26:12.670Z`) and a 97-brick hollow

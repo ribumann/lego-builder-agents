@@ -10,6 +10,10 @@ Offline templates need no model account. Optional AI planning proposes original
 brick geometry; the five visible agents execute and inspect it deterministically.
 They are not five language-model calls.
 
+<img src="docs/images/offline-jurassic-herd.png" alt="Completed local Jurassic herd beside the five-agent crew and inspection messages" width="720">
+
+*A completed offline example, not model-generated output.*
+
 ## Try it
 
 **Local computer:** with Node.js 22.12+ and npm, run from the repository root:

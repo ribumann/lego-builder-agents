@@ -12,6 +12,20 @@ after each exercise.
 | Private Codespace | Start/resume your own Codespace. Allow automatic tasks only if you trust the repository, or run `npm run codespace:connect` yourself. Open private port 4173; use `bricklab` and the temporary app password from that terminal. Do not start a second server. Follow [the full steps](lab-organizer.md#private-codespaces) if blocked. |
 | Azure-hosted lab | Open the HTTPS URL your organizer supplies. There is no local install or visitor sign-in for anonymous hosted mode. If no URL is ready, use local setup or Codespaces; do not provision Azure just to take the lab. |
 
+### Codespaces recovery card
+
+| Stuck at... | Try this |
+| --- | --- |
+| Workspace stopped | Resume your own Codespace and wait for startup |
+| No helper terminal | Open a terminal in the project and run `npm run codespace:connect`; do not start a second server |
+| Browser password rejected | Run `npm run codespace:connect` again for the current temporary **app** password; a server restart changes it |
+| Page denied / 403 | Keep port 4173 **Private**. Run `npm run codespace:status` and give the organizer only the phase/error category |
+| AI login or planning fails | Choose **Change mode -> Use offline templates**; AI is not needed for the exercises |
+
+Never paste passwords, device codes or raw logs into chat. When finished, preserve
+wanted downloads and ask the organizer about deleting a disposable lab Codespace;
+stopping it leaves stored data behind.
+
 You can do the core lab without an AI account. Select **Change mode ->
 Use offline templates** even if Copilot is initially selected.
 Do not enter your GitHub password into BrickLab. Do not put names, photos of
@@ -37,12 +51,15 @@ flowchart LR
   Verify --> Detail["DetailBot: supports and details"]
   Frame --> Check["CheckBot: inspect"]
   Detail --> Check
-  Check -->|Missing bricks| Plan
+  Check -->|Missing frame identities| Frame
+  Check -->|Missing detail identities| Detail
 ```
 
 The five roles are deterministic program logic. Offline templates recognize a
 limited vocabulary; they cannot invent every subject you type. Team messages
 describe actions, not hidden model thoughts.
+During repair, BuildBot routes missing identities to their original builder
+owners; PlanBot rechecks task prerequisites, not a newly invented blueprint.
 
 **Checkpoint:** explain why waiting can be the correct action.
 
@@ -112,8 +129,10 @@ For an interior experiment, select **Try a hollow interior** and request a small
 room with an open doorway. **Cutaway view** reveals the cross-section, but cannot
 make a solid model hollow. Templates ignore the interior preference.
 Image support depends on the server/platform; do not assume it is available.
-Images require separate consent and may carry embedded metadata. Typing works
-without image or [voice input](voice-integration.md).
+Linux/private Codespaces image support is merged but not real-Codespace accepted;
+the operator must opt in first. Each request needs separate consent, and images
+may carry embedded metadata. Typing works without image or
+[voice input](voice-integration.md).
 
 **Checkpoint:** separate "the model proposed it" from "the application checked it."
 
@@ -144,7 +163,7 @@ memory is separate from your workshop save. See [playground controls](agent-play
 | Port in use / `EADDRINUSE` | Check whether your own BrickLab is already running. Do not kill another person's process or start more servers; ask the organizer to identify the port owner |
 | "Copilot is off", missing CLI or login error | Use templates for the lab; [optional Copilot setup](lab-organizer.md#optional-copilot-planning) belongs in the server terminal, not browser settings |
 | Codespace page asks for a password | Use the temporary **app** password shown by `codespace:connect`, not a GitHub password; after a server restart reconnect to retrieve the rotated password. Keep port 4173 private |
-| Codespace startup/403 failure | [Run the bounded diagnostic](lab-organizer.md#private-codespaces); share only classifications, never raw logs or tokens |
+| Codespace startup/403 failure | Use the [Codespaces recovery card](#codespaces-recovery-card); give the organizer the phase/error category |
 | Wrong-world message | Switch between Jurassic valley and Space dock to match the brief |
 | Unsupported template idea | Use the shown dinosaur/ship examples, or a deliberately configured AI planner |
 | Busy/HTTP 429 or no allowance | Tell the organizer; use templates instead of automatic/repeated retries |

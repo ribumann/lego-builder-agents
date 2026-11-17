@@ -4,6 +4,37 @@
 after a 30-45 minute session. You need technical confidence, not coding experience.
 Give participants the [student guide](student-guide.md).
 
+## Go/no-go before learners arrive
+
+| Ready? | Decision |
+| --- | --- |
+| An offline plan builds, repairs and saves on the actual learner path | **Go** with the core lab |
+| AI login, allowance or model access is unverified | **Go offline**; omit the optional AI comparison |
+| Learners cannot reach a working workspace | **No-go for hands-on work**; use your rehearsed demo while fixing access |
+
+## Run the room
+
+```mermaid
+flowchart LR
+  Connect["0-5: connect"] --> Plan["5-12: predict a task"]
+  Plan --> Observe["12-20: build and pause"]
+  Observe --> Repair["20-28: hide and repair"]
+  Repair --> Grow["28-35: grow or explore"]
+  Grow --> Reflect["35-40: save and explain"]
+```
+
+| Activity | Facilitation prompt |
+| --- | --- |
+| Connect and choose templates | "Which decisions do you expect a team to share?" Check everyone reaches a build without AI. |
+| Plan a purple brachiosaurus; open **Task board** | "Which job must wait?" Ask for a named prerequisite. |
+| Single-step, run, pause, fast-forward | "Can both builders make progress?" Follow actual handoffs, not imagined conversations. |
+| Finish, **Hide bricks**, **Ask team to repair** | "How did it know what was missing?" Compare planned identities and inspect again. |
+| **Add to scene**, or try the separate playground | "What stayed unchanged?" |
+| Save and exchange explanations | "Where was a model needed?" Templates and the crew are deterministic. |
+
+For a five-minute demo: plan, predict one dependency, build fast, hide/repair,
+then ask the last question. Skip setup and optional AI live on stage.
+
 ## Choose a setup
 
 | Path | Who prepares it? | What learners need |
@@ -76,6 +107,22 @@ Replace the example executable path. Use `Get-Command copilot -All` and
 an installed CLI alone does not establish CLI entitlement or model access.
 An explicit **Send brief to Copilot** submission checks that path and may use
 quota. No silent template fallback is made on failure.
+
+### Optional private Copilot images
+
+Merged PR #27 adds Linux/private Codespaces support as well as the existing
+Windows path. Keep it out of the core lab: real Codespace image acceptance has
+not been completed. Images are off by default and unavailable to public hosted
+Copilot planning. The private server needs both `BRICKLAB_COPILOT=1` and
+`BRICKLAB_COPILOT_IMAGES=1` before startup; selecting a file still requires
+per-request consent and an explicit planning submission.
+
+On Linux, cancellation stops the managed process group and attempts temporary
+file deletion. Cleanup is best-effort: escaped descendants or a crash can leave
+data behind. Delete **disposable lab Codespaces** after preserving wanted work;
+closing the tab or stopping the Codespace does not delete its storage.
+[Copilot session data can be retained or synced](https://docs.github.com/en/copilot/concepts/security-governance-and-network-settings/session-data);
+deleting a Codespace does not delete synced data. Use synthetic images only.
 
 ## Private Codespaces
 
@@ -162,20 +209,6 @@ one small comparison; keep templates as the reliable core activity.
 Use diagrams and the task board when graphics are unavailable. Do not depend on
 voice, image generation, large scenes or a live provider for the core lesson.
 See [current evidence and gaps](architecture.md#deployment-and-release-evidence).
-
-## Facilitate 40 minutes
-
-| Time | Activity and prompt | Look for |
-| --- | --- | --- |
-| 0-5 min | Connect, select templates, run a demo. "Which decisions do you expect a team to share?" | Everyone reaches a build without AI |
-| 5-12 min | Plan a purple brachiosaurus. Open **Task board** before starting. "Which job must wait?" | A named prerequisite, not just an agent name |
-| 12-20 min | Single-step, run, pause, fast-forward. "Can both builders make progress?" | Actual handoffs in the board and team messages |
-| 20-28 min | Finish, **Hide bricks**, **Ask team to repair**. "How did it know what was missing?" | Comparison with planned identities, then reinspection |
-| 28-35 min | **Add to scene**, or try the separate playground. "What stayed unchanged?" | Existing scene preserved, or a recorded repair |
-| 35-40 min | Save, exchange explanations, reflect. "Where was a model needed?" | Templates/team are deterministic; optional AI only proposes geometry |
-
-For a five-minute demo: plan, predict one dependency, build fast, hide/repair,
-then ask the last question. Skip setup and optional AI live on stage.
 
 ## Scenarios and unblocking
 

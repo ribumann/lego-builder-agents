@@ -84,8 +84,12 @@ Copilot uses scripting JSONL, not rendered terminal text. Only a final completed
 assistant message with a successful terminal result is eligible for parsing.
 The CLI has model tools, built-in MCPs and repository instructions disabled.
 Windows text/image work requires native executable/Job containment; private
-image attachments additionally require verified owner-only ACLs. This snapshot
-does not include pending Linux image support in #27.
+image attachments additionally require verified owner-only ACLs. Merged #27 adds
+private Linux/Codespaces images with explicit server opt-in and per-request
+consent. Linux process-group termination and temporary-file deletion are
+best-effort, not proof all descendants/data are gone; disposable lab Codespaces
+should be deleted after preserving wanted work. Copilot session sync is a separate
+retention boundary. Real Codespace image acceptance remains unverified.
 
 ## L3: execution and invariants
 
@@ -176,12 +180,15 @@ deployment runs them. Links target the repository's recorded PRs:
 | [#21](https://github.com/ribumann/lego-builder-agents/pull/21) | Bounded parallel planning and anonymous Foundry access; concurrency limits are not measured speedup |
 | [#22](https://github.com/ribumann/lego-builder-agents/pull/22), [#23](https://github.com/ribumann/lego-builder-agents/pull/23) | Single-pass custom-plan construction and reconciled release evidence |
 | [#24](https://github.com/ribumann/lego-builder-agents/pull/24), [#25](https://github.com/ribumann/lego-builder-agents/pull/25), [#26](https://github.com/ribumann/lego-builder-agents/pull/26) | Private proxy Host/Origin fixes and unattended startup with explicit terminal login |
+| [#27](https://github.com/ribumann/lego-builder-agents/pull/27) (`1acde76`) | Private Linux/Codespaces image opt-in and consent; cleanup is best-effort, real Codespace image UAT not done |
 
 **Not shipped:** the prior release documentation records a separate prompt/output
 latency experiment whose small paired sample showed no end-to-end improvement.
 It is not on this source path and is not a performance baseline or 2x claim.
-**Pending at 2026-11-17:** [#27](https://github.com/ribumann/lego-builder-agents/pull/27)
-proposes private Linux Copilot image planning; do not describe it as released.
+**Pending integration at 2026-11-17:** voice removal, BYO-provider and
+design-consistency work are not included in this documented baseline or the
+historical deployed Azure evidence. #27 was inspected at its merged revision
+without rebasing this documentation worktree.
 Live Azure examples and unverified paths are tracked in
 [release evidence](architecture.md#deployment-and-release-evidence).
 
