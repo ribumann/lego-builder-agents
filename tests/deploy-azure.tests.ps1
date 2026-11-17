@@ -72,6 +72,8 @@ try {
     $script:groupManaged = $true
     $script:provisionStorageBlocked = $false
     $script:planWorkers = 1
+    $script:deploymentSucceeded = $false
+    $script:tamperedBlob = $false
     function Invoke-RestMethod { return @{ hosted = $true; planningCapacity = @{ active = $script:active; quarantined = $false } } }
     function Invoke-Azure {
         param([string[]] $Arguments, [switch] $Json)
@@ -84,7 +86,12 @@ try {
             'group show' { return @{ tags = @{ 'bricklab-installation' = $(if ($script:groupManaged) { 'deploy-azure-v1' } else { 'not-ours' }) } } }
             'resource list' { return @() }
             'deployment group' {
-                if ($Arguments[2] -eq 'list') { return @() }
+                if ($Arguments[2] -eq 'list') {
+                    if ($script:deploymentSucceeded) {
+                        return @(@{ name = 'bricklab-installation'; properties = @{ provisioningState = 'Succeeded' } })
+                    }
+                    return @()
+                }
                 if ($Arguments[2] -eq 'create') { return }
                 return @{ properties = @{ outputs = @{
                     webAppName = @{ value = 'bricklab-test' }; storageAccountName = @{ value = 'bricklabtest' }
@@ -132,6 +139,9 @@ try {
                 }
                 if ($Arguments[2] -eq 'download') {
                     Copy-Item -LiteralPath $packagePath -Destination $Arguments[([array]::IndexOf($Arguments, '--file') + 1)] -Force
+                    if ($script:tamperedBlob) {
+                        [IO.File]::AppendAllText($Arguments[([array]::IndexOf($Arguments, '--file') + 1)], 'tampered')
+                    }
                     return
                 }
             }
@@ -177,6 +187,11 @@ try {
     Assert-Test ($uploads.Count -eq 1 -and $uploads[0] -contains '--if-none-match') 'Immutable conditional upload'
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'daily-usage.json' -or $_ -contains 'daily-budget.json' }).Count -eq 0) 'Update never touches ledger'
     $script:calls.Clear()
+    $script:tamperedBlob = $true
+    Assert-Throws { Invoke-BrickLabDeployment $options } 'hash mismatch'
+    Assert-Test (@($script:calls | Where-Object { $_ -contains 'restart' -or $_ -contains 'set' }).Count -eq 0) 'Tampered existing blob is not selected'
+    $script:tamperedBlob = $false
+    $script:calls.Clear()
     Invoke-BrickLabDeployment $options
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'restart' -or $_ -contains 'set' }).Count -eq 0) 'Same package does not restart'
 
@@ -207,6 +222,12 @@ try {
     Invoke-BrickLabDeployment $provision
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'create' -and $_ -contains 'deployment' }).Count -eq 1) 'Provision deploys only isolated installation template'
     Assert-Test (@($script:calls | Where-Object { $_ -contains 'cognitiveservices' -or $_ -contains 'afd' -or $_ -contains 'dns' }).Count -eq 0) 'No model, edge or domain commands'
+    $script:calls.Clear()
+    $script:groupExists = $true
+    $script:deploymentSucceeded = $true
+    $script:settings.WEBSITE_RUN_FROM_PACKAGE = 'existing-initialized-package'
+    Invoke-BrickLabDeployment $provision
+    Assert-Test (@($script:calls | Where-Object { $_ -contains 'create' -or $_ -contains 'set' }).Count -eq 0) 'Completed provisioning is resume-only and never reapplies settings'
     $script:provisionStorageBlocked = $true
     Assert-Throws { Invoke-BrickLabDeployment $provision } 'possibly by Azure Policy'
     Write-Host 'PASS: offline release, target, boundary, idle, preservation, immutable rollout, initialization and provisioning tests.'
