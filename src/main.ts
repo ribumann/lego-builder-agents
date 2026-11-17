@@ -909,7 +909,7 @@ setInterval(() => {
 document.addEventListener('visibilitychange', () => {
   if (document.hidden && running && team) { running = false; team.status = 'paused'; render(); }
 });
-window.addEventListener('beforeunload', () => { planningController?.abort(); save(); });
+window.addEventListener('beforeunload', () => { planningController?.abort(); });
 window.addEventListener('pagehide', () => { planningController?.abort(); });
 restore();
 render();

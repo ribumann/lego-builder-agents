@@ -11,7 +11,7 @@ test('all planning endpoints validate scene size before provider access', async 
   await new Promise(resolve => reservation.close(resolve));
   const child = spawn(process.execPath, ['server.mjs', '--production'], {
     env: { ...process.env, HOST: '127.0.0.1', PORT: String(port), BRICKLAB_HOSTED: '0',
-      BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT: '0', BRICKLAB_LOCAL_AI: '0',
+      BRICKLAB_CODESPACES: '0', BRICKLAB_COPILOT: '0',
       BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0' },
     stdio: ['ignore', 'pipe', 'pipe'],
   });
