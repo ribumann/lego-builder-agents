@@ -187,8 +187,8 @@ latency experiment whose small paired sample showed no end-to-end improvement.
 It is not on this source path and is not a performance baseline or 2x claim.
 **Pending integration at 2026-11-17:** voice removal, BYO-provider and
 design-consistency work are not included in this documented baseline or the
-historical deployed Azure evidence. #27 was inspected at its merged revision
-without rebasing this documentation worktree.
+historical deployed Azure evidence. This documentation branch merges main through
+#27 (`1acde76`); the offline screenshot predates that merge.
 Live Azure examples and unverified paths are tracked in
 [release evidence](architecture.md#deployment-and-release-evidence).
 

@@ -117,9 +117,11 @@ Copilot planning. The private server needs both `BRICKLAB_COPILOT=1` and
 `BRICKLAB_COPILOT_IMAGES=1` before startup; selecting a file still requires
 per-request consent and an explicit planning submission.
 
-On Linux, cancellation stops the managed process group and attempts temporary
-file deletion. Cleanup is best-effort: escaped descendants or a crash can leave
-data behind. Delete **disposable lab Codespaces** after preserving wanted work;
+Linux attachments use owner-only, request-owned temporary files and the CLI's
+documented [`--attachment` option](https://docs.github.com/en/copilot/reference/copilot-cli-reference/cli-programmatic-reference).
+Cancellation targets the managed process group; file deletion is attempted after
+the managed process exits. Cleanup is best-effort: escaped descendants or a crash
+can leave data behind. Delete **disposable lab Codespaces** after preserving wanted work;
 closing the tab or stopping the Codespace does not delete its storage.
 [Copilot session data can be retained or synced](https://docs.github.com/en/copilot/concepts/security-governance-and-network-settings/session-data);
 deleting a Codespace does not delete synced data. Use synthetic images only.

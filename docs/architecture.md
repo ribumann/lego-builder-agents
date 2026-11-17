@@ -128,9 +128,9 @@ not in the learner's setup path.
 ## Deployment and release evidence
 
 **Historical evidence snapshot: 2026-11-17; no new provider acceptance test.**
-Core source was reviewed locally through `dbce924` (PR #26); the subsequently
-merged #27 change at `1acde76` was inspected from GitHub without merging it into
-the documentation capture worktree.
+The documentation branch includes merged main through `1acde76` (PR #27).
+Core source and the Linux image change were reviewed; the offline screenshot
+was captured earlier, before this main integration.
 A merge, automated fixture, deployment and real user acceptance are different
 claims.
 
