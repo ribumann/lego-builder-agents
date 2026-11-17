@@ -16,7 +16,7 @@ import { createAzurePlanner, getAzurePlannerDiagnostic } from './azure-planner.m
 import { createAzureAccessTokenVerifier, getAzureAuthConfig } from './azure-auth.mjs';
 import { createAzureUsageGate } from './azure-usage.mjs';
 import { createOpenAICompatiblePlanner } from './openai-compatible-planner.mjs';
-import { MAX_IMAGE_BYTES, validatePlanningImage } from './planning-image.mjs';
+import { MAX_IMAGE_BYTES, validatePlanningImage, withCopilotImageAttachment } from './planning-image.mjs';
 import { createWindowsCopilotJobRunner } from './src/windows-copilot-job-runner.mjs';
 
 const root = fileURLToPath(new URL('.', import.meta.url));
@@ -85,9 +85,9 @@ if (process.env.BRICKLAB_COPILOT_BIN
 const copilotModel = liveEnabled ? process.env.BRICKLAB_COPILOT_MODEL : undefined;
 if (copilotModel !== undefined && !/^[a-zA-Z0-9][a-zA-Z0-9._:/-]{0,127}$/.test(copilotModel))
   throw new Error('BRICKLAB_COPILOT_MODEL must be a nonempty model identifier of at most 128 characters.');
-const copilotImagesEnabled = liveEnabled && process.platform === 'win32'
-  && process.env.BRICKLAB_COPILOT_IMAGES === '1'
-  && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable);
+const copilotImagesEnabled = liveEnabled && process.env.BRICKLAB_COPILOT_IMAGES === '1'
+  && (process.platform === 'linux' || (process.platform === 'win32'
+    && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable)));
 const windowsCopilotRunner = liveEnabled && process.platform === 'win32'
   && isAbsolute(copilotExecutable) && /\.exe$/i.test(copilotExecutable)
   ? createWindowsCopilotJobRunner() : null;
@@ -270,7 +270,7 @@ function parseCopilotPlan(code, stdout, stderr) {
   }
 }
 
-function askCopilot(prompt, signal) {
+function askCopilot(prompt, signal, attachment) {
   const workdir = resolve(root, '.agent-home');
   let release;
   const finished = new Promise(resolvePromise => { release = resolvePromise; });
@@ -282,8 +282,10 @@ function askCopilot(prompt, signal) {
     let closed = false;
     let stopping = false;
     let treeStopped = false;
+    let cleanupDeadline;
     const cleanup = () => {
       if (child && (!closed || (stopping && !treeStopped))) return;
+      clearTimeout(cleanupDeadline);
       signal.removeEventListener('abort', abort);
       release();
     };
@@ -306,14 +308,21 @@ function askCopilot(prompt, signal) {
             return false;
           }
         };
-        if (error.name === 'TimeoutError') treeStopped = killGroup('SIGKILL');
+        const hardStop = () => {
+          treeStopped = killGroup('SIGKILL');
+          child.stdout.destroy();
+          child.stderr.destroy();
+          cleanup();
+        };
+        cleanupDeadline = setTimeout(() => {
+          if (!closed || !treeStopped)
+            quarantinePlanning('Copilot process cleanup could not be confirmed. Planning is locked; the server operator must verify cleanup before restarting.');
+        }, 5000);
+        if (error.name === 'TimeoutError') hardStop();
         else {
           killGroup('SIGTERM');
-          setTimeout(() => {
-            // Kill the group even if its leader already exited but descendants ignored SIGTERM.
-            treeStopped = killGroup('SIGKILL');
-            cleanup();
-          }, 2000);
+          // Kill the group even if its leader already exited but descendants ignored SIGTERM.
+          setTimeout(hardStop, 2000);
         }
       }
       finish(error);
@@ -326,7 +335,7 @@ function askCopilot(prompt, signal) {
     mkdir(workdir, { recursive: true }).then(() => {
       if (settled) return;
       // No shell interpolation and no agent tools. Only the brief and fixed schema go to the model.
-      child = spawn(copilotExecutable, copilotArguments(prompt), {
+      child = spawn(copilotExecutable, [...copilotArguments(prompt), ...(attachment ? ['--attachment', attachment] : [])], {
         cwd: workdir, env: { ...process.env, COPILOT_ALLOW_ALL: 'false', COPILOT_PLUGIN_DIR_ONLY: 'true' },
         stdio: ['ignore', 'pipe', 'pipe'], detached: true,
       });
@@ -400,7 +409,7 @@ const server = http.createServer(async (req, res) => {
       return send(res, 403, { error: 'Use this Codespace port\'s exact HTTPS URL and origin.' });
     if (!sameSecret(req.headers.authorization, appAuthorization)) {
       res.setHeader('WWW-Authenticate', 'Basic realm="BrickLab private Codespace", charset="UTF-8"');
-      return send(res, 401, { error: 'Sign in as bricklab with the temporary app password printed in the server terminal.' });
+      return send(res, 401, { error: 'Sign in as bricklab with the temporary app password shown in your private Codespace terminal (npm run codespace:connect for automated startup).' });
     }
     // Independent app authentication also protects against a visibility change after this check.
     try { await verifyPrivatePort(); }
@@ -497,7 +506,7 @@ const server = http.createServer(async (req, res) => {
           : compatibleAI ? compatiblePlanner.status().message : hosted ? 'Copilot CLI is disabled in hosted mode.'
           : 'Copilot mode is off. Restart with BRICKLAB_COPILOT=1 to opt in.' });
       if (copilotAI && image && !copilotImagesEnabled)
-        return send(res, 503, { error: 'Copilot image planning is unavailable without verified process-tree containment. No image was sent.' });
+        return send(res, 503, { error: 'Copilot image planning requires an opted-in private Linux or Windows server. No image was sent.' });
       if (copilotAI && process.platform === 'win32' && !windowsCopilotRunner)
         return send(res, 503, { error: windowsContainmentMessage });
       const today = new Date().toISOString().slice(0, 10);
@@ -595,7 +604,7 @@ const server = http.createServer(async (req, res) => {
               })();
               finished = work.then(() => {}, () => {});
               spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
-            } else if (image || process.platform === 'win32') {
+            } else if (process.platform === 'win32') {
               let cleanupUnconfirmed = false;
               const quarantine = () => {
                 cleanupUnconfirmed = true;
@@ -632,6 +641,20 @@ const server = http.createServer(async (req, res) => {
               // An ambiguous job remains charged to capacity until operator recovery;
               // another job's eventual cleanup cannot free or unquarantine it.
               finished = work.then(() => {}, () => cleanupUnconfirmed ? new Promise(() => {}) : undefined);
+              spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
+            } else if (image) {
+              const work = withCopilotImageAttachment({
+                image: body.image, imageConsent: body.imageConsent, signal: controller.signal,
+              }, async attachment => {
+                const invocation = askCopilot(prompt, controller.signal, attachment);
+                try { return await invocation.result; }
+                finally { await invocation.finished; }
+              }).catch(error => {
+                if (error?.cleanupConfirmed === false) quarantinePlanning();
+                throw error;
+              });
+              finished = work.then(() => {}, error => error?.cleanupConfirmed === false
+                ? new Promise(() => {}) : undefined);
               spec = await Promise.race([work, interrupted.then(() => { throw controller.signal.reason; })]);
             } else {
               const invocation = askCopilot(prompt, controller.signal);
@@ -697,6 +720,16 @@ const server = http.createServer(async (req, res) => {
 server.listen(port, host, () => {
   console.log(`BrickLab: http://${host}:${port} | Copilot planning: ${liveEnabled ? 'opted in' : 'off'} | Daily calls per process: none (local/Codespaces) | Public Azure quota: ${planningQuota.enabled ? planningQuota.dailyCallLimit : 'off'}`);
   if (hosted) console.warn(`Hosted mode: ${azureEnabled ? 'anonymous Azure planning with a shared daily request allowance' : 'static/offline only; Azure planning is off'}.`);
-  if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
+  if (codespaces && process.env.BRICKLAB_CODESPACES_STARTUP === '1' && process.send)
+    process.send({ type: 'bricklab-listening', port, password: appPassword });
+  else if (codespaces) console.log(`Private Codespace: ${forwardedOrigin}\nApp username: bricklab\nTemporary app password: ${appPassword}\nKeep this password private. It changes on restart; GitHub port authentication is also required.`);
 });
-for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => { server.close(); vite?.close().then(() => process.exit(0)); });
+let shuttingDown = false;
+for (const signal of ['SIGINT', 'SIGTERM']) process.on(signal, () => {
+  if (shuttingDown) process.exit(1);
+  shuttingDown = true;
+  for (const controller of activeControllers) controller.abort(new Error('Server shutting down.'));
+  server.close();
+  void vite?.close();
+  setTimeout(() => process.exit(1), 10_000).unref();
+});

@@ -69,8 +69,10 @@ spec validation, and tests. The current boundaries are:
 
 - The implemented Copilot text route invokes the standalone CLI under the
   server user's account. It is not the Copilot desktop/IDE sign-in. Copilot
-  image requests are a separate Windows-only opt-in with process containment
-  and private temporary files.
+  image requests require a separate private Windows/Linux opt-in. Windows uses
+  process containment and private temporary files; Linux uses private temporary
+  files and best-effort process-group cleanup, with residual risk after crashes
+  or from remaining processes.
 - Azure uses backend managed identity; hosted visitors remain anonymous.
   Azure owner confirms merged package
   `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with the selected Terra

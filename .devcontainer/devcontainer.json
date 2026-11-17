@@ -9,12 +9,13 @@
   "containerEnv": {
     "BRICKLAB_GH_BIN": "/usr/bin/gh"
   },
-  "postCreateCommand": "npm ci",
-  "waitFor": "postCreateCommand",
+  "postStartCommand": "node scripts/codespaces.mjs start",
+  "waitFor": "updateContentCommand",
   "forwardPorts": [4173],
   "portsAttributes": {
     "4173": {
-      "label": "BrickLab"
+      "label": "BrickLab",
+      "onAutoForward": "notify"
     }
   }
 }

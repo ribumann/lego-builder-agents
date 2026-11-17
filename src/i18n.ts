@@ -788,11 +788,6 @@ export function translateActivity(message: string, localTemplate = false, object
   if (match) return [message, `Serverstatus meldete ${match[1]}`, `L’état du serveur a renvoyé ${match[1]}`,
     `Lo stato del server ha restituito ${match[1]}`, `El estado del servidor devolvió ${match[1]}`,
     `O estado do servidor retornou ${match[1]}`][index];
-  if (match) return [message, `Das tägliche Sitzungslimit von ${match[1]} Copilot-Aufrufen ist erreicht. Offline-Vorlagen und konfigurierte lokale KI sind separate Optionen.`,
-    `La limite quotidienne de ${match[1]} appels Copilot est atteinte. Les modèles hors ligne et l’IA locale configurée sont des options distinctes.`,
-    `Raggiunto il limite giornaliero di ${match[1]} chiamate Copilot. I modelli offline e l’IA locale configurata sono opzioni separate.`,
-    `Se alcanzó el límite diario de ${match[1]} llamadas a Copilot. Las plantillas sin conexión y la IA local configurada son opciones separadas.`,
-    `O limite diário de ${match[1]} chamadas do Copilot foi atingido. Modelos offline e IA local configurada são opções separadas.`][index];
   match = /^Custom brick (\d+)(?: in object (\d+))? (has invalid dimensions, bounds, color, or part|has an invalid repeat|repeat exceeds bounds)(?: \(([^)]+)\))?\.( No build was started\. Try a smaller scene size or ask for tiled parts; no automatic retry\.)?$/.exec(message);
   if (match) {
     const reason = [
@@ -815,6 +810,7 @@ export function translateActivity(message: string, localTemplate = false, object
       ' Nenhuma construção iniciada. Escolha uma cena menor ou peça peças em mosaico; sem nova tentativa automática.'][index] : '';
     return base + object + advice;
   }
+  match = /^(Copilot|Compatible AI) returned invalid JSON in its final response\. No build was started and BrickLab did not retry\. Revise the brief or explicitly choose offline templates\.$/.exec(message);
   if (match) return [message, `${match[1]} lieferte ungültiges JSON. Kein Bau und kein erneuter Versuch. Überarbeite den Auftrag oder wähle Offline-Vorlagen.`,
     `${match[1]} a renvoyé du JSON invalide. Aucune construction ni nouvel essai. Revoyez la consigne ou choisissez les modèles hors ligne.`,
     `${match[1]} ha restituito JSON non valido. Nessuna costruzione o nuovo tentativo. Rivedi la richiesta o scegli i modelli offline.`,

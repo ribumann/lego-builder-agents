@@ -151,7 +151,7 @@ test('hosted offline mode rejects selected images even when Azure images are ena
   expect(await page.evaluate(() => localStorage.getItem('bricklab-jurassic'))).toBe(saved);
 });
 
-test('Copilot image planning stays unavailable without verified process containment', async ({ page }) => {
+test('Copilot image planning stays unavailable without server opt-in', async ({ page }) => {
   let requests = 0;
   await page.route('**/api/status', route => route.fulfill({ json: {
     sessionKey: 'fixture', copilot: true, planner: { state: 'ready', message: 'Ready' },
@@ -159,11 +159,11 @@ test('Copilot image planning stays unavailable without verified process containm
   await page.route('**/api/plan', route => { requests++; return route.abort(); });
   await page.goto('/');
   await page.locator('#media-privacy > summary').click();
-  await expect(page.locator('#image-destination')).toContainText('unavailable');
+  await expect(page.locator('#image-provider-details')).toContainText('opted-in private Linux or Windows server');
   await page.locator('#image-file').setInputFiles(image);
   await expect(page.locator('#image-consent')).toBeDisabled();
   await page.locator('#brief-form').evaluate((form: HTMLFormElement) => form.requestSubmit());
-  await expect(page.locator('#notice')).toContainText('unavailable');
+  await expect(page.locator('#notice')).toContainText('opted-in private Linux or Windows server');
   expect(requests).toBe(0);
 });
 
@@ -190,10 +190,11 @@ test('Windows Copilot image capability discloses GitHub, requires consent, and r
   for (const language of ['en', 'de', 'fr', 'it', 'es', 'pt']) {
     await page.locator('#language').selectOption(language);
     await expect(page.locator('#image-destination')).toContainText('GitHub');
-    await expect(page.locator('#image-provider-details')).toContainText('Windows');
+    await expect(page.locator('#image-provider-details')).toContainText('Codespace');
   }
   await page.locator('#language').selectOption('en');
   await expect(page.locator('#image-destination')).toContainText('may consume quota');
+  await expect(page.locator('#image-destination')).toContainText('sync it to your GitHub account');
   await expect(page.locator('#image-provider-details')).toContainText('unverified');
   await page.locator('#image-file').setInputFiles(image);
   await page.locator('#brief').fill('A tiny observatory');
