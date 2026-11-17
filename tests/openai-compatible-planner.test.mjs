@@ -20,6 +20,7 @@ test('construction and status are inert, opt-in and disclose no connection secre
   await assert.rejects(off.plan({ prompt: 'brief' }), /is off/);
   const configured = createOpenAICompatiblePlanner({ enabled: true, endpoint, model: 'model', apiKey: secret, fetchImpl });
   assert.deepEqual(configured.status(), { enabled: true, state: 'configured',
+    destination: 'https://private.example:8443', vision: false,
     message: 'Compatible AI is configured. Availability and authentication are unverified; only explicit planning sends a prompt.' });
   assert.equal(calls, 0);
 });
@@ -97,7 +98,8 @@ test('invalid requests cannot supply endpoint, model, key, history or fake signa
 
 test('HTTP failures and transport errors are sanitized with no retries', async () => {
   for (const [status, pattern] of [[301, /redirects/], [307, /redirects/], [401, /denied access/],
-    [403, /denied access/], [429, /rate or quota/], [400, /HTTP failure/], [503, /HTTP failure/]]) {
+    [403, /denied access/], [429, /rate or quota/], [400, /rejected the request/],
+    [404, /rejected the request/], [422, /rejected the request/], [503, /HTTP failure/]]) {
     let calls = 0;
     const plan = planner(async () => { calls++; return new Response(secret, { status }); });
     await assert.rejects(plan.plan({ prompt: 'brief' }), error => pattern.test(error.message)

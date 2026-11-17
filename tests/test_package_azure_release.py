@@ -23,16 +23,16 @@ class PackageAzureReleaseTests(unittest.TestCase):
         self.root = Path(self.temporary.name) / "source"
         self.root.mkdir()
         for name, content in (
-            ("package.json", json.dumps({"dependencies": {"@huggingface/transformers": "3.8.1"}})),
+            ("package.json", json.dumps({"dependencies": {"fixture-runtime": "1.0.0"}})),
             ("server.mjs", "import './src/windows-copilot-job-runner.mjs';\n"),
             ("planning.mjs", "export const ready = true;\n"),
             ("src/windows-copilot-job-runner.mjs", "import '../planning.mjs';\n"),
             ("src/custom-design.mjs", "export const prompt = 'ok';\n"),
             ("scripts/windows-copilot-job-host.ps1", "Write-Output 'ok'\n"),
-            ("dist/assets/voice-worker.mjs", "export {};\n"),
-            ("dist/assets/runtime.wasm", "wasm"),
-            ("node_modules/@huggingface/transformers/package.json", '{"version":"3.8.1"}'),
-            ("node_modules/@huggingface/transformers/index.mjs", "export {};\n"),
+            ("dist/index.html", '<script type="module" src="/assets/app.js"></script>'),
+            ("dist/assets/app.js", "export {};\n"),
+            ("node_modules/fixture-runtime/package.json", '{"version":"1.0.0"}'),
+            ("node_modules/fixture-runtime/index.js", "export {};\n"),
         ):
             path = self.root / name
             path.parent.mkdir(parents=True, exist_ok=True)
@@ -44,13 +44,13 @@ class PackageAzureReleaseTests(unittest.TestCase):
     def tearDown(self):
         self.temporary.cleanup()
 
-    def test_release_contains_runtime_import_closure_worker_assets_and_manifest_only(self):
+    def test_release_contains_runtime_import_closure_browser_assets_and_manifest_only(self):
         files = {path.as_posix() for path in collect_runtime_files(self.root, verify_npm=False)}
         self.assertIn("src/windows-copilot-job-runner.mjs", files)
         self.assertIn("scripts/windows-copilot-job-host.ps1", files)
-        self.assertIn("dist/assets/voice-worker.mjs", files)
-        self.assertIn("dist/assets/runtime.wasm", files)
-        self.assertIn("node_modules/@huggingface/transformers/index.mjs", files)
+        self.assertIn("dist/index.html", files)
+        self.assertIn("dist/assets/app.js", files)
+        self.assertIn("node_modules/fixture-runtime/index.js", files)
         self.assertNotIn(".env", files)
         self.assertNotIn("tests/secret-fixture.txt", files)
 
@@ -59,6 +59,16 @@ class PackageAzureReleaseTests(unittest.TestCase):
             "import './missing-runtime.mjs';\n", encoding="utf-8"
         )
         with self.assertRaisesRegex(PackageError, "Unresolved local runtime import"):
+            collect_runtime_files(self.root, verify_npm=False)
+
+    def test_missing_browser_entry_or_bundle_fails_closed(self):
+        entry = self.root / "dist" / "index.html"
+        entry.unlink()
+        with self.assertRaisesRegex(PackageError, "dist/index.html"):
+            collect_runtime_files(self.root, verify_npm=False)
+        entry.write_text("app", encoding="utf-8")
+        (self.root / "dist" / "assets" / "app.js").unlink()
+        with self.assertRaisesRegex(PackageError, "JavaScript application asset"):
             collect_runtime_files(self.root, verify_npm=False)
 
     def test_build_writes_manifest_hash_and_refuses_overwrite(self):
@@ -73,9 +83,10 @@ class PackageAzureReleaseTests(unittest.TestCase):
         with zipfile.ZipFile(output) as archive:
             manifest = json.loads(archive.read("release-manifest.json"))
             names = set(archive.namelist())
+            self.assertEqual(json.loads(archive.read("dist/release.json")), {"revision": "b" * 40})
         self.assertEqual(manifest["revision"], "b" * 40)
         self.assertIn("src/windows-copilot-job-runner.mjs", names)
-        self.assertIn("dist/assets/runtime.wasm", names)
+        self.assertIn("dist/assets/app.js", names)
         second = Path(self.temporary.name) / "release-second.zip"
         second_result = build_package(self.root, "b" * 40, second, verify_npm=False)
         self.assertEqual(result["sha256"], second_result["sha256"])
@@ -95,6 +106,15 @@ class PackageAzureReleaseTests(unittest.TestCase):
         self.assertEqual(result["archiveBytes"], output.stat().st_size)
         with zipfile.ZipFile(output) as archive:
             self.assertIn("dist/assets/large.bin", archive.namelist())
+
+    def test_served_revision_metadata_replaces_stale_build_metadata_only_in_archive(self):
+        stale = self.root / "dist" / "release.json"
+        stale.write_text('{"revision":"stale"}', encoding="utf-8")
+        output = Path(self.temporary.name) / "metadata-release.zip"
+        build_package(self.root, "c" * 40, output, verify_npm=False)
+        with zipfile.ZipFile(output) as archive:
+            self.assertEqual(json.loads(archive.read("dist/release.json")), {"revision": "c" * 40})
+        self.assertEqual(json.loads(stale.read_text()), {"revision": "stale"})
 
     def test_output_must_be_outside_release_source(self):
         with self.assertRaisesRegex(PackageError, "outside the repository"):

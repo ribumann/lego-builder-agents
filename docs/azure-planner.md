@@ -40,7 +40,7 @@ GlobalStandard capacity 40, with the existing native content policy and
 automatic upgrades disabled. Preserve its startup app setting across package
 updates; the retained GPT-5.4 capacity 200 is not an automatic fallback.
 The isolated deployment template and operational boundaries are documented in
-[the Azure runbook](self-hosting-azure.md#selected-default-gpt-61-terra).
+[the Azure runbook](self-hosting-azure.md#current-public-preview-planner-not-a-general-model-requirement).
 This is deployment configuration, not a hardcoded model requirement in the
 adapter or permission to enable paid planning.
 
@@ -56,7 +56,7 @@ A completed, parsed but invalid model design gets at most **one correction**
 from the same provider. The rejected JSON and precise validation feedback are
 sent transiently with the original instructions; they are never logged. Both
 attempts use the same held capacity slot, cancellation signal and overall
-300-second deadline (90 seconds for local AI). There is no correction after
+300-second deadline. There is no correction after
 network/authentication/429/timeout failure or client cancellation. JSON parsing,
 incomplete responses and content filtering also fail without replay.
 The correction prompt remains capped at 32,000 bytes; a larger rejected design
@@ -120,8 +120,8 @@ Images require explicit `imageConsent:true`, with
 type, at most 1,000,000 decoded bytes, dimensions at most 4096 each and at most
 8 million pixels before counting or inference. The adapter sends one user
 message containing text plus an `image_url` data URL. There are no Azure image
-temporary files. Voice is browser-local Whisper with explicit review/apply,
-not Azure Speech or a server audio upload.
+temporary files. BrickLab has no audio-transcription route; voice remains
+backlogged across modes.
 
 ## Lifecycle and output
 

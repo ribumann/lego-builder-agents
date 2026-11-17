@@ -7,6 +7,7 @@ import json
 import os
 from pathlib import Path
 import re
+import shutil
 import stat
 import subprocess
 import sys
@@ -22,6 +23,7 @@ REQUIRED_RUNTIME_FILES = (
     Path("server.mjs"),
     Path("src/windows-copilot-job-runner.mjs"),
     Path("scripts/windows-copilot-job-host.ps1"),
+    Path("dist/index.html"),
 )
 OMIT_DIRECTORY_PARTS = {".bin"}
 
@@ -79,7 +81,7 @@ def collect_runtime_files(root: Path, verify_npm: bool = True) -> list[Path]:
             raise PackageError(f"Production dependency is missing: {dependency}")
     if verify_npm:
         result = subprocess.run(
-            ["npm", "ls", "--omit=dev", "--depth=0", "--json"],
+            [shutil.which("npm") or "npm", "ls", "--omit=dev", "--depth=0", "--json"],
             cwd=root,
             check=False,
             capture_output=True,
@@ -105,10 +107,8 @@ def collect_runtime_files(root: Path, verify_npm: bool = True) -> list[Path]:
                 raise PackageError(f"Runtime import is not packaged: {specifier}")
 
     dist_files = [root / path for path in files if Path("dist") in path.parents]
-    if not any(path.suffix == ".wasm" for path in dist_files):
-        raise PackageError("Built release has no WebAssembly runtime asset.")
-    if not any(path.suffix == ".mjs" for path in dist_files):
-        raise PackageError("Built release has no JavaScript module runtime asset.")
+    if not any(path.suffix == ".js" for path in dist_files):
+        raise PackageError("Built release has no JavaScript application asset.")
     return sorted(files, key=lambda path: path.as_posix())
 
 
@@ -122,7 +122,9 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
     if output.exists():
         raise PackageError(f"Refusing to overwrite an existing release: {output}")
 
-    files = collect_runtime_files(root, verify_npm=verify_npm)
+    files = [path for path in collect_runtime_files(root, verify_npm=verify_npm)
+             if path != Path("dist/release.json")]
+    release_metadata = (json.dumps({"revision": revision}, sort_keys=True) + "\n").encode()
     entries = []
     for relative in files:
         content = (root / relative).read_bytes()
@@ -131,6 +133,12 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
             "size": len(content),
             "sha256": hashlib.sha256(content).hexdigest(),
         })
+    entries.append({
+        "path": "dist/release.json",
+        "size": len(release_metadata),
+        "sha256": hashlib.sha256(release_metadata).hexdigest(),
+    })
+    entries.sort(key=lambda entry: entry["path"])
     manifest = {
         "revision": revision,
         "files": entries,
@@ -148,8 +156,10 @@ def build_package(root: Path, revision: str, output: Path, verify_npm: bool = Tr
                     source = root / relative
                     info = zipfile.ZipInfo(relative.as_posix(), date_time=(1980, 1, 1, 0, 0, 0))
                     info.compress_type = zipfile.ZIP_DEFLATED
-                    info.external_attr = (stat.S_IMODE(source.stat().st_mode) & 0xFFFF) << 16
-                    archive.writestr(info, (root / relative).read_bytes())
+                    mode = 0o644 if entry["path"] == "dist/release.json" else stat.S_IMODE(source.stat().st_mode)
+                    info.external_attr = (mode & 0xFFFF) << 16
+                    content = release_metadata if entry["path"] == "dist/release.json" else source.read_bytes()
+                    archive.writestr(info, content)
                 info = zipfile.ZipInfo("release-manifest.json", date_time=(1980, 1, 1, 0, 0, 0))
                 info.compress_type = zipfile.ZIP_DEFLATED
                 archive.writestr(info, json.dumps(manifest, sort_keys=True, separators=(",", ":")) + "\n")

@@ -11,7 +11,7 @@ class AzureTemplateTests(unittest.TestCase):
     def setUpClass(cls):
         root = Path(__file__).resolve().parents[1]
         cls.templates = {}
-        for name in ("azure", "edge"):
+        for name in ("azure", "edge", "installation", "installation-private-storage", "temporary-uploader"):
             result = subprocess.run(
                 [shutil.which("az"), "bicep", "build", "--file",
                  str(root / "infra" / f"{name}.bicep"), "--stdout"],
@@ -51,6 +51,38 @@ class AzureTemplateTests(unittest.TestCase):
         model = self.resource("azure", "Microsoft.CognitiveServices/accounts/deployments")["properties"]
         self.assertIn("bricklab-public-safe", model["raiPolicyName"])
         self.assertEqual(settings["BRICKLAB_AZURE_AI"], "0")
+
+    def test_isolated_installation_has_no_model_or_domain_and_restricted_networks(self):
+        resources = self.templates["installation"]["resources"]
+        self.assertFalse(any(item["type"].startswith(("Microsoft.CognitiveServices/", "Microsoft.Cdn/"))
+                             for item in resources))
+        web = self.resource("installation", "Microsoft.Web/sites")["properties"]
+        site = web["siteConfig"]
+        self.assertEqual(site["ipSecurityRestrictionsDefaultAction"], "Deny")
+        self.assertEqual(site["ipSecurityRestrictions"][0]["ipAddress"],
+                         "[parameters('operatorIpv4Cidr')]")
+        self.assertFalse(site["scmIpSecurityRestrictionsUseMain"])
+        self.assertEqual(site["scmIpSecurityRestrictionsDefaultAction"], "Deny")
+        settings = {item["name"]: item["value"] for item in site["appSettings"]}
+        self.assertEqual(settings["BRICKLAB_AZURE_AI"], "0")
+        storage = self.resource("installation", "Microsoft.Storage/storageAccounts")["properties"]
+        self.assertFalse(storage["allowSharedKeyAccess"])
+        self.assertFalse(storage["allowBlobPublicAccess"])
+        self.assertEqual(storage["networkAcls"]["defaultAction"], "Deny")
+        self.assertEqual(storage["networkAcls"]["bypass"], "None")
+        self.assertIn("parameters('privateStorage')", storage["networkAcls"]["ipRules"])
+        self.assertEqual(len(storage["networkAcls"]["virtualNetworkRules"]), 1)
+
+    def test_private_stage_has_only_isolated_networking_and_uploader_denies_inbound(self):
+        private = self.templates["installation-private-storage"]["resources"]
+        self.assertTrue(any(item["type"] == "Microsoft.Network/privateEndpoints" for item in private))
+        self.assertFalse(any("peerings" in item["type"].lower() for item in private))
+        nsg = self.resource("temporary-uploader", "Microsoft.Network/networkSecurityGroups")["properties"]
+        rule = nsg["securityRules"][0]["properties"]
+        self.assertEqual((rule["access"], rule["direction"], rule["sourceAddressPrefix"]), ("Deny", "Inbound", "*"))
+        vm = self.resource("temporary-uploader", "Microsoft.Compute/virtualMachines")["properties"]
+        self.assertTrue(vm["osProfile"]["linuxConfiguration"]["disablePasswordAuthentication"])
+        self.assertEqual(vm["storageProfile"]["osDisk"]["deleteOption"], "Detach")
 
 
 if __name__ == "__main__":

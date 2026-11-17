@@ -210,7 +210,7 @@ test('a real isolated production child transfers its password over IPC, never st
   await new Promise(resolve => reservation.close(resolve));
   // Node is a deliberately invalid gh fixture: port inspection fails closed, without network or model calls.
   Object.assign(config.env, { ...process.env, ...config.env, BRICKLAB_GH_BIN: process.execPath,
-    BRICKLAB_HOSTED: '0', BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0' });
+    BRICKLAB_HOSTED: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0' });
   let child;
   let output = '';
   const running = serve(config, { run: async () => {}, launch: (file, args, options) => {

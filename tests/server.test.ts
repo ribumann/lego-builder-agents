@@ -51,7 +51,7 @@ async function startServer(t: TestContext, env: NodeJS.ProcessEnv = {}, nodeArgs
       BRICKLAB_COPILOT_IMAGES: '0', BRICKLAB_COPILOT_MODEL: undefined,
       // Historical lifecycle cases explicitly exercise a one-slot configuration.
       BRICKLAB_PLANNING_CONCURRENCY: '1', BRICKLAB_PROVIDER_CONCURRENCY: '1',
-      BRICKLAB_LOCAL_AI: '0', BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
+      BRICKLAB_AZURE_AI: '0', BRICKLAB_COMPATIBLE_AI: '0', BRICKLAB_HOSTED: '0', ...env },
     stdio: ['ignore', 'pipe', 'pipe', 'ipc'],
   });
   t.after(async () => {
@@ -1770,8 +1770,7 @@ test('production serves WebAssembly runtime assets with module-safe MIME types',
 
 test('hosted mode is anonymous static/offline only with exact host/origin bounds and no trusted forwarded headers', { timeout: 10_000 }, async t => {
   const { get, post, azurePost, base, headers, command } = await startLifecycleServer(t, 'linux', {
-    BRICKLAB_HOSTED: '1', BRICKLAB_COPILOT: '1', BRICKLAB_LOCAL_AI: '1',
-    BRICKLAB_LOCAL_MODEL: 'fixture:latest', TEST_STATIC_FIXTURE: '1',
+    BRICKLAB_HOSTED: '1', BRICKLAB_COPILOT: '1', TEST_STATIC_FIXTURE: '1',
   });
   const navigation = await get('/');
   assert.equal(navigation.status, 200, 'Anonymous GET without Origin or a principal is supported');
@@ -1781,7 +1780,7 @@ test('hosted mode is anonymous static/offline only with exact host/origin bounds
   assert.equal(status.hosted, true);
   assert.equal(status.copilot, false);
   assert.equal(status.planner.state, 'off');
-  assert.equal(status.localPlanner.enabled, false);
+  assert.equal(Object.hasOwn(status, 'localPlanner'), false);
   assert.equal(status.azurePlanner.enabled, false);
   assert.equal(status.azurePlanner.state, 'off');
   assert.match(status.azurePlanner.message, /off.*static\/offline/);
@@ -1795,8 +1794,8 @@ test('hosted mode is anonymous static/offline only with exact host/origin bounds
   assert.equal((await post(ndjson)).status, 403);
   assert.equal((await azurePost(ndjson)).status, 403);
   assert.equal((await fetchWithHost(base + '/api/local-plan', { method: 'POST', headers,
-    body: JSON.stringify({ world: 'space', brief: 'test' }) })).status, 403);
-  for (const path of ['/api/azure-plan', '/api/unknown']) {
+    body: JSON.stringify({ world: 'space', brief: 'test' }) })).status, 404);
+  for (const path of ['/api/azure-plan', '/api/voice-transcribe', '/api/unknown']) {
     assert.equal((await fetchWithHost(base + path, { method: 'POST', headers: { ...headers, Origin: '' }, body: '{}' })).status, 403);
   }
   const state = await command({ action: 'inspect' });
@@ -2301,9 +2300,13 @@ test('Compatible AI uses the protected lifecycle and never exposes server creden
   assert.doesNotMatch(statusText, /fixture-secret|chat\/completions/);
   const status = JSON.parse(statusText);
   assert.equal(status.compatiblePlanner.enabled, true);
+  assert.equal(status.compatiblePlanner.destination, `http://127.0.0.1:${address.port}`);
+  assert.equal(status.compatiblePlanner.vision, false);
+  assert.equal((await fetch(`${base}/api/local-plan`, { method: 'POST',
+    headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey } })).status, 404);
   assert.equal(calls.length, 0);
   const post = (origin = base, key = status.sessionKey,
-    payload = JSON.stringify({ world: 'space', brief: 'A blue sculpture' })) => fetch(`${base}/api/compatible-plan`, {
+    payload = JSON.stringify({ world: 'space', brief: 'A blue sculpture', sceneSize: 2000 })) => fetch(`${base}/api/compatible-plan`, {
     method: 'POST', headers: { Origin: origin, 'X-Bricklab-Key': key },
     body: payload,
   });
@@ -2317,6 +2320,7 @@ test('Compatible AI uses the protected lifecycle and never exposes server creden
   assert.deepEqual(await response.json(), { spec: lifecycleSpec, source: 'compatible' });
   assert.equal(calls.length, 1);
   assert.match(calls[0], /A blue sculpture/);
+  assert.match(calls[0], /roughly 2000 expanded bricks/);
   reply = { ...lifecycleSpec, model: 'explorer' };
   assert.equal((await post()).status, 502);
   assert.equal(calls.length, 3, 'One invalid-design correction, no transport replay');
@@ -2399,82 +2403,6 @@ test('Compatible AI disconnect aborts upstream and eventually releases the share
   }
 });
 
-test('local and compatible mock adapters run independent image/text plans concurrently with cancellation isolation', { timeout: 20_000 }, async t => {
-  for (const providerName of ['local', 'compatible']) await t.test(providerName, async t => {
-    const pending: { body: any; response: import('node:http').ServerResponse }[] = [];
-    let started!: () => void;
-    const overlapped = new Promise<void>(resolve => { started = resolve; });
-    let disconnected!: () => void;
-    const closed = new Promise<void>(resolve => { disconnected = resolve; });
-    const provider = createHttpServer(async (req, res) => {
-      let raw = '';
-      for await (const chunk of req) raw += chunk;
-      res.setHeader('Content-Type', 'application/json');
-      if (req.url === '/api/tags') {
-        res.end(JSON.stringify({ models: [{ name: 'fixture:latest', model: 'fixture:latest' }] }));
-      } else if (req.url === '/api/show') {
-        res.end(JSON.stringify({ capabilities: ['vision'] }));
-      } else {
-        pending.push({ body: JSON.parse(raw), response: res });
-        if (pending.length === 1) res.once('close', disconnected);
-        if (pending.length === 2) started();
-      }
-    });
-    provider.listen(0, '127.0.0.1');
-    await once(provider, 'listening');
-    t.after(() => {
-      provider.closeAllConnections();
-      return new Promise<void>(resolve => provider.close(() => resolve()));
-    });
-    const address = provider.address();
-    assert.ok(address && typeof address === 'object');
-    const endpoint = `http://127.0.0.1:${address.port}`;
-    const server = await startLifecycleServer(t, 'linux', { ...defaultCapacity,
-      BRICKLAB_LOCAL_AI: '1', BRICKLAB_LOCAL_MODEL: 'fixture:latest', BRICKLAB_LOCAL_URL: endpoint,
-      BRICKLAB_COMPATIBLE_AI: '1', BRICKLAB_COMPATIBLE_MODEL: 'fixture', BRICKLAB_COMPATIBLE_VISION: '1',
-      BRICKLAB_COMPATIBLE_ENDPOINT: `${endpoint}/v1/chat/completions`,
-    });
-    const route = `${server.base}/api/${providerName}-plan`;
-    const controller = new AbortController();
-    const first = fetch(route, { method: 'POST', headers: server.headers, signal: controller.signal,
-      body: JSON.stringify({ world: 'space', brief: 'First private plan' }) }).catch(() => undefined);
-    // Wait for the first generation, so fixture ordering cannot depend on image preflight timing.
-    while (pending.length < 1) await new Promise(resolve => setTimeout(resolve, 5));
-    const second = fetch(route, { method: 'POST', headers: server.headers,
-      body: JSON.stringify({ world: 'space', brief: 'Second image plan', image: consentedTestImage, imageConsent: true }) });
-    await overlapped;
-    assert.equal((await fetch(route, { method: 'POST', headers: server.headers, body: '{}' })).status, 429);
-    const copilot = server.post();
-    await server.command({ action: 'started', count: 1 });
-    if (providerName === 'local') {
-      assert.match(pending[0].body.prompt, /First private plan/);
-      assert.equal(pending[0].body.images, undefined);
-      assert.match(pending[1].body.prompt, /Second image plan/);
-      assert.deepEqual(pending[1].body.images, [consentedTestImage.data]);
-    } else {
-      assert.match(pending[0].body.messages[0].content, /First private plan/);
-      const content = pending[1].body.messages[0].content;
-      assert.match(content[0].text, /Second image plan/);
-      assert.equal(content[1].image_url.url, `data:image/png;base64,${consentedTestImage.data}`);
-    }
-    controller.abort();
-    await first;
-    await closed;
-    assert.equal(pending[1].response.destroyed, false);
-    const spec = { ...lifecycleSpec, design: { ...lifecycleSpec.design, name: `${providerName} independent result` } };
-    pending[1].response.end(JSON.stringify(providerName === 'local' ? { done: true, response: JSON.stringify(spec) }
-      : { choices: [{ finish_reason: 'stop', message: { role: 'assistant', content: JSON.stringify(spec) } }] }));
-    const result = await second;
-    assert.equal(result.status, 200);
-    const body = await result.json() as any;
-    assert.deepEqual(body.spec, spec);
-    assert.equal(body.source, providerName === 'local' ? 'local-ai' : 'compatible');
-    await server.command({ action: 'complete', spec: lifecycleSpec });
-    assert.equal((await copilot).status, 200);
-    assert.equal((await (await server.get()).json() as any).planningCapacity.active, 0);
-  });
-});
-
 test('Hosted mode rejects compatible AI even when configured', () => {
   const child = spawnSync(process.execPath, ['server.mjs', '--production'], { encoding: 'utf8', timeout: 15_000,
     env: { ...process.env, HOST: '127.0.0.1', PORT: '4173', BRICKLAB_HOSTED: '1',
@@ -2482,6 +2410,77 @@ test('Hosted mode rejects compatible AI even when configured', () => {
   assert.ifError(child.error);
   assert.notEqual(child.status, 0);
   assert.match(child.stderr, /cannot be enabled in public hosted mode/);
+});
+
+test('Compatible AI refuses a non-loopback server bind', () => {
+  const child = spawnSync(process.execPath, ['server.mjs', '--production'], { encoding: 'utf8', timeout: 15_000,
+    env: { ...process.env, HOST: '0.0.0.0', BRICKLAB_HOSTED: '0', BRICKLAB_CODESPACES: '0',
+      BRICKLAB_COMPATIBLE_AI: '1' } });
+  assert.ifError(child.error);
+  assert.notEqual(child.status, 0);
+  assert.match(child.stderr, /requires a loopback-bound private server/);
+});
+
+test('private Codespace proxy accepts operator-configured Compatible AI', async t => {
+  const bin = await mkdtemp(join(tmpdir(), 'bricklab-private-compatible-'));
+  t.after(() => rm(bin, { recursive: true, force: true }));
+  const visibilityFile = join(bin, 'ports.json');
+  const fakeGh = join(bin, 'fake-gh.cjs');
+  await writeFile(visibilityFile, '[]');
+  await writeFile(fakeGh, `const fs = require('node:fs');
+if (require('node:path').basename(process.argv[1] || '') === 'codespace') {
+  process.stdout.write(fs.readFileSync(process.env.TEST_PORTS_FILE, 'utf8'));
+  process.exit(0);
+}
+`);
+  const calls: string[] = [];
+  const provider = createHttpServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    assert.equal(req.headers.authorization, 'Bearer windows-codespace-secret');
+    calls.push(raw);
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop',
+      message: { role: 'assistant', content: JSON.stringify(lifecycleSpec) } }] }));
+  });
+  provider.listen(0, '127.0.0.1');
+  await once(provider, 'listening');
+  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
+  const providerAddress = provider.address();
+  assert.ok(providerAddress && typeof providerAddress === 'object');
+  const { port, base, output } = await startServer(t, {
+    BRICKLAB_CODESPACES: '1', CODESPACES: 'true', CODESPACE_NAME: 'test-codespace',
+    BRICKLAB_COPILOT: '0', BRICKLAB_GH_BIN: process.execPath,
+    NODE_OPTIONS: `--require="${fakeGh.replaceAll('\\', '\\\\')}"`, TEST_PORTS_FILE: visibilityFile,
+    BRICKLAB_COMPATIBLE_AI: '1',
+    BRICKLAB_COMPATIBLE_ENDPOINT: `http://127.0.0.1:${providerAddress.port}/v1/chat/completions`,
+    BRICKLAB_COMPATIBLE_MODEL: 'windows-codespace-fixture',
+    BRICKLAB_COMPATIBLE_API_KEY: 'windows-codespace-secret',
+  });
+  const origin = `https://test-codespace-${port}.app.github.dev`;
+  await writeFile(visibilityFile, JSON.stringify([{ sourcePort: port, visibility: 'private', browseUrl: origin }]));
+  const password = /Temporary app password: ([a-f0-9]+)/.exec(output)?.[1];
+  assert.ok(password);
+  const basic = `Basic ${Buffer.from(`bricklab:${password}`).toString('base64')}`;
+  const proxyHeaders = { Host: `127.0.0.1:${port}`, 'X-Forwarded-Host': new URL(origin).host,
+    'X-Forwarded-Proto': 'https', Authorization: basic };
+  const statusResponse = await fetchWithHost(`${base}/api/status`, { headers: proxyHeaders });
+  const statusText = await statusResponse.text();
+  assert.equal(statusResponse.status, 200, statusText);
+  assert.doesNotMatch(statusText, /windows-codespace-secret|chat\/completions/);
+  const status = JSON.parse(statusText) as { sessionKey: string;
+    compatiblePlanner: { enabled: boolean; destination: string } };
+  assert.equal(status.compatiblePlanner.enabled, true);
+  assert.equal(status.compatiblePlanner.destination, `http://127.0.0.1:${providerAddress.port}`);
+  const planned = await fetchWithHost(`${base}/api/compatible-plan`, {
+    method: 'POST', headers: { ...proxyHeaders, Origin: origin, 'X-Bricklab-Key': status.sessionKey },
+    body: JSON.stringify({ world: 'space', brief: 'A private Codespaces BYO check', sceneSize: 500 }),
+  });
+  const plannedText = await planned.text();
+  assert.equal(planned.status, 200, plannedText);
+  assert.deepEqual(JSON.parse(plannedText), { spec: lifecycleSpec, source: 'compatible' });
+  assert.equal(calls.length, 1);
+  assert.match(calls[0], /A private Codespaces BYO check/);
 });
 
 test('Hosted planning rejects image and malformed image-only requests before any planner starts', { timeout: 10_000 }, async t => {
@@ -2495,115 +2494,6 @@ test('Hosted planning rejects image and malformed image-only requests before any
   assert.equal(sensitive.status, 400);
   assert.doesNotMatch(await sensitive.text(), /private-synthetic-marker/);
   assert.equal((await command({ action: 'inspect' })).count, 0);
-});
-
-test('Local AI is explicit, uses the same API protections and requires custom local geometry', async t => {
-  const generated: { prompt: string }[] = [];
-  const replies: unknown[] = [];
-  let metadataRequests = 0;
-  let remote = false;
-  let reply: unknown = { world: 'jurassic', model: 'custom', color: 'blue', longTail: false, wideWings: false, budget: 10,
-    design: { name: 'Local sculpture', bricks: [
-      { x: 0, y: 0, z: 0, width: 3, height: 2, depth: 1, color: 'purple', part: 'frame' },
-    ] } };
-  const provider = createHttpServer(async (req, res) => {
-    res.setHeader('Content-Type', 'application/json');
-    if (req.url === '/api/tags') {
-      metadataRequests++;
-      res.end(JSON.stringify({ models: [{ name: 'fixture:latest', model: 'fixture:latest',
-        ...(remote ? { remote_model: 'remote', remote_host: 'https://ollama.com' } : {}) }] }));
-      return;
-    }
-    assert.equal(req.url, '/api/generate');
-    let raw = '';
-    for await (const chunk of req) raw += chunk;
-    generated.push(JSON.parse(raw));
-    res.end(JSON.stringify({ done: true, response: JSON.stringify(replies.length ? replies.shift() : reply) }));
-  });
-  provider.listen(0, '127.0.0.1');
-  await once(provider, 'listening');
-  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
-  const address = provider.address();
-  assert.ok(address && typeof address === 'object');
-  const { base } = await startServer(t, { BRICKLAB_COPILOT: '0', BRICKLAB_LOCAL_AI: '1',
-    BRICKLAB_LOCAL_MODEL: 'fixture:latest', BRICKLAB_LOCAL_URL: `http://127.0.0.1:${address.port}` });
-  const status = await (await fetch(`${base}/api/status`)).json() as {
-    sessionKey: string; localPlanner: { enabled: boolean }; copilot: boolean;
-  };
-  assert.equal(status.copilot, false);
-  assert.equal(status.localPlanner.enabled, true);
-  assert.equal(metadataRequests, 0, 'Page/status requests never probe the local provider');
-  const brief = 'An original freestanding abstract sculpture, not a dinosaur or spaceship.';
-  const post = (extra: Record<string, string> = {}) => fetch(`${base}/api/local-plan`, {
-    method: 'POST', headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey, ...extra },
-    body: JSON.stringify({ world: 'jurassic', brief }),
-  });
-  assert.equal((await post({ Origin: 'https://attacker.example' })).status, 403);
-  assert.equal((await post({ 'X-Bricklab-Key': '' })).status, 403);
-  assert.equal(metadataRequests, 0);
-  const planned = await post();
-  assert.equal(planned.status, 200);
-  assert.deepEqual(await planned.json(), { spec: reply, calls: 0, limit: null, source: 'local-ai' });
-  assert.equal(generated.length, 1);
-  assert.ok(generated[0].prompt.endsWith(`User brief: ${JSON.stringify(brief)}`));
-  reply = { world: 'jurassic', model: 'stegosaurus', color: 'blue', longTail: false, wideWings: false, budget: 700 };
-  const template = await post();
-  assert.equal(template.status, 502);
-  assert.match((await template.json() as { error: string }).error, /original custom design is required/i);
-  assert.equal(generated.length, 3, 'One design correction, no alternate-provider/template fallback');
-  replies.push({ ...lifecycleSpec, world: 'jurassic', design: { ...lifecycleSpec.design,
-    bricks: [lifecycleSpec.design.bricks[0], lifecycleSpec.design.bricks[0]] } }, { ...lifecycleSpec, world: 'jurassic' });
-  const corrected = await (await post()).json() as any;
-  assert.deepEqual(corrected.spec, { ...lifecycleSpec, world: 'jurassic' });
-  assert.deepEqual(corrected.designCorrection, { providerAttempts: 2, attempted: true, outcome: 'succeeded' });
-  assert.equal(generated.length, 5);
-  assert.match(generated[4].prompt, /intersects object 1, brick 1, repeat 1/);
-  remote = true;
-  const cloudModel = await post();
-  assert.equal(cloudModel.status, 502);
-  assert.equal(generated.length, 5, 'Remote metadata is rejected before sending a brief');
-});
-
-test('Local vision metadata gate sends an image only after per-request consent and verified capabilities', async t => {
-  const requests: { path: string; body: any }[] = [];
-  let capabilities = ['completion'];
-  const provider = createHttpServer(async (req, res) => {
-    let raw = '';
-    for await (const chunk of req) raw += chunk;
-    requests.push({ path: req.url || '', body: raw ? JSON.parse(raw) : null });
-    res.setHeader('Content-Type', 'application/json');
-    res.end(JSON.stringify(req.url === '/api/tags' ? { models: [{ name: 'fixture:latest' }] }
-      : req.url === '/api/show' ? { capabilities }
-        : { done: true, response: JSON.stringify(lifecycleSpec) }));
-  });
-  provider.listen(0, '127.0.0.1');
-  await once(provider, 'listening');
-  t.after(() => new Promise<void>(resolve => provider.close(() => resolve())));
-  const address = provider.address();
-  assert.ok(address && typeof address === 'object');
-  const { base } = await startServer(t, { BRICKLAB_COPILOT: '0', BRICKLAB_LOCAL_AI: '1',
-    BRICKLAB_LOCAL_MODEL: 'fixture:latest', BRICKLAB_LOCAL_URL: `http://127.0.0.1:${address.port}` });
-  const status = await (await fetch(`${base}/api/status`)).json() as { sessionKey: string };
-  const post = (body: string) => fetch(`${base}/api/local-plan`, { method: 'POST',
-    headers: { Origin: base, 'X-Bricklab-Key': status.sessionKey }, body });
-  assert.equal((await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
-    image: consentedTestImage }))).status, 400);
-  assert.equal((await post(JSON.stringify({ image: consentedTestImage, imageConsent: true }))).status, 400);
-  assert.equal(requests.length, 0, 'Invalid consent and image-only requests never probe Ollama');
-  const denied = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
-    image: consentedTestImage, imageConsent: true }));
-  assert.equal(denied.status, 502);
-  assert.deepEqual(requests.map(request => request.path), ['/api/tags', '/api/show']);
-  assert.doesNotMatch(JSON.stringify(requests), /A tiny observatory|iVBOR/);
-  capabilities = ['completion', 'vision'];
-  const response = await post(JSON.stringify({ world: 'space', brief: 'A tiny observatory',
-    image: consentedTestImage, imageConsent: true }));
-  assert.equal(response.status, 200);
-  assert.deepEqual(await response.json(), { spec: lifecycleSpec, calls: 0, limit: null, source: 'local-ai' });
-  assert.deepEqual(requests.map(request => request.path),
-    ['/api/tags', '/api/show', '/api/tags', '/api/show', '/api/generate']);
-  assert.deepEqual(requests.at(-1)?.body.images, [consentedTestImage.data]);
-  assert.ok(requests.at(-1)?.body.prompt.endsWith('User brief: "A tiny observatory"'));
 });
 
 test('Codespace proxy-shaped requests retain authentication, origin and port checks', { timeout: 25_000 }, async t => {
@@ -2775,6 +2665,21 @@ test('Codespace port checks use the configured absolute CLI rather than PATH', {
 test('private Codespace mode authenticates independently and fails closed on visibility or origin changes', posixExecutableFixtures, async t => {
   const bin = await mkdtemp(join(tmpdir(), 'bricklab-private-test-'));
   t.after(() => rm(bin, { recursive: true, force: true }));
+  const compatibleCalls: string[] = [];
+  const compatibleProvider = createHttpServer(async (req, res) => {
+    let raw = '';
+    for await (const chunk of req) raw += chunk;
+    assert.equal(req.headers.authorization, 'Bearer codespace-fixture-secret');
+    compatibleCalls.push(raw);
+    res.setHeader('Content-Type', 'application/json');
+    res.end(JSON.stringify({ choices: [{ finish_reason: 'stop',
+      message: { role: 'assistant', content: JSON.stringify(lifecycleSpec) } }] }));
+  });
+  compatibleProvider.listen(0, '127.0.0.1');
+  await once(compatibleProvider, 'listening');
+  t.after(() => new Promise<void>(resolve => compatibleProvider.close(() => resolve())));
+  const compatibleAddress = compatibleProvider.address();
+  assert.ok(compatibleAddress && typeof compatibleAddress === 'object');
   const visibilityFile = join(bin, 'ports.json');
   const callsFile = join(bin, 'model-calls.json');
   const specFile = join(bin, 'model-spec.json');
@@ -2818,6 +2723,10 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
     PATH: `${bin}${delimiter}${process.env.PATH}`, TEST_PORTS_FILE: visibilityFile,
     TEST_CALLS_FILE: callsFile, TEST_SPEC_FILE: specFile,
     TEST_INVOCATIONS_FILE: invocationsFile, TEST_PID_FILE: pidFile,
+    BRICKLAB_COMPATIBLE_AI: '1',
+    BRICKLAB_COMPATIBLE_ENDPOINT: `http://127.0.0.1:${compatibleAddress.port}/v1/chat/completions`,
+    BRICKLAB_COMPATIBLE_MODEL: 'codespace-fixture',
+    BRICKLAB_COMPATIBLE_API_KEY: 'codespace-fixture-secret',
   });
   const origin = `https://test-codespace-${port}.app.github.dev`;
   const password = /Temporary app password: ([a-f0-9]+)/.exec(output)?.[1];
@@ -2840,8 +2749,13 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   assert.equal(response.status, 200);
   assert.equal(response.headers.get('cache-control'), 'no-store');
   assert.equal(response.headers.get('access-control-allow-origin'), null);
-  const status = await response.json() as { sessionKey: string; calls: number; copilot: boolean };
+  const statusText = await response.text();
+  assert.doesNotMatch(statusText, /codespace-fixture-secret|chat\/completions/);
+  const status = JSON.parse(statusText) as { sessionKey: string; calls: number; copilot: boolean;
+    compatiblePlanner: { enabled: boolean; destination: string } };
   assert.equal(status.copilot, true);
+  assert.equal(status.compatiblePlanner.enabled, true);
+  assert.equal(status.compatiblePlanner.destination, `http://127.0.0.1:${compatibleAddress.port}`);
   const post = (extra: Record<string, string> = {}, brief = 'A blue ship with wide wings') => fetchWithHost(`${base}/api/plan`, {
     method: 'POST', headers: { ...headers, Origin: origin, 'X-Bricklab-Key': status.sessionKey, ...extra },
     body: JSON.stringify({ world: 'space', brief }),
@@ -2855,6 +2769,14 @@ setTimeout(() => process.stdout.write(bytes.subarray(split)), 5);
   const planned = await post({}, arbitraryBrief);
   assert.equal(planned.status, 200);
   assert.deepEqual(await planned.json(), { spec, calls: 1, limit: null, source: 'copilot' });
+  const compatiblePlanned = await fetchWithHost(`${base}/api/compatible-plan`, {
+    method: 'POST', headers: { ...headers, Origin: origin, 'X-Bricklab-Key': status.sessionKey },
+    body: JSON.stringify({ world: 'space', brief: 'A private Codespaces-compatible provider check', sceneSize: 500 }),
+  });
+  assert.equal(compatiblePlanned.status, 200);
+  assert.deepEqual(await compatiblePlanned.json(), { spec: lifecycleSpec, source: 'compatible' });
+  assert.equal(compatibleCalls.length, 1);
+  assert.match(compatibleCalls[0], /A private Codespaces-compatible provider check/);
   const args = JSON.parse(await readFile(callsFile, 'utf8')) as string[];
   assert.ok(args.includes('--available-tools='));
   assert.ok(args.includes('--disable-builtin-mcps'));

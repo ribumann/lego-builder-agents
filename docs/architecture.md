@@ -1,242 +1,187 @@
-# BrickLab architecture and MVP boundaries
+# BrickLab for architects
 
-This describes merged release `c0060c7af8bd5a1c748a76b10e7710e35cf051e6`
-and the available deployment evidence. It is not a claim that every deployment
-path or user journey has passed end-to-end acceptance.
-The [README](../README.md) is the practical setup and capability guide;
-[software design](software-design.md) describes the core behavior.
+**One browser workshop, one Node server, optional external planning.**
+The model proposes bounded geometry; deterministic application logic schedules,
+builds and inspects it. Start with [setup](lab-organizer.md#choose-a-setup) or
+continue to [developer-level design](software-design.md).
+Use this guide to choose a deployment boundary and explain what the system can
+and cannot guarantee.
 
-## System shape
+Here, **L0** means system context, **L1** runtime containers, and **L2**
+components. These are navigation levels, not a claim of a separate service per
+agent.
+
+## L0: system context
 
 ```mermaid
 flowchart LR
-  subgraph Device["User device and browser"]
-    UI["Workshop UI"]
-    Engine["Deterministic team engine"]
-    Scene["Three.js scene"]
-    Save["Browser localStorage / JSON download"]
-    Voice["Opt-in local voice transcription"]
-    UI --> Engine --> Scene
-    Engine --> Save
-    Voice --> UI
-  end
-
-  subgraph Host["BrickLab Node server"]
-    Static["Static app and status"]
-    API["Validated planning API"]
-    Slots["Capacity lease held through provider/process cleanup"]
-    Quota["Public Azure submission admission"]
-    API --> Slots
-    Slots --> Quota
-  end
-
-  CLI["GitHub Copilot CLI"]
-  Local["Backlog: local model service"]
-  Compat["Backlog: compatible API"]
-  Azure["Azure OpenAI + managed identity"]
-  Counter["Private Blob: UTC call count"]
-
-  UI -->|"Explicit request; exact host/origin and per-process request token; cancel/disconnect/deadline aborts"| API
-  API -->|"Server user's authenticated CLI"| CLI
-  API -->|"Private/local opt-in"| Local
-  API -->|"Private/local opt-in"| Compat
-  Quota -->|"Blob ETag conditional update"| Counter
-  Quota -->|"Admitted submission"| Azure
-  Slots -->|"Validated custom spec"| UI
-  Static --> UI
+  Organizer["Lab organizer"] -->|Prepare and facilitate| Lab["BrickLab"]
+  Learner["Learner"] -->|Brief, build, investigate| Lab
+  Lab -->|Explicit optional submission| Provider["Configured model provider"]
+  Provider -->|Untrusted geometry| Lab
+  Lab <-->|Local saves and JSON files| Device["Learner device"]
+  Operator["Host operator"] -->|Identity, access, cost controls| Lab
 ```
 
-The browser owns the interactive simulation, rendering, replay, and local saves.
-The Node server serves the application and, only when configured, brokers an
-explicit planning request to a provider. The provider proposes a custom geometry
-specification; BrickLab validates it before constructing a deterministic local
-plan. The five visible roles are application logic, not five model calls.
+The core lesson works without inference. Copilot, Azure and an operator-configured
+OpenAI-compatible service are optional planning paths, not autonomous
+multi-model teams. The separate GitHub Models Actions workflow makes three
+model decisions and produces an importable artifact; it is not a workshop
+runtime provider.
 
-## Deployment and release evidence
+## L1: runtime containers
 
-| Target | MVP boundary | Current evidence and limitation |
+```mermaid
+flowchart TB
+  subgraph Device["Learner browser"]
+    UI["Workshop UI"]
+    Engine["Deterministic team"]
+    Render["Three.js scene"]
+    Store["localStorage and JSON export"]
+    UI --> Engine --> Render
+    Engine --> Store
+  end
+  subgraph Host["Private or hosted Node server"]
+    Static["App and status"]
+    API["Planning admission and validation"]
+    Adapter["Selected provider adapter"]
+    API --> Adapter
+  end
+  Static --> UI
+  UI -->|Explicit plan request and required consent| API
+  Adapter <-->|Bounded request and geometry| External["Copilot CLI, compatible endpoint, or Azure OpenAI"]
+  API <-->|Public Azure daily count only| Blob["Private Blob state"]
+  API -->|Validated custom spec| UI
+```
+
+The browser owns execution, rendering, replay and saves. The server owns provider
+configuration, request admission and process/transport cleanup. The browser
+validates returned geometry again; external output and imported files are not
+trusted. The server is not a shared scene database.
+
+## L2: components and decisions
+
+| Responsibility | Component | Why this boundary |
 | --- | --- | --- |
-| Local server | Run the application on loopback; offline templates work without a provider. Copilot planning is an explicit, separately configured action. | Earlier Windows ARM64 candidates completed bounded text and consented synthetic-image requests. Copilot authentication, inference and manual acceptance on merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` remain unverified. |
-| Private Codespaces | Keep the forwarded port private; configure the production server, Copilot CLI login, and BrickLab's separate temporary app password as described in the README. | Setup guidance and automated fixtures exist, but real Codespaces setup and manual UAT have not been reported. Do not make the port public to troubleshoot. |
-| Azure-hosted app | Anonymous hosted planning uses backend managed identity and the shared submission limit. | Azure owner confirms merged revision `c0060c7af8bd5a1c748a76b10e7710e35cf051e6` live with GPT-6.1 Terra selected, exact package/settings verified, and public HTTPS 200 with the expected asset on 2026-11-16. Two guarded baseline UI plans completed against the release; this does not establish broad reliability, correction/vision behavior or user acceptance. |
+| Explicit workflow and consent | [`src/main.ts`](../src/main.ts) | Choosing a mode is separate from sending a request |
+| Shared geometry contract | [`src/custom-design.mjs`](../src/custom-design.mjs) | Server and browser enforce bounds, overlap and expanded counts |
+| Tasks, handoffs, inspection, restore | [`src/engine.ts`](../src/engine.ts) | Same deterministic execution for templates and accepted AI plans |
+| Scene growth | [`src/scene-append.ts`](../src/scene-append.ts) | Translate only the addition; commit nothing if combined validation fails |
+| Rendering | [`src/scene.ts`](../src/scene.ts) | Display changes do not redefine canonical geometry |
+| API and admission | [`server.mjs`](../server.mjs), [`planning-capacity.mjs`](../planning-capacity.mjs) | Hold capacity through cleanup, not just until the HTTP response ends |
+| Provider-specific behavior | [`azure-planner.mjs`](../azure-planner.mjs), [`openai-compatible-planner.mjs`](../openai-compatible-planner.mjs), Copilot bridge in server | Credentials and process work stay off the browser |
+| Durable public usage | [`azure-usage.mjs`](../azure-usage.mjs) | Blob conditional writes share a UTC-day submission count across instances |
+| Separate learning sandbox | [`src/agent-playground-engine.ts`](../src/agent-playground-engine.ts) | Six deterministic roles and opt-in memory, independent of workshop saves |
 
-Earlier read-only Azure inventory recorded Front Door Standard
-with WAF Prevention and a 240-second profile origin-response timeout; Linux
-App Service B1 in Italy North; private Blob storage and an approved private
-endpoint in Sweden Central; and Azure OpenAI deployments for `gpt-4.1-mini`
-and GPT-5.4 in Sweden Central, both attached to `Microsoft.DefaultV2`. Azure
-owner then reported app settings `BRICKLAB_HOSTED=1` and
-`BRICKLAB_AZURE_AI=0`; its package uses the system-assigned identity. A private
-VM runner was deallocated. These observations describe earlier infrastructure
-inventory, not the current planner setting. The owner confirms the live
-application runs merged revision
-`c0060c7af8bd5a1c748a76b10e7710e35cf051e6` with
-`BRICKLAB_HOSTED=1`, `BRICKLAB_AZURE_AI=1`, and the system-assigned identity.
-Its configured planner is
-`AZURE_OPENAI_DEPLOYMENT=bricklab-planner-terra`,
-gpt-6.1-terra version 2026-10-26, GlobalStandard capacity 40, the
-`bricklab-public-safe` policy and automatic upgrades disabled. GPT-5.4 capacity
-200 is retained without automatic fallback; all existing guards and the
-call-count ledger remain preserved. GlobalStandard is not EU-processing
-restricted. The deployment owner verified the exact package/settings, and
-public HTTPS returned 200 with asset `index-B5T0Pdlt.js` on 2026-11-16.
-The deployment record ties this revision to package SHA-256
-`e62792405c2f59b2f4f60521eda270a8c1eca52fc440a98b1695a5036fa716df`.
+Adapters are explicit code paths, not runtime-discovered plugins. Private
+operators can configure an OpenAI-compatible chat-completions service; this is
+a protocol integration, not certification of every provider or model. The
+operator must verify the configured endpoint, model, capabilities, data
+handling and costs. Details and environment settings are in the
+[organizer guide](lab-organizer.md#operator-configured-compatible-ai).
 
-The Azure owner also recorded two sequential guarded text-only baseline plans
-through the deployed UI, both on that package and deployment. Request A ran
-from `2026-11-16T08:25:50.337Z` to `2026-11-16T08:26:12.670Z` (reported elapsed
-22.332s): a visually recognizable spaceship with 99 bricks. Request B ran
-from `2026-11-16T08:27:40.984Z` to `2026-11-16T08:28:08.107Z` (27.123s): a
-hollow observatory with a separate rover, 97 bricks. Each was one browser POST and
-one reported adapter attempt (`correctionAttempted=false`,
-`outcome=not-attempted`, `images=false`) and passed 3/3 local build checks.
-These are observed end-to-end UI durations, not separately measured upstream
-model latency. The first view did not independently establish every requested
-spaceship feature. Together with the earlier 100-brick airplane case, this is
-small example evidence, not broad reliability, a matched compact-versus-
-canonical comparison, correction or vision validation, cancellation or
-timeout/cleanup verification, or final user acceptance.
+## Deployment choices
 
-The owner also verified HTTPS-only/TLS 1.2, HTTP-to-HTTPS redirect, Front Door
-routing with WAF Prevention and its approximate 10-per-minute planner rule,
-exact Front Door-ID-bound origin allow plus default deny, and independent SCM
-deny-all; direct App Service origin returned 403. The managed identity has
-`Cognitive Services OpenAI User` on the dedicated account,
-`Storage Blob Data Reader` on the package container, and
-`Storage Blob Data Contributor` on the usage container; storage is private.
-A same-origin invalid-world request returned 400 without changing quota status
-or calling the provider. These are bounded configuration/path checks, not a
-full security assessment. No live quota/capacity-denial,
-cancellation/disconnect, or 300-second timeout/cleanup test has been reported;
-Front Door's configured 240-second origin timeout does not verify delivery of
-a 300-second request.
+| Choice | Access and identity | Preparation |
+| --- | --- | --- |
+| Local | Loopback by default; optional CLI runs as the server user | [Local guide](lab-organizer.md#local-computer); templates need no provider |
+| Private Codespaces | GitHub private port plus separate temporary app password; CLI login is independent | [Codespaces guide](lab-organizer.md#private-codespaces); automated production startup |
+| Azure self-hosting | Anonymous visitors; backend managed identity; protected origin and private storage | [Azure runbook](self-hosting-azure.md) and [planner contract](azure-planner.md); advanced operator work |
 
-### Simplified hosted-planning contract and evidence boundary
-
-The source implements the following user-approved simplification, covered by
-mock/unit and browser checks. The owner confirms the merged release package and
-settings are live. The two baseline requests above verify current text
-inference through the deployed UI; they do not establish broad reliability,
-correction/vision behavior, every cleanup edge case or user acceptance.
-
-- Hosted visitors are anonymous; the backend uses managed identity for Azure
-  services. Visitor Entra sign-in and visitor client-hash keys are not used.
-- Hosted planning targets 20 total slots and 20 per provider.
-  A 20-slot deployment requires one worker and one Node process; it is not an
-  upstream capacity guarantee. Private mode defaults to 8 total
-  and 2 per provider. Local and Codespaces have no application daily-call
-  quota.
-- Public Azure planning counts valid admitted submissions against a shared
-  limit of 50 per UTC day by default (`BRICKLAB_AZURE_DAILY_CALLS`, integer
-  1-100). The private Blob counter uses ETag conditional writes. It is an
-  application call-count admission record, not a monetary reservation or
-  billing cap. Each submission allows at most two same-provider requests, with
-  one correction only for a completed invalid design. Up to 100 Azure model
-  requests can therefore follow 50 submissions, with no second count,
-  correction-specific refund or reset. Both attempts share one slot and deadline;
-  transport/auth/429/timeout failures are not replayed. The revised design
-  removes the estimated-dollar ledger, price
-  verification, pinned model/version/region/price constraints, and six-minute
-  day-boundary blackout. A submission limit is not a billing cap.
-- Hosted configuration uses `BRICKLAB_HOSTED=1`, explicit
-  `BRICKLAB_AZURE_AI=1`,
-  `BRICKLAB_HOSTED_ORIGIN`, `AZURE_OPENAI_ENDPOINT` and
-  `AZURE_OPENAI_DEPLOYMENT`; public Azure accounting uses
-  `AZURE_STORAGE_ACCOUNT` and either `BRICKLAB_AZURE_USAGE_CONTAINER` or the
-  legacy `BRICKLAB_AZURE_BUDGET_CONTAINER`. Source defaults keep hosted paid
-  planning off unless explicitly enabled; the checked-in Bicep also defaults
-  `BRICKLAB_AZURE_AI=0`. The live preview's selected Terra deployment and
-  package/settings are owner-confirmed, but the Bicep default does not establish
-  a live app setting. Secrets and resource identifiers are not published here.
-- The app checks exact Host/Origin values and bounds request/response sizes.
-  The Bicep template defaults App Service and SCM ingress to deny, allowing
-  Front Door backend traffic only with the configured `x-azure-fdid`; source
-  configuration uses managed identity and the approved native Azure content
-  policy. Public visitors remain anonymous; Codespaces additionally requires
-  the private forwarded port and its separate temporary Basic-auth credential.
-  The owner confirmed live origin/SCM restrictions and direct-origin denial
-  above; this is not an independent end-to-end security assessment. Consented
-  and validated Azure image requests are implemented in source. Live vision
-  behavior has not been verified.
-- The backend applies a 300-second HTTP deadline to Copilot, Azure, and
-  compatible-provider planning; Local AI has a separate 90-second limit. On
-  timeout it aborts the provider request; capacity remains held until cleanup
-  settles. Its tests cover the HTTP-to-Windows text-job timeout path, slot
-  retention through confirmed cleanup, and quarantine when cleanup cannot be
-  confirmed. An HTTP abort cannot prove remote model computation or billing
-  stopped. CI covers the implemented abort, cleanup-wait and quarantine paths.
-
-The merged PR #21 tree-equivalent test head
-`0ad0b55740c99f9e59fff3511390ee0b26daf828` passed workflow run
-`43812538493` (286 passed, 10 skipped, including native Windows process
-tests). The separate prompt/output latency
-experiment is not shipped; paired measurements did not demonstrate an
-end-to-end improvement. No 2x speed or throughput increase is measured.
-
-The backend's 300-second deadline is distinct from Azure Front Door's
-documented origin response timeout, which is profile-wide and configurable
-from 16 to 240 seconds
-([Microsoft Learn](https://learn.microsoft.com/en-us/azure/frontdoor/how-to-configure-origin#origin-response-timeout)).
-That setting does not establish a hard limit for an already-streaming response.
-Live long-stream reliability and real-timeout behavior remain unverified.
+For Azure, the infrastructure artifacts separate base app/model resources,
+private storage networking, edge and domain configuration. Paid planning defaults
+off. A successful infrastructure deployment or configured status is not proof of
+inference or valid geometry.
 
 ## Trust and data boundaries
 
-- On a local run, the server listens on loopback by default. Exact Host/Origin,
-  a per-process request token, bounded input, and provider opt-ins protect its
-  planning routes; this is not a hardened public multi-user service.
-- Codespaces accepts the exact public Host or the observed loopback Host plus
-  exact forwarded host/protocol shape. Only that full proxy shape also accepts
-  the tunnel's rewritten HTTP/HTTPS loopback Origin on the configured port.
-  Arbitrary, null, wrong-port and multi-value origins remain rejected.
-  Forwarding headers are forgeable and establish neither proxy identity nor
-  privacy; bounded Origin checks, separate
-  app login, request tokens and a fresh GitHub CLI private-port check remain
-  mandatory. GitHub/Copilot sign-in and
-  BrickLab's app password are distinct credentials. Never publish the port or
-  paste GitHub credentials or tokens into BrickLab or chat. For the private
-  app's HTTPS Basic Authentication prompt only, enter username `bricklab` and
-  the temporary app password printed in the Codespace terminal; never use a
-  GitHub password or token there.
-- The owner-confirmed `c0060c7` public hosted app serves the selected Terra
-  planner and exact release asset over HTTPS. The earlier representative
-  planning/build result is limited to one synthetic case. The design is
-  anonymous at the visitor boundary; Azure managed identity is the backend's
-  service identity.
-  Host and Origin checks alone are not authentication, and forwarded client
-  headers do not establish a trusted identity.
-- A submitted brief is sent only after the user explicitly starts planning.
-  Depending on the selected provider, it goes to GitHub, a configured local or
-  compatible service, or Azure. Consented, validated Azure image planning is
-  implemented in source. Image planning requires explicit consent; original
-  image metadata is not stripped.
-- Voice transcription runs in the browser after explicit microphone consent.
-  First use downloads the model from its publisher; audio and transcript are
-  not sent by the voice module. A later plan submission follows the selected
-  planner's separate disclosure.
-- Browser saves and playground memory are local to the browser. Downloads are
-  files, not a sharing service. A shared application call limit is not an
-  invoice cap.
+| Boundary | Contract and limitation |
+| --- | --- |
+| Browser -> planner | Explicit submission, exact Host/Origin checks, per-process request token, bounded input. Host/Origin is not user authentication. |
+| Codespaces proxy -> app | Exact forwarded-host/protocol shape, bounded rewritten-loopback Origin support, app password and fresh `gh` private-port check. Forwarding headers alone prove neither privacy nor identity. |
+| Server -> provider | Credentials stay server-side; the brief and any consented image go to the selected, disclosed provider. Compatible-provider data handling is the operator's responsibility. An abort cannot prove remote compute or billing stopped. |
+| Provider -> engine | Custom geometry only; no silent template fallback. Checks do not prove artistic fidelity, semantic intent or physical stability. |
+| Browser -> storage | Per-world local saves; exported files include the brief. Imported attribution is metadata, not authenticated provenance. |
+| Voice | Voice capture/transcription is not available in local, Codespaces or Azure modes; typed briefs remain supported. |
 
-The MVP controls in this repository apply to BrickLab and its dedicated Azure
-resources. Subscription-wide governance and cross-solution spend analysis are
-operator responsibilities, not product deliverables or release blockers.
+Compatible AI is available only in private mode and requires a loopback-bound
+server. In Codespaces, the app continues to use its private local listener behind
+the GitHub private-port proxy; do not bind the app to a public interface to
+enable BYO. The provider endpoint may be remote, so a submitted brief (and any
+separately consented image) is sent there. No particular commercial provider or
+model has been verified as compatible.
 
-## Scope decisions
+Images are off unless the operator separately enables provider-specific image
+support, and each image request requires user consent. Image metadata is not
+stripped. Do not use identifying or sensitive input. The private Linux image
+path uses temporary files and best-effort process-group cleanup; crashes or
+escaped descendants may leave data behind. Deleting a Codespace removes its
+storage, but does not remove any separately synced Copilot session data.
+Private servers are not hardened public multi-user deployments. The approved
+Azure native content policy and edge restrictions are additional controls, not
+proof that arbitrary public hosting is safe.
 
-- **MVP:** offline templates, the deterministic team and inspector, custom
-  planning subject to validation, scene append, replay, local persistence, and
-  the documented local/Codespaces/Azure deployment boundaries.
-- **Stretch:** improve and validate voice input; automatic onset/silence handling
-  is not implemented and real-microphone usability is not accepted. Refactor
-  existing code only where required to meet MVP behavior and reliability.
-- **Backlog:** OpenAI-compatible custom endpoints and Ollama/local-model
-  planning. Code and older setup notes may exist, but these paths are not MVP
-  support commitments.
-- **Not a physical simulator:** face connectivity and occupied-cell checks do
-  not prove clutch strength, collision safety, stability, or buildability.
+## Capacity, cost and failure boundaries
 
-See [Azure planner notes](azure-planner.md) and
-[Azure hosting notes](self-hosting-azure.md) for deployment-specific controls
-and their verification status.
+Private servers default to **8 total / 2 per-provider** in-flight plans; hosted
+mode defaults to **20 / 20**, bounded to at most 20 by configuration. Excess
+requests return HTTP 429 without queuing. Capacity is process-local: one worker
+and one Node process are required for a deployment-wide 20-request bound.
+
+Public Azure defaults to **50 admitted submissions per UTC day**, shared across
+visitors. A completed invalid design may get one same-provider correction:
+at most 100 model requests from that day's submissions. Failure/cancellation
+does not refund admission. Local/Codespaces have no application daily quota.
+Neither capacity nor submission count is a billing cap or throughput guarantee.
+
+Copilot, Azure and compatible planning have a 300-second HTTP deadline.
+Capacity remains held until cleanup settles. Unconfirmed Copilot cleanup
+quarantines planning until an operator verifies cleanup before restart. Azure
+Front Door origin response timeout is configurable only to 240 seconds; the
+application deadline does not establish live long-stream reliability. Detailed
+contracts belong in the [Azure planner appendix](azure-planner.md), not in the
+learner's setup path.
+
+## Deployment and release evidence
+
+**Historical Azure evidence snapshot: 2026-11-16; no new provider acceptance
+test was run for this documentation merge.** The current source incorporates
+BYO, voice removal, design-consistency and merged PR #27 (`1acde76`), but this
+does not establish that the current source is deployed. The existing owner
+record identifies the older Azure package `c0060c7af8bd5a1c748a76b10e7710e35cf051e6`
+as live on 2026-11-16. A merge, automated fixture, deployment and real user
+acceptance are different claims.
+
+| Area | What is established | What is not established |
+| --- | --- | --- |
+| Source | #21 adds bounded planning/public Azure counting; #22 single-pass browser custom-plan validation; #24-#27 private Codespaces and opt-in Linux image changes are merged. Current source also includes operator-configured compatible planning and voice removal. | Merged code is not proof it is deployed or accepted. |
+| Local Copilot | Historical Windows ARM64 candidates completed bounded text and consented synthetic-image requests. | Authentication/inference and manual acceptance on this source revision. |
+| Codespaces | Startup, proxy and diagnostic paths have automated fixture coverage; a fake-provider test covers compatible planning through the private proxy. | Real private forwarding, BYO endpoint inference, device login, image UAT and classroom acceptance. |
+| Compatible AI | A fake OpenAI-compatible endpoint verifies server-side configuration, protected lifecycle and credential secrecy. | Any real provider/model compatibility, live inference, billing behavior or provider data handling. |
+| Azure preview | Existing owner record confirms the older `c0060c7` package/settings live on 2026-11-16 and two text-only baseline UI plans, each one adapter attempt and 3/3 local checks. | Deployment of later source changes; broad reliability, live correction/vision, cancellation, quota denial or timeout cleanup. |
+| Private Linux images | #27 (`1acde76`) adds opt-in private Linux/Codespaces Copilot attachments and per-request consent. | Real Codespace image acceptance and live provider inference; Linux process-group/file cleanup is best-effort. |
+| Voice | Voice was removed from the product UI and planning paths; typed briefs remain available. | A future supported voice integration or real-microphone acceptance. |
+
+The [organizer guide](lab-organizer.md#optional-private-copilot-images) summarizes
+the private image operational choice. Dispose of lab Codespaces after preserving
+wanted work.
+
+The [genuine offline UI capture](images/offline-jurassic-herd.png) was made from
+the isolated `a952527` documentation worktree with all providers disabled.
+Only status requests were observed, and its temporary server was stopped. It
+illustrates the offline-template path, not current provider behavior.
+
+The retained Azure baseline record is a 99-brick spaceship in **22.332s**
+(`2026-11-16T08:25:50.337Z` to `08:26:12.670Z`) and a 97-brick hollow
+observatory/rover in **27.123s** (`08:27:40.984Z` to `08:28:08.107Z`).
+These are browser request durations, not isolated model timings or a performance
+comparison. Every requested spaceship detail was not independently verified.
+The [owner evidence retained in repository history](https://github.com/ribumann/lego-builder-agents/blob/da53598045417bcded2533aad87c50d51191b75b/docs/architecture.md#deployment-and-release-evidence)
+is the source of these observations, not a new probe for this documentation
+change. An earlier 100-brick airplane case is recorded in the
+[hosting runbook](self-hosting-azure.md).
+
+The separate prompt/output latency experiment was not shipped and did not
+demonstrate end-to-end speedup in its small paired sample. No 2x improvement is
+claimed. See [history and opportunities](software-design.md#history-and-experiments)
+for the development trail.

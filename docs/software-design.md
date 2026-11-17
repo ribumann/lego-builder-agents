@@ -1,71 +1,76 @@
-# BrickLab software design
+# Develop BrickLab
 
-BrickLab separates provider planning from deterministic execution. The planner
-proposes geometry; the browser application validates, schedules, builds,
-inspects, saves, and renders it. See [architecture and MVP boundaries](architecture.md)
-for deployment and release evidence.
+**Follow one brief from UI to validated geometry to deterministic execution.**
+Use the [architect guide](architecture.md) for L0 context, deployment/trust
+boundaries and release evidence; [student exercises](student-guide.md) reproduce
+the behavior you are changing.
+Use this guide to locate a change, preserve its invariants and identify the
+evidence needed before calling it ready.
 
-## Core flow
+Levels here are **L1** runtime/code map, **L2** interactions, **L3** domain
+algorithms, and **L4** concrete contracts. They are documentation zoom levels,
+not independent deployable layers.
 
-1. The user chooses a world, writes a brief, and explicitly starts planning.
-   Offline template mode interprets a limited vocabulary locally. A configured
-   provider receives the brief only after that action.
-2. The planning endpoint validates the request and provider configuration. AI
-   providers must return `model: "custom"` geometry; a template, malformed
-   response, or unsupported shape fails visibly rather than falling back.
-3. `validateCustomSpec` canonicalizes the spec and checks object/record counts,
-   expanded brick and occupied-cell limits, bounds, colors, budget, repeats,
-   and overlap. The browser validates the returned spec again before execution.
-4. `createCustomPlan` validates provider input and constructs build tasks in
-   one browser pass. Direct `createPlan` calls still validate custom specs.
-   `Team` runs the deterministic coordinator, dependency verifier, two
-   construction roles, and inspector. The renderer reflects the team's
-   canonical brick state.
-5. The user can damage and repair a completed build, scrub placement replay,
-   append another plan, save locally, restore it, or download JSON.
+## Work locally
 
-## Domain behavior
+Use Node.js 22.12+ and npm in the repository root:
 
-`src/engine.ts` owns specs, task graphs, construction, inspection, and versioned
-snapshots. BuildBot delegates ready tasks; PlanBot checks dependencies; FrameBot
-and DetailBot place their assigned bricks; CheckBot compares planned identities
-and face connectivity with the result. Events describe application actions,
-not model reasoning. The event history is bounded; it is not an unlimited
-conversation transcript.
+```sh
+npm ci
+npm run dev
+```
 
-`src/custom-design.mjs` is shared by the browser and server. Custom geometry
-supports named objects and compact repeats. The hard limits are 32 objects,
-256 compact records, 8,192 expanded bricks, and 262,144 occupied cells, with
-bounded coordinates and dimensions. Each named object's bricks must be
-face-connected at inspection. Separate objects may be apart. These checks do
-not simulate physical stability or collisions.
+Open http://127.0.0.1:4173 and select offline templates. For a production-shaped
+run, stop your development server, then `npm run build` and `npm start`.
+Provider opt-ins belong to the server environment; see
+[Copilot setup](lab-organizer.md#optional-copilot-planning),
+[Compatible AI setup](lab-organizer.md#operator-configured-compatible-ai), or
+[Azure configuration](azure-planner.md). Never commit credentials.
 
-Scene append preserves the original scene and translates only the new
-contribution into a collision-free, in-bounds position. Contribution sources
-and offsets are retained in the extended save. The source label is application
-metadata, not cryptographic proof of a model run or attribution.
+## L1: code and deployment map
 
-The UI stores per-world versioned snapshots in browser `localStorage` and
-supports JSON export/import. Restore reconstructs canonical geometry instead
-of trusting arbitrary imported brick content. Browser storage can be cleared
-or unavailable; the user can download a save as a fallback. The playground's
-opt-in lesson uses a separate local-storage key and does not alter workshop
-saves or provider settings.
+| Area | Start with | Artifact or role |
+| --- | --- | --- |
+| Browser workflow | [`src/main.ts`](../src/main.ts) | Consent, planning, controls, persistence/import |
+| Domain | [`src/engine.ts`](../src/engine.ts), [`src/custom-design.mjs`](../src/custom-design.mjs) | Typed plans, canonical geometry, deterministic `Team` |
+| Scene | [`src/scene.ts`](../src/scene.ts), [`src/scene-append.ts`](../src/scene-append.ts) | Three.js instances, picking, transactional append |
+| Teaching surfaces | [`src/agent-insights.ts`](../src/agent-insights.ts), [`src/agent-playground-engine.ts`](../src/agent-playground-engine.ts) | Retained engine state versus isolated six-role sandbox |
+| Node host | [`server.mjs`](../server.mjs) | Development/production serving and explicit provider routes |
+| Provider contracts | [`planning-prompt.mjs`](../planning-prompt.mjs), [`copilot-output.mjs`](../copilot-output.mjs), [`azure-planner.mjs`](../azure-planner.mjs), [`openai-compatible-planner.mjs`](../openai-compatible-planner.mjs) | Shared prompt, strict CLI events, Azure structured output, compatible chat-completions |
+| Admission | [`planning-capacity.mjs`](../planning-capacity.mjs), [`planning-quota.mjs`](../planning-quota.mjs), [`azure-usage.mjs`](../azure-usage.mjs) | In-flight leases and distinct public Azure submission counting |
+| Codespaces | [devcontainer](../.devcontainer/devcontainer.json), [startup](../scripts/codespaces.mjs), [diagnostic](../scripts/diagnose-codespaces.mjs) | Private production startup and terminal onboarding |
+| Azure | [`infra/azure.bicep`](../infra/azure.bicep), [packager](../scripts/package_azure_release.py) | Build/package plus separate private-network, edge and domain templates |
+| Actions mission | [workflow](../.github/workflows/ai-mission.yml), [`scripts/ai-team.ts`](../scripts/ai-team.ts) | Three model decisions -> validated downloadable mission, not a runtime adapter |
 
-## Provider and request boundaries
+TypeScript/Three.js run in the browser; Vite builds static assets. Node serves the
+application and optional planning APIs. There is no React layer or shared
+server-side scene store. Deployment commands and prerequisites stay in the
+[Azure runbook](self-hosting-azure.md).
 
-There is one browser workshop and one Node server, not a separate application
-core for each provider. `src/main.ts` selects an explicit planning route;
-`server.mjs` wires those routes to provider-specific code. Accepted AI results
-pass through `createCustomPlan` and `Team` in the browser; offline templates
-use `createPlan` and the same engine without calling a model. The shared
-`planning-prompt.mjs` prompt and `src/custom-design.mjs` geometry contract keep
-provider output aligned with that core.
+## L2: one external planning request
 
-The adapters are explicit modules/routes, not a dynamic plugin system. There is
-no runtime discovery or drop-in registration API: adding a provider requires
-deliberate server configuration, status handling, route/UI selection, shared
-spec validation, and tests. The current boundaries are:
+```mermaid
+sequenceDiagram
+  actor User
+  participant UI as main.ts
+  participant Server as server.mjs
+  participant Provider as Selected adapter
+  participant Core as Browser engine
+  User->>UI: Explicit plan submission
+  UI->>Server: Refresh status and request token
+  UI->>Server: POST brief, world, options
+  Server->>Server: Validate input and admit capacity
+  Server->>Provider: Bounded planning request
+  Provider-->>Server: Candidate custom geometry
+  Server->>Server: Parse and validate
+  opt Completed parsed design is invalid
+    Server->>Provider: One correction, same deadline and lease
+    Provider-->>Server: Corrected candidate
+    Server->>Server: Validate again
+  end
+  Server-->>UI: Validated spec or explicit error
+  UI->>Core: createCustomPlan, then Team
+```
 
 - The implemented Copilot text route invokes the standalone CLI under the
   server user's account. It is not the Copilot desktop/IDE sign-in. Copilot
@@ -98,27 +103,36 @@ spec validation, and tests. The current boundaries are:
   approved native Azure
   content policy and network protections. The application call limit is not
   an invoice cap.
-- Local AI and OpenAI-compatible adapters exist in code but are backlog, not
-  supported MVP choices. They must not be presented as release-ready paths.
+- A private lab operator can configure the server-side OpenAI-compatible
+  chat-completions adapter. It sends a non-streaming request with JSON-object
+  output and `max_tokens`; a provider/model must support those request fields
+  and return the expected assistant JSON response. A service advertising
+  compatibility is not proof that its model supports the needed behavior.
+  The operator chooses and verifies the endpoint, model, credentials,
+  capability and data handling. No particular real provider or model has been
+  verified. Text is sent only after explicit planning; image requests require
+  both operator vision opt-in (`BRICKLAB_COMPATIBLE_VISION=1`) and separate
+  user consent. `BRICKLAB_COMPATIBLE_AI=1`,
+  `BRICKLAB_COMPATIBLE_ENDPOINT`, `BRICKLAB_COMPATIBLE_MODEL` and optional
+  `BRICKLAB_COMPATIBLE_API_KEY` are server-side settings. The adapter rejects
+  public hosted mode and requires a loopback-bound app server; private
+  Codespaces uses its private proxy without a public bind. The fake-proxy test
+  does not establish real Codespaces forwarding or provider inference. See the
+  [operator setup](lab-organizer.md#operator-configured-compatible-ai).
 - The GitHub Models Actions workflow is a separate artifact-generation path,
   not another runtime-pluggable provider for the workshop.
 
-Planning is explicit, bounded, and fail-closed: input size and schema are
-checked, provider output is validated, and provider errors do not trigger a
-template fallback. The merged release defaults to 20 total/20 per provider in
-hosted mode and 8 total/2 per provider in private mode. It configures
-`BRICKLAB_PLANNING_CONCURRENCY` and `BRICKLAB_PROVIDER_CONCURRENCY` from 1 to
-20, keeping the provider limit no higher than total. A 20-slot hosted
-deployment requires one worker and one Node process; this is not an upstream
-capacity guarantee. The public deployment owner confirmed the selected
-20/20 settings. These are process-local in-flight limits, not a distributed
-semaphore. Slots cover request-body reading, provider work, and cleanup; full
-shared capacity returns HTTP 429 rather than queuing work, with no
-application-level retry or provider fallback.
+No automatic provider/template fallback occurs. Malformed JSON, incomplete
+output, authentication, transport, 429 and timeout failures do not get the
+design-correction retry. Both permitted attempts share one deadline, cancellation
+signal and capacity lease. Status availability is not proof of provider access.
+The runtime planning routes are `/api/plan` (Copilot), `/api/azure-plan`, and
+`/api/compatible-plan`; offline `parseBrief -> createPlan -> Team` does not call
+a provider. There is no Ollama/local-model planning route.
 
 Cancellation and cleanup are critical correctness properties. The backend
 applies a 300-second HTTP deadline to Copilot, Azure, and compatible
-planning; Local AI has a separate 90-second limit. Capacity remains held until
+planning. Capacity remains held until
 provider and process cleanup settle; this cannot prove remote model computation
 or billing stopped. Native Windows Copilot text/image jobs use Job containment;
 unconfirmed cleanup retains capacity and quarantines planning until an operator
@@ -128,9 +142,9 @@ verifies before restart. The merged PR #21 tree-equivalent test head
 timeout-isolation and host-loss quarantine tests. The deployed
 package and public endpoint were verified; package/status checks are distinct
 from the two live baseline requests above, which provide small text-inference
-evidence only. Local Copilot authentication, manual UAT,
-real Codespaces forwarding, real-microphone voice acceptance and real Ollama
-inference remain unverified. The separate prompt/output latency experiment is
+evidence only. Local Copilot authentication, manual UAT, real Codespaces
+forwarding remain unverified. Voice input is excluded and backlogged across
+modes. The separate prompt/output latency experiment is
 not shipped; its paired measurements did not demonstrate end-to-end speedup.
 The reported CI covers implemented abort, cleanup-wait and quarantine paths;
 a live HTTP abort cannot prove remote compute termination or billing.
@@ -142,24 +156,162 @@ That setting does not prove a hard limit on an already-streaming response;
 live long-stream behavior remains unverified. No 2x planning speed or
 throughput improvement has been measured.
 
-## User consent and optional inputs
+Copilot uses scripting JSONL, not rendered terminal text. Only a final completed
+assistant message with a successful terminal result is eligible for parsing.
+The CLI has model tools, built-in MCPs and repository instructions disabled.
+Windows text/image work requires native executable/Job containment; private
+image attachments additionally require verified owner-only ACLs. Merged #27 adds
+private Linux/Codespaces images with explicit server opt-in and per-request
+consent. Linux process-group termination and temporary-file deletion are
+best-effort, not proof all descendants/data are gone; disposable lab Codespaces
+should be deleted after preserving wanted work. Copilot session sync is a separate
+retention boundary. Real Codespace image acceptance remains unverified.
 
-Image selection does not upload an image. Planning requires explicit consent;
-the original image, including embedded metadata, may reach the selected
-provider. Consented, validated Azure image support is implemented in source; live
-Azure vision behavior is not verified.
+## L3: execution and invariants
 
-Voice input is an opt-in browser capability, separate from planning. Recording
-starts and stops through explicit user actions, has a 30-second bound, and the
-user reviews and applies the transcript before it changes the brief; submitting
-that brief is another explicit action. Automatic onset/silence handling is not
-implemented. Real-microphone usability has not been accepted; voice quality
-and device support remain stretch validation.
+| Operation | Algorithm and invariant | Focused evidence |
+| --- | --- | --- |
+| Plan | `createCustomPlan` validates/canonicalizes once before constructing browser tasks; direct `createPlan` custom inputs still validate | [`custom-design.test.ts`](../tests/custom-design.test.ts), [`engine-complex-design-stages.test.mjs`](../tests/engine-complex-design-stages.test.mjs) |
+| Review | `Team` constructor checks missing/duplicate tasks, unknown dependencies and cycles; records disconnected geometry for inspection | [`engine.test.ts`](../tests/engine.test.ts) |
+| Step | In order, FrameBot and DetailBot each select their first eligible owned task; place 1-20 bricks per role per tick according to batch | [`engine.test.ts`](../tests/engine.test.ts) |
+| Inspect | Compare planned identities, per-object face connectivity and budget; templates also check balance | [`engine.test.ts`](../tests/engine.test.ts) |
+| Damage/repair | Remove about one-third deterministically; route missing identities back to original owners, reopen handoffs, inspect again | [`engine.test.ts`](../tests/engine.test.ts), [`game.spec.ts`](../tests/browser/game.spec.ts) |
+| Append | Validate canonical contributions, search x/z translations in increasing Manhattan distance, revalidate combined limits before replacing state | [`scene-append.test.ts`](../tests/scene-append.test.ts), [`scene-growth.spec.ts`](../tests/browser/scene-growth.spec.ts) |
+| Restore | Reconstruct geometry from validated spec; don't trust arbitrary imported bricks or source attribution | [`engine.test.ts`](../tests/engine.test.ts), [`scene-append.test.ts`](../tests/scene-append.test.ts) |
+| Learn in playground | Explicitly save one inspected repair rule; next robot recalls it; separate local key, not model training | [`agent-playground.test.ts`](../tests/agent-playground.test.ts) |
 
-## Validation and release checks
+Voice input is unavailable in local, Codespaces and Azure modes. GitHub Copilot
+CLI has an interactive local `/voice` feature, but no supported reusable app API
+has been established. BrickLab has no microphone capture, transcription worker
+or audio endpoint. See the [voice backlog](voice-integration.md).
 
-The focused code checks are `npm test` and `npm run build`; browser journeys use
-`npm run test:e2e`. Tests can verify schemas, deterministic execution, and
-simulated provider cleanup, but do not establish live provider access, manual
-Codespaces UAT, real Azure identity/shared-quota behavior, successful public paid
-inference, or deployment revision. Record those separately as release evidence.
+"Parallel builders" means dependency-aware progress in the same deterministic
+tick loop, not threads or two LLM calls. Events retain at most 120 actions.
+Large partial builds defer full connectivity work until completion (or damage).
+Repair cannot invent geometry to connect an already-disconnected blueprint.
+
+Append sends only the new brief/world/options to the planner, not the existing
+scene. Local placement preserves the original and translates the addition;
+contribution sources/offsets survive save/restore but are not signed provenance.
+
+## L4: concrete contracts
+
+### Geometry
+
+A minimal custom spec accepted by the shared contract:
+
+```json
+{
+  "world": "space",
+  "model": "custom",
+  "color": "blue",
+  "longTail": false,
+  "wideWings": false,
+  "budget": 2,
+  "design": {
+    "name": "Two-brick study",
+    "objects": [{
+      "name": "Base and cap",
+      "bricks": [
+        {"x": 0, "y": 0, "z": 0, "width": 1, "height": 1, "depth": 1, "color": "blue", "part": "frame"},
+        {"x": 0, "y": 1, "z": 0, "width": 1, "height": 1, "depth": 1, "color": "red", "part": "detail"}
+      ]
+    }]
+  }
+}
+```
+
+Custom designs allow **32 objects, 256 compact records, 8,192 expanded bricks,
+262,144 occupied cells**, dimensions 1-8, occupied x/z -64..63 and y 0..63.
+Repeats count bricks, including the first; dimensions multiply occupied cells,
+not brick count. Named objects can be separate, but each must be face-connected
+to pass inspection. No overlap, silent clipping or geometry fabrication.
+The usual scale target is 1,000 bricks / 32,768 cells, not a device guarantee.
+Decorative studs are sampled above 8,192 per model/blueprint; bodies are not omitted.
+
+### State and persistence
+
+`Spec -> Plan {tasks, assumptions, source} -> Team {bricks, events, tick, status}`.
+The version-1 `Snapshot` stores spec, prompt, placed bricks, task order, events,
+source and assumptions. Append extends it with contribution/offset and appearance
+metadata. `main.ts` saves per world in `bricklab-jurassic` / `bricklab-space`;
+playground lessons use `bricklab-agent-playground-memory-v1`. Closing a tab
+aborts an in-flight plan but does not write a snapshot during unload, so closing
+a stale tab cannot replace a newer saved scene.
+
+### Failure and cleanup
+
+Admission defaults and public usage semantics are in
+[architecture](architecture.md#capacity-cost-and-failure-boundaries).
+Capacity covers body reading, provider work and cleanup. Client response
+termination is not lease release. Unconfirmed Copilot process cleanup globally
+quarantines planning; operators verify processes and request-owned temporary
+files before restart. Do not add a timed unlock or assume leader exit proves
+descendant termination. No HTTP abort proves upstream compute or billing stopped.
+
+## History and experiments
+
+These are merged milestones visible in Git history, not evidence that every
+deployment runs them. Links target the repository's recorded PRs:
+
+| Milestone | What changed / lesson |
+| --- | --- |
+| [#1](https://github.com/ribumann/lego-builder-agents/pull/1) | Initial agentic builder demo |
+| [#2](https://github.com/ribumann/lego-builder-agents/pull/2), [#3](https://github.com/ribumann/lego-builder-agents/pull/3) | Private Codespaces path, cloud-first custom planning and five-agent execution; keep templates distinct from inference |
+| [#4](https://github.com/ribumann/lego-builder-agents/pull/4), [#5](https://github.com/ribumann/lego-builder-agents/pull/5) | Interactive playground, then clearer challenge flow; isolate learning memory from workshop state |
+| [#6](https://github.com/ribumann/lego-builder-agents/pull/6), [#7](https://github.com/ribumann/lego-builder-agents/pull/7) | Approximate size targets and serialized software-rendered CI checks; targets are not output guarantees |
+| [#21](https://github.com/ribumann/lego-builder-agents/pull/21) | Bounded parallel planning and anonymous Foundry access; concurrency limits are not measured speedup |
+| [#22](https://github.com/ribumann/lego-builder-agents/pull/22), [#23](https://github.com/ribumann/lego-builder-agents/pull/23) | Single-pass custom-plan construction and reconciled release evidence |
+| [#24](https://github.com/ribumann/lego-builder-agents/pull/24), [#25](https://github.com/ribumann/lego-builder-agents/pull/25), [#26](https://github.com/ribumann/lego-builder-agents/pull/26) | Private proxy Host/Origin fixes and unattended startup with explicit terminal login |
+| [#27](https://github.com/ribumann/lego-builder-agents/pull/27) (`1acde76`) | Private Linux/Codespaces image opt-in and consent; cleanup is best-effort, real Codespace image UAT not done |
+
+**Not shipped:** the prior release documentation records a separate prompt/output
+latency experiment whose small paired sample showed no end-to-end improvement.
+It is not on this source path and is not a performance baseline or 2x claim.
+The current source integrates operator-configured Compatible AI, voice removal,
+design-consistency fixes and main through #27 (`1acde76`). This is source
+status, not a deployment claim: the Azure evidence above is for the older
+`c0060c7` package, and no deployment of these later changes is established.
+Live Azure examples and unverified paths are tracked in
+[release evidence](architecture.md#deployment-and-release-evidence).
+
+## Check a change
+
+For a first engine change, reproduce a student exercise, read `Team` and the
+matching case in `tests/engine.test.ts`, then run:
+
+```sh
+node --import tsx --test tests/engine.test.ts
+```
+
+For planner failures, begin at the selected route in `server.mjs` and its adapter
+test rather than the renderer. For display-only failures, start with `src/scene.ts`
+and the matching browser journey. Broaden checks as the change requires:
+
+```sh
+npm test
+npm run build
+npx playwright install chromium
+npm run test:e2e -- --workers=1
+```
+
+Use the smallest relevant existing tests first. CI serializes Playwright's
+software-rendered scenes; native Windows containment tests need Windows and are
+skipped by Linux CI. Mock providers test contracts, not entitlement, live vision,
+real forwarding or billed service behavior. No paid inference belongs in CI.
+For documentation-only work, validate links, commands and fenced examples rather
+than running the application suite.
+
+## Challenges worth improving
+
+| Opportunity | Useful acceptance evidence |
+| --- | --- |
+| Classroom onboarding | Real local/Codespaces learner walkthrough, with redacted phase/error observations |
+| Provider reliability and visual fidelity | Consented synthetic cases, exact revision/provider and outcome; distinguish schema validity from resemblance |
+| Latency | Matched end-to-end runs with the same briefs/model/settings; do not infer speed from capacity |
+| Scale | Real-device rendering/memory measurements; do not extrapolate CPU or fixture results to FPS |
+| Voice and images | Real device/provider consent, cancellation and usability checks; keep typed/offline routes usable |
+| Maintainability | Extract a boundary only when a concrete change needs it; preserve fail-closed validation and focused tests |
+
+Report reproducible issues with a synthetic brief, setup, revision and expected
+versus actual result. Exclude secrets, private identifiers and raw provider logs.
