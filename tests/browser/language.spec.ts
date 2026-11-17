@@ -294,7 +294,7 @@ test('translated guide describes template limitations and model consent', async 
   await page.locator('#close-dialog').click();
   await page.locator('#settings').click();
   await expect(page.locator('#dialog-body')).toContainText('Le coût en dollars est inconnu');
-  await expect(page.locator('#dialog-body')).toContainText('La boucle locale seule ne prouve pas');
+  await expect(page.locator('#dialog-body')).toContainText('L’exploitant choisit le service et le modèle');
 });
 
 test('guide and planning choices are available in all six languages', async ({ page }) => {
