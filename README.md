@@ -44,6 +44,9 @@ Codespaces usage limits and charges may apply.
 | **Understand the architecture** | [Architect guide](docs/architecture.md): L0-L2 views, trust boundaries and deployment choices |
 | **Develop or experiment** | [Developer guide](docs/software-design.md): L1-L4 views, code, decisions, history and checks |
 
+Before a workshop or release, follow the [step-by-step UAT guide](docs/uat-guide.md)
+and record acceptance separately for local, Codespaces, provider and Azure paths.
+
 Use the lab, adapt the exercises, and collaborate through
 [issues](https://github.com/ribumann/lego-builder-agents/issues) and pull requests.
 Describe your setup and expected behavior; leave out private briefs, credentials
